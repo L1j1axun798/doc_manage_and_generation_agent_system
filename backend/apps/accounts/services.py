@@ -21,14 +21,14 @@ def create_user(*, actor: Any, data: dict[str, Any], request: Any = None) -> Any
         resource=user,
         result="success",
         request=request,
-        after_data=_public_user_data(user),
+        after_data=user_snapshot(user),
     )
     return user
 
 
 @transaction.atomic
 def update_user(*, actor: Any, user: Any, data: dict[str, Any], request: Any = None) -> Any:
-    before_data = _public_user_data(user)
+    before_data = user_snapshot(user)
     for field, value in data.items():
         setattr(user, field, value)
     user.save()
@@ -39,14 +39,14 @@ def update_user(*, actor: Any, user: Any, data: dict[str, Any], request: Any = N
         result="success",
         request=request,
         before_data=before_data,
-        after_data=_public_user_data(user),
+        after_data=user_snapshot(user),
     )
     return user
 
 
 @transaction.atomic
 def disable_user(*, actor: Any, user: Any, request: Any = None) -> None:
-    before_data = _public_user_data(user)
+    before_data = user_snapshot(user)
     user.is_active = False
     user.save(update_fields=["is_active"])
     audit_log(
@@ -56,7 +56,7 @@ def disable_user(*, actor: Any, user: Any, request: Any = None) -> None:
         result="success",
         request=request,
         before_data=before_data,
-        after_data=_public_user_data(user),
+        after_data=user_snapshot(user),
     )
 
 
@@ -83,7 +83,7 @@ def reset_password(
     return temporary_password
 
 
-def _public_user_data(user: Any) -> dict[str, Any]:
+def user_snapshot(user: Any) -> dict[str, Any]:
     return {
         "id": user.pk,
         "username": user.username,

@@ -57,6 +57,7 @@ def test_non_admin_cannot_create_user(client):
     )
 
     assert response.status_code == 403
+    assert AuditLog.objects.filter(action="permission.denied", result="denied").exists()
 
 
 @pytest.mark.django_db
@@ -72,6 +73,10 @@ def test_public_register_endpoint_does_not_exist(client):
     )
 
     assert response.status_code == 404
+
+
+def test_user_required_fields_include_real_name() -> None:
+    assert "real_name" in User.REQUIRED_FIELDS
 
 
 @pytest.mark.django_db

@@ -15,6 +15,8 @@ class User(AbstractUser):
     must_change_password = models.BooleanField("首次登录需修改密码", default=True)
     created_at = models.DateTimeField("创建时间", auto_now_add=True)
 
+    REQUIRED_FIELDS = ["real_name", "email"]
+
     class Meta:
         indexes = [
             models.Index(fields=["role"], name="accounts_user_role_idx"),

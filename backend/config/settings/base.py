@@ -35,6 +35,7 @@ INSTALLED_APPS = [
     "rest_framework",
     "apps.accounts",
     "apps.audit",
+    "apps.projects",
     "apps.system",
 ]
 
@@ -136,6 +137,22 @@ SPECTACULAR_SETTINGS = {
     "DESCRIPTION": "公司内网资料管理系统后端 API",
     "VERSION": "0.1.0",
     "SERVE_INCLUDE_SCHEMA": False,
+    "ENUM_NAME_OVERRIDES": {
+        "UserRoleEnum": [
+            ("system_admin", "系统管理员"),
+            ("project_manager", "项目负责人"),
+            ("data_operator", "资料整理员"),
+        ],
+        "ProjectStatusEnum": [
+            ("active", "进行中"),
+            ("archived", "已归档"),
+        ],
+        "ProjectMemberRoleEnum": [
+            ("manager", "负责人"),
+            ("operator", "资料整理员"),
+            ("viewer", "查看者"),
+        ],
+    },
 }
 
 FILE_STORAGE_ROOT = BASE_DIR / env("FILE_STORAGE_ROOT")
