@@ -35,6 +35,7 @@ INSTALLED_APPS = [
     "rest_framework",
     "apps.accounts",
     "apps.audit",
+    "apps.folders",
     "apps.projects",
     "apps.system",
 ]

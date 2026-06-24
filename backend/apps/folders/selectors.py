@@ -1,0 +1,74 @@
+from typing import Any, TypedDict
+
+from django.db.models import Q, QuerySet
+
+from apps.projects.selectors import visible_projects_for_user
+
+from .models import Folder
+
+
+class FolderTreeNode(TypedDict):
+    id: int
+    project: int | None
+    parent: int | None
+    name: str
+    code: str
+    sort_order: int
+    is_active: bool
+    is_system_root: bool
+    children: list["FolderTreeNode"]
+
+
+def visible_folders_for_user(user: Any) -> QuerySet[Folder]:
+    queryset = Folder.objects.select_related("project", "parent", "created_by")
+    if getattr(user, "is_system_admin", False):
+        return queryset
+    visible_project_ids = visible_projects_for_user(user).values("id")
+    return queryset.filter(Q(project__isnull=True) | Q(project_id__in=visible_project_ids))
+
+
+def active_visible_folders_for_user(user: Any) -> QuerySet[Folder]:
+    return (
+        visible_folders_for_user(user)
+        .filter(is_active=True)
+        .exclude(
+            project__isnull=True,
+            parent__isnull=True,
+            is_system_root=False,
+        )
+    )
+
+
+def folder_tree_for_user(user: Any, project_id: str | None = None) -> list[FolderTreeNode]:
+    queryset = active_visible_folders_for_user(user)
+    if project_id in {"public", "null", "none"}:
+        queryset = queryset.filter(project__isnull=True)
+    elif project_id:
+        queryset = queryset.filter(project_id=project_id)
+    folders = list(queryset.order_by("sort_order", "id"))
+    return build_tree(folders)
+
+
+def build_tree(folders: list[Folder]) -> list[FolderTreeNode]:
+    nodes: dict[int, FolderTreeNode] = {
+        folder.id: {
+            "id": folder.id,
+            "project": folder.project_id,
+            "parent": folder.parent_id,
+            "name": folder.name,
+            "code": folder.code,
+            "sort_order": folder.sort_order,
+            "is_active": folder.is_active,
+            "is_system_root": folder.is_system_root,
+            "children": [],
+        }
+        for folder in folders
+    }
+    roots: list[FolderTreeNode] = []
+    for folder in folders:
+        node = nodes[folder.id]
+        if folder.parent_id and folder.parent_id in nodes:
+            nodes[folder.parent_id]["children"].append(node)
+        else:
+            roots.append(node)
+    return roots
