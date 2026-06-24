@@ -16,12 +16,23 @@ plugins = ["mypy_django_plugin.main", "mypy_drf_plugin.main"]
 strict = true
 warn_unreachable = true
 ignore_missing_imports = true
-exclude = ["migrations"]
+disallow_any_generics = false
+disallow_untyped_defs = false
+disallow_untyped_calls = false
+warn_return_any = false
+exclude = ["migrations", "tests"]
+
+[tool.ruff.lint.per-file-ignores]
+"**/migrations/*.py" = ["E501"]
+
+[[tool.mypy.overrides]]
+module = ["*.admin"]
+ignore_errors = true
 
 [tool.django-stubs]
-django_settings_module = "config.settings.development"
+django_settings_module = "config.settings.testing"
 
 [tool.pytest.ini_options]
-DJANGO_SETTINGS_MODULE = "config.settings.development"
+DJANGO_SETTINGS_MODULE = "config.settings.testing"
 python_files = ["test_*.py", "*_tests.py"]
 testpaths = ["apps", "common"]

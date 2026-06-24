@@ -33,6 +33,8 @@ INSTALLED_APPS = [
     "django_filters",
     "drf_spectacular",
     "rest_framework",
+    "apps.accounts",
+    "apps.audit",
     "apps.system",
 ]
 
@@ -75,8 +77,7 @@ if DATABASES["default"]["ENGINE"] == "django.db.backends.mysql":
         {
             "charset": "utf8mb4",
             "init_command": (
-                "SET sql_mode='STRICT_TRANS_TABLES', "
-                "transaction_isolation='READ-COMMITTED'"
+                "SET sql_mode='STRICT_TRANS_TABLES', transaction_isolation='READ-COMMITTED'"
             ),
         }
     )
@@ -105,6 +106,7 @@ STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+AUTH_USER_MODEL = "accounts.User"
 
 CORS_ALLOWED_ORIGINS = env("DJANGO_CORS_ALLOWED_ORIGINS")
 CSRF_TRUSTED_ORIGINS = env("DJANGO_CSRF_TRUSTED_ORIGINS")

@@ -1,9 +1,10 @@
 from typing import Any
 
+from rest_framework.response import Response
 from rest_framework.views import exception_handler
 
 
-def api_exception_handler(exc: Exception, context: dict[str, Any]):
+def api_exception_handler(exc: Exception, context: dict[str, Any]) -> Response | None:
     response = exception_handler(exc, context)
     request = context.get("request")
     request_id = getattr(request, "request_id", None)
