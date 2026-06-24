@@ -1,0 +1,19 @@
+# Python 编译文件
+__pycache__/
+*.py[cod]
+
+# 虚拟环境目录（假设你的虚拟环境叫 venv）
+venv/
+env/
+
+# 本地上传的测试文件（对应我们之前设计的本地存储盘）
+media/
+uploads/
+
+# Django 本地数据库文件（如果你在本地测试用了 sqlite）
+db.sqlite3
+
+# 环境变量与机密配置
+.env
+.idea/
+.vscode/
