@@ -12,8 +12,27 @@ uploads/
 
 # Django 本地数据库文件（如果你在本地测试用了 sqlite）
 db.sqlite3
+backend/db.sqlite3
+
+# Python 测试、类型检查和格式化缓存
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+schema.yaml
+
+# Django 构建输出
+backend/staticfiles/
 
 # 环境变量与机密配置
 .env
+backend/.env
 .idea/
 .vscode/
+
+# 本地开发文件存储，仅保留目录占位文件
+backend/data/files/*
+!backend/data/files/.gitkeep
+backend/data/temporary/*
+!backend/data/temporary/.gitkeep
