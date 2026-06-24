@@ -34,6 +34,7 @@ INSTALLED_APPS = [
     "drf_spectacular",
     "rest_framework",
     "apps.accounts",
+    "apps.access",
     "apps.audit",
     "apps.documents",
     "apps.folders",
