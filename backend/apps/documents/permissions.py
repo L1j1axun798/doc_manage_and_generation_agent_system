@@ -41,6 +41,43 @@ def can_view_document(user: Any, document: Document) -> bool:
     return bool(membership and membership.can_download_restricted)
 
 
+def can_update_document(user: Any, document: Document) -> bool:
+    if getattr(user, "is_system_admin", False):
+        return True
+    if _has_active_grant(user, document, "update"):
+        return True
+    if document.project is None:
+        return False
+    membership = get_project_membership(user, document.project)
+    return bool(membership and membership.can_upload)
+
+
+def can_delete_document(user: Any, document: Document) -> bool:
+    if getattr(user, "is_system_admin", False):
+        return True
+    if _has_active_grant(user, document, "delete"):
+        return True
+    if document.project is None:
+        return False
+    membership = get_project_membership(user, document.project)
+    return bool(membership and membership.can_delete)
+
+
+def can_restore_document(user: Any, document: Document) -> bool:
+    if getattr(user, "is_system_admin", False):
+        return True
+    if _has_active_grant(user, document, "restore"):
+        return True
+    if document.project is None:
+        return False
+    membership = get_project_membership(user, document.project)
+    return bool(membership and membership.can_restore)
+
+
+def can_permanently_delete_document(user: Any, document: Document) -> bool:
+    return bool(getattr(user, "is_system_admin", False))
+
+
 def _has_basic_scope(user: Any, document: Document) -> bool:
     if document.project is None:
         return True

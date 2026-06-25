@@ -2,22 +2,40 @@ from urllib.parse import quote
 
 from django.http import FileResponse
 from drf_spectacular.utils import extend_schema
-from rest_framework import mixins, viewsets
+from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.generics import get_object_or_404
-from rest_framework.parsers import FormParser, MultiPartParser
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from .models import Document
-from .selectors import base_documents_for_user, visible_documents_for_user
+from .selectors import (
+    base_documents_for_user,
+    trashed_documents_for_user,
+    visible_documents_for_user,
+)
 from .serializers import (
+    DocumentBatchDownloadSerializer,
+    DocumentMoveSerializer,
+    DocumentMutationSerializer,
     DocumentSerializer,
+    DocumentUpdateSerializer,
     DocumentUploadSerializer,
     DocumentVersionSerializer,
     DocumentVersionUploadSerializer,
 )
-from .services import create_document, create_document_version, open_current_version_for_download
+from .services import (
+    build_batch_download_zip,
+    create_document,
+    create_document_version,
+    move_document,
+    open_current_version_for_download,
+    permanently_delete_document,
+    restore_document,
+    soft_delete_document,
+    update_document_metadata,
+)
 
 
 class DocumentViewSet(
@@ -28,7 +46,7 @@ class DocumentViewSet(
 ):
     queryset = Document.objects.none()
     serializer_class = DocumentSerializer
-    parser_classes = [MultiPartParser, FormParser]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
     permission_classes = [IsAuthenticated]
     filterset_fields = ["project", "folder", "access_level"]
     search_fields = [
@@ -51,11 +69,25 @@ class DocumentViewSet(
     def get_base_scoped_object(self):
         return get_object_or_404(base_documents_for_user(self.request.user), pk=self.kwargs["pk"])
 
+    def get_deleted_scoped_object(self):
+        return get_object_or_404(
+            base_documents_for_user(self.request.user, include_deleted=True),
+            pk=self.kwargs["pk"],
+        )
+
     def get_serializer_class(self):
         if self.action == "create":
             return DocumentUploadSerializer
         if self.action == "versions":
             return DocumentVersionUploadSerializer
+        if self.action in {"update", "partial_update"}:
+            return DocumentUpdateSerializer
+        if self.action == "move":
+            return DocumentMoveSerializer
+        if self.action in {"delete", "restore", "permanent_delete"}:
+            return DocumentMutationSerializer
+        if self.action == "batch_download":
+            return DocumentBatchDownloadSerializer
         return DocumentSerializer
 
     @extend_schema(request=DocumentUploadSerializer, responses=DocumentSerializer)
@@ -88,6 +120,120 @@ class DocumentViewSet(
             request=request,
         )
         return Response(DocumentVersionSerializer(version).data, status=201)
+
+    @extend_schema(request=DocumentUpdateSerializer, responses=DocumentSerializer)
+    def update(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        validated_data = dict(serializer.validated_data)
+        expected_updated_at = validated_data.pop("expected_updated_at")
+        document = update_document_metadata(
+            actor=request.user,
+            document=self.get_object(),
+            data=validated_data,
+            expected_updated_at=expected_updated_at,
+            request=request,
+        )
+        return Response(DocumentSerializer(document).data)
+
+    @extend_schema(request=DocumentUpdateSerializer, responses=DocumentSerializer)
+    def partial_update(self, request, *args, **kwargs):
+        return self.update(request, *args, **kwargs)
+
+    @extend_schema(request=DocumentMoveSerializer, responses=DocumentSerializer)
+    @action(detail=True, methods=["post"])
+    def move(self, request, pk=None):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        document = move_document(
+            actor=request.user,
+            document=self.get_object(),
+            folder=serializer.validated_data["folder"],
+            expected_updated_at=serializer.validated_data["expected_updated_at"],
+            request=request,
+        )
+        return Response(DocumentSerializer(document).data)
+
+    @extend_schema(request=DocumentMutationSerializer, responses={204: None})
+    @action(detail=True, methods=["post"])
+    def delete(self, request, pk=None):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        soft_delete_document(
+            actor=request.user,
+            document=self.get_object(),
+            expected_updated_at=serializer.validated_data["expected_updated_at"],
+            request=request,
+        )
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @extend_schema(request=DocumentMutationSerializer, responses=DocumentSerializer)
+    @action(detail=True, methods=["post"])
+    def restore(self, request, pk=None):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        document = restore_document(
+            actor=request.user,
+            document=self.get_deleted_scoped_object(),
+            expected_updated_at=serializer.validated_data["expected_updated_at"],
+            request=request,
+        )
+        return Response(DocumentSerializer(document).data)
+
+    @extend_schema(request=DocumentMutationSerializer, responses={204: None})
+    @action(detail=True, methods=["post"], url_path="permanent-delete")
+    def permanent_delete(self, request, pk=None):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        permanently_delete_document(
+            actor=request.user,
+            document=self.get_deleted_scoped_object(),
+            expected_updated_at=serializer.validated_data["expected_updated_at"],
+            request=request,
+        )
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @extend_schema(responses=DocumentSerializer(many=True))
+    @action(detail=False, methods=["get"])
+    def trash(self, request):
+        queryset = self.filter_queryset(trashed_documents_for_user(request.user))
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = DocumentSerializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+        return Response(DocumentSerializer(queryset, many=True).data)
+
+    @extend_schema(request=DocumentBatchDownloadSerializer, responses={200: bytes})
+    @action(detail=False, methods=["post"], url_path="batch-download")
+    def batch_download(self, request):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        document_ids = serializer.validated_data["document_ids"]
+        documents = list(
+            base_documents_for_user(request.user)
+            .filter(pk__in=document_ids)
+            .select_related("current_version")
+        )
+        if len(documents) != len(set(document_ids)):
+            return Response(
+                {"detail": "批量下载包含不存在或不可见的文档"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        document_by_id = {document.pk: document for document in documents}
+        ordered_documents = [document_by_id[document_id] for document_id in document_ids]
+        archive, filename, total_size = build_batch_download_zip(
+            actor=request.user,
+            documents=ordered_documents,
+            request=request,
+        )
+        response = FileResponse(
+            archive,
+            as_attachment=True,
+            content_type="application/zip",
+        )
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        response["X-Archive-Uncompressed-Size"] = str(total_size)
+        return response
 
     @extend_schema(request=None, responses={200: bytes})
     @action(detail=True, methods=["get"])

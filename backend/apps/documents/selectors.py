@@ -8,13 +8,16 @@ from apps.projects.selectors import visible_projects_for_user
 from .models import Document
 
 
-def base_documents_for_user(user: Any) -> QuerySet[Document]:
+def base_documents_for_user(user: Any, *, include_deleted: bool = False) -> QuerySet[Document]:
     queryset = Document.objects.select_related(
         "project",
         "folder",
         "current_version",
         "created_by",
+        "deleted_by",
     )
+    if not include_deleted:
+        queryset = queryset.filter(deleted_at__isnull=True)
     if getattr(user, "is_system_admin", False):
         return queryset
     visible_project_ids = visible_projects_for_user(user).values("id")
@@ -34,8 +37,8 @@ def base_documents_for_user(user: Any) -> QuerySet[Document]:
     )
 
 
-def visible_documents_for_user(user: Any) -> QuerySet[Document]:
-    queryset = base_documents_for_user(user)
+def visible_documents_for_user(user: Any, *, include_deleted: bool = False) -> QuerySet[Document]:
+    queryset = base_documents_for_user(user, include_deleted=include_deleted)
     if getattr(user, "is_system_admin", False):
         return queryset
     restricted_project_ids = ProjectMember.objects.filter(
@@ -48,6 +51,10 @@ def visible_documents_for_user(user: Any) -> QuerySet[Document]:
         | Q(access_level=Document.AccessLevel.RESTRICTED, project_id__in=restricted_project_ids)
         | Q(id__in=granted_view_document_ids)
     )
+
+
+def trashed_documents_for_user(user: Any) -> QuerySet[Document]:
+    return visible_documents_for_user(user, include_deleted=True).filter(deleted_at__isnull=False)
 
 
 def _active_granted_document_ids(user: Any, *actions: str) -> QuerySet:

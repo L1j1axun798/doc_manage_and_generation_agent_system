@@ -47,12 +47,23 @@ class Document(models.Model):
     )
     created_at = models.DateTimeField("创建时间", auto_now_add=True)
     updated_at = models.DateTimeField("更新时间", auto_now=True)
+    lock_version = models.PositiveIntegerField("乐观锁版本", default=1)
+    deleted_at = models.DateTimeField("删除时间", null=True, blank=True)
+    deleted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="deleted_documents",
+        verbose_name="删除人",
+    )
 
     class Meta:
         ordering = ["-updated_at", "-id"]
         indexes = [
             models.Index(fields=["project", "folder"], name="document_project_folder_idx"),
             models.Index(fields=["access_level"], name="document_access_level_idx"),
+            models.Index(fields=["deleted_at"], name="document_deleted_at_idx"),
             models.Index(fields=["created_at"], name="document_created_idx"),
         ]
         verbose_name = "文档"
@@ -60,6 +71,10 @@ class Document(models.Model):
 
     def __str__(self) -> str:
         return self.title
+
+    @property
+    def is_deleted(self) -> bool:
+        return self.deleted_at is not None
 
 
 class DocumentVersion(models.Model):

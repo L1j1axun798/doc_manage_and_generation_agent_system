@@ -30,6 +30,7 @@ class DocumentSerializer(serializers.ModelSerializer):
     project_name = serializers.CharField(source="project.name", read_only=True)
     folder_name = serializers.CharField(source="folder.name", read_only=True)
     created_by_name = serializers.CharField(source="created_by.real_name", read_only=True)
+    deleted_by_name = serializers.CharField(source="deleted_by.real_name", read_only=True)
     current_version = DocumentVersionSerializer(read_only=True)
 
     class Meta:
@@ -44,12 +45,40 @@ class DocumentSerializer(serializers.ModelSerializer):
             "description",
             "access_level",
             "current_version",
+            "lock_version",
+            "deleted_at",
+            "deleted_by",
+            "deleted_by_name",
             "created_by",
             "created_by_name",
             "created_at",
             "updated_at",
         ]
         read_only_fields = fields
+
+
+class DocumentUpdateSerializer(serializers.Serializer):
+    title = serializers.CharField(max_length=255, required=False)
+    description = serializers.CharField(required=False, allow_blank=True)
+    access_level = serializers.ChoiceField(choices=Document.AccessLevel.choices, required=False)
+    expected_updated_at = serializers.DateTimeField()
+
+
+class DocumentMoveSerializer(serializers.Serializer):
+    folder = serializers.PrimaryKeyRelatedField(queryset=Folder.objects.filter(is_active=True))
+    expected_updated_at = serializers.DateTimeField()
+
+
+class DocumentMutationSerializer(serializers.Serializer):
+    expected_updated_at = serializers.DateTimeField()
+
+
+class DocumentBatchDownloadSerializer(serializers.Serializer):
+    document_ids = serializers.ListField(
+        child=serializers.IntegerField(min_value=1),
+        min_length=1,
+        max_length=20,
+    )
 
 
 class DocumentUploadSerializer(serializers.Serializer):

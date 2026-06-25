@@ -38,6 +38,7 @@ INSTALLED_APPS = [
     "apps.audit",
     "apps.documents",
     "apps.folders",
+    "apps.notifications",
     "apps.projects",
     "apps.system",
 ]
