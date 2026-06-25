@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="风电资料系统">
+  <rect width="64" height="64" rx="12" fill="#1f7a5f"/>
+  <path d="M32 12v16m0 0 14-8M32 28 18 20m14 8v24" stroke="#fff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="32" cy="28" r="5" fill="#fff"/>
+</svg>
