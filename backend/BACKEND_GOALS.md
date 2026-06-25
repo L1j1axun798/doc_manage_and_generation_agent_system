@@ -1,5 +1,3 @@
-### 里程碑 0：仓库和工程基线
-
 1. 目标：建立可运行 Django 后端骨架和质量工具。
 2. 文件：新增 `backend/manage.py`、`config/`、`requirements/`、`pyproject.toml`、`pytest.ini`、`.env.example`、`common/`、`apps/system/`、`AGENTS.md`、`PLANS.md`。
 3. 迁移：无业务迁移。
