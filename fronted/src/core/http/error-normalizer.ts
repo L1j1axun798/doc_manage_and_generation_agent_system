@@ -7,6 +7,10 @@ export interface NormalizedApiError {
 }
 
 export function normalizeApiError(error: unknown): NormalizedApiError {
+  if (isNormalizedApiError(error)) {
+    return error
+  }
+
   if (!axios.isAxiosError(error)) {
     return {
       detail: '请求处理失败',
@@ -30,10 +34,28 @@ export function normalizeApiError(error: unknown): NormalizedApiError {
   }
 }
 
+export function isNormalizedApiError(error: unknown): error is NormalizedApiError {
+  return (
+    typeof error === 'object'
+    && error !== null
+    && 'detail' in error
+    && typeof (error as { detail: unknown }).detail === 'string'
+  )
+}
+
+export function getErrorMessage(error: unknown): string {
+  return normalizeApiError(error).detail
+}
+
 function readDetail(data: Record<string, unknown>): string {
   const detail = data.detail
   if (typeof detail === 'string' && detail.trim()) {
     return detail
+  }
+
+  const message = data.message
+  if (typeof message === 'string' && message.trim()) {
+    return message
   }
 
   return '请求处理失败'

@@ -1,0 +1,87 @@
+<script setup lang="ts">
+import { ElMessage } from 'element-plus'
+import { reactive, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+
+import { getErrorMessage } from '@/core/http/error-normalizer'
+import { useAuthStore } from '../stores/auth.store'
+
+const authStore = useAuthStore()
+const route = useRoute()
+const router = useRouter()
+
+const loading = ref(false)
+const form = reactive({
+  username: '',
+  password: '',
+})
+
+async function submitLogin(): Promise<void> {
+  if (!form.username || !form.password) {
+    ElMessage.warning('请输入用户名和密码')
+    return
+  }
+
+  loading.value = true
+
+  try {
+    const user = await authStore.login({
+      username: form.username,
+      password: form.password,
+    })
+    const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : '/dashboard'
+    await router.replace(user.must_change_password ? '/change-password' : redirect)
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error))
+  } finally {
+    loading.value = false
+  }
+}
+</script>
+
+<template>
+  <main class="login-page">
+    <section class="login-page__panel" aria-labelledby="login-title">
+      <div class="login-page__brand">
+        <span class="login-page__brand-mark" aria-hidden="true">W</span>
+        <div>
+          <p>Wind Document System</p>
+          <h1 id="login-title">风电资料系统</h1>
+        </div>
+      </div>
+
+      <el-form class="login-page__form" :model="form" @submit.prevent="submitLogin">
+        <el-form-item label="用户名">
+          <el-input
+            v-model="form.username"
+            autocomplete="username"
+            placeholder="请输入用户名"
+            size="large"
+          />
+        </el-form-item>
+
+        <el-form-item label="密码">
+          <el-input
+            v-model="form.password"
+            autocomplete="current-password"
+            placeholder="请输入密码"
+            show-password
+            size="large"
+            type="password"
+            @keyup.enter="submitLogin"
+          />
+        </el-form-item>
+
+        <el-button
+          class="login-page__submit"
+          :loading="loading"
+          native-type="submit"
+          size="large"
+          type="primary"
+        >
+          登录
+        </el-button>
+      </el-form>
+    </section>
+  </main>
+</template>

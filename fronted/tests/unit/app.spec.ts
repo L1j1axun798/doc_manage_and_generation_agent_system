@@ -1,6 +1,6 @@
 import { mount } from '@vue/test-utils'
 import ElementPlus from 'element-plus'
-import { createPinia } from 'pinia'
+import { createPinia, setActivePinia } from 'pinia'
 import { createMemoryHistory, createRouter } from 'vue-router'
 
 import App from '@/app/App.vue'
@@ -11,16 +11,18 @@ it('mounts the dashboard route', async () => {
     history: createMemoryHistory(),
     routes,
   })
+  const pinia = createPinia()
+  setActivePinia(pinia)
 
-  await router.push('/')
+  await router.push('/login')
   await router.isReady()
 
   const wrapper = mount(App, {
     global: {
-      plugins: [router, createPinia(), ElementPlus],
+      plugins: [pinia, router, ElementPlus],
     },
   })
 
   expect(wrapper.text()).toContain('风电资料系统')
-  expect(wrapper.text()).toContain('首页')
+  expect(wrapper.text()).toContain('登录')
 })
