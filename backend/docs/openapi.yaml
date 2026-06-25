@@ -1,0 +1,3424 @@
+openapi: 3.0.3
+info:
+  title: 风电检测资料管理系统 API
+  version: 0.1.0
+  description: 公司内网资料管理系统后端 API
+paths:
+  /api/v1/audit-logs/:
+    get:
+      operationId: v1_audit_logs_list
+      parameters:
+      - in: query
+        name: action
+        schema:
+          type: string
+      - name: ordering
+        required: false
+        in: query
+        description: 用于排序结果的字段。
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: 分页结果集中的页码。
+        schema:
+          type: integer
+      - in: query
+        name: resource_id
+        schema:
+          type: string
+      - in: query
+        name: resource_type
+        schema:
+          type: string
+      - in: query
+        name: result
+        schema:
+          type: string
+          title: 结果
+          enum:
+          - denied
+          - failure
+          - success
+        description: |-
+          * `success` - 成功
+          * `failure` - 失败
+          * `denied` - 拒绝
+      - name: search
+        required: false
+        in: query
+        description: 搜索关键词。
+        schema:
+          type: string
+      - in: query
+        name: user
+        schema:
+          type: integer
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedAuditLogList'
+          description: ''
+  /api/v1/audit-logs/{id}/:
+    get:
+      operationId: v1_audit_logs_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: 标识此 审计日志 的 唯一整数值。
+        required: true
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditLog'
+          description: ''
+  /api/v1/auth/change-password/:
+    post:
+      operationId: v1_auth_change_password_create
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangePassword'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ChangePassword'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ChangePassword'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '204':
+          description: 密码已修改
+  /api/v1/auth/csrf/:
+    get:
+      operationId: v1_auth_csrf_retrieve
+      tags:
+      - v1
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/v1/auth/login/:
+    post:
+      operationId: v1_auth_login_create
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Login'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Login'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Login'
+        required: true
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+          description: ''
+  /api/v1/auth/logout/:
+    post:
+      operationId: v1_auth_logout_create
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '204':
+          description: 已退出
+  /api/v1/auth/me/:
+    get:
+      operationId: v1_auth_me_retrieve
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+          description: ''
+  /api/v1/document-grants/:
+    get:
+      operationId: v1_document_grants_list
+      parameters:
+      - in: query
+        name: document
+        schema:
+          type: integer
+      - name: ordering
+        required: false
+        in: query
+        description: 用于排序结果的字段。
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: 分页结果集中的页码。
+        schema:
+          type: integer
+      - in: query
+        name: revoked_at
+        schema:
+          type: string
+          format: date-time
+      - name: search
+        required: false
+        in: query
+        description: 搜索关键词。
+        schema:
+          type: string
+      - in: query
+        name: user
+        schema:
+          type: integer
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedDocumentGrantList'
+          description: ''
+    post:
+      operationId: v1_document_grants_create
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DocumentGrant'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/DocumentGrant'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/DocumentGrant'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentGrant'
+          description: ''
+  /api/v1/document-grants/{id}/:
+    get:
+      operationId: v1_document_grants_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: 标识此 文档授权 的 唯一整数值。
+        required: true
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentGrant'
+          description: ''
+    put:
+      operationId: v1_document_grants_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: 标识此 文档授权 的 唯一整数值。
+        required: true
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DocumentGrant'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/DocumentGrant'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/DocumentGrant'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentGrant'
+          description: ''
+    patch:
+      operationId: v1_document_grants_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: 标识此 文档授权 的 唯一整数值。
+        required: true
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedDocumentGrant'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedDocumentGrant'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedDocumentGrant'
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentGrant'
+          description: ''
+    delete:
+      operationId: v1_document_grants_destroy
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: 标识此 文档授权 的 唯一整数值。
+        required: true
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/document-grants/{id}/revoke/:
+    post:
+      operationId: v1_document_grants_revoke_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: 标识此 文档授权 的 唯一整数值。
+        required: true
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentGrant'
+          description: ''
+  /api/v1/documents/:
+    get:
+      operationId: v1_documents_list
+      parameters:
+      - in: query
+        name: access_level
+        schema:
+          type: string
+          title: 访问级别
+          enum:
+          - internal
+          - restricted
+        description: |-
+          * `internal` - 内部
+          * `restricted` - 受限
+      - in: query
+        name: folder
+        schema:
+          type: integer
+      - name: ordering
+        required: false
+        in: query
+        description: 用于排序结果的字段。
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: 分页结果集中的页码。
+        schema:
+          type: integer
+      - in: query
+        name: project
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: 搜索关键词。
+        schema:
+          type: string
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedDocumentList'
+          description: ''
+    post:
+      operationId: v1_documents_create
+      tags:
+      - v1
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/DocumentUpload'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/DocumentUpload'
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DocumentUpload'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Document'
+          description: ''
+  /api/v1/documents/{id}/:
+    get:
+      operationId: v1_documents_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: 标识此 文档 的 唯一整数值。
+        required: true
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Document'
+          description: ''
+    put:
+      operationId: v1_documents_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: 标识此 文档 的 唯一整数值。
+        required: true
+      tags:
+      - v1
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/DocumentUpdate'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/DocumentUpdate'
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DocumentUpdate'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Document'
+          description: ''
+    patch:
+      operationId: v1_documents_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: 标识此 文档 的 唯一整数值。
+        required: true
+      tags:
+      - v1
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedDocumentUpdate'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedDocumentUpdate'
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedDocumentUpdate'
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Document'
+          description: ''
+  /api/v1/documents/{id}/delete/:
+    post:
+      operationId: v1_documents_delete_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: 标识此 文档 的 唯一整数值。
+        required: true
+      tags:
+      - v1
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/DocumentMutation'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/DocumentMutation'
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DocumentMutation'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/documents/{id}/download/:
+    get:
+      operationId: v1_documents_download_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: 标识此 文档 的 唯一整数值。
+        required: true
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: string
+                format: binary
+          description: ''
+  /api/v1/documents/{id}/move/:
+    post:
+      operationId: v1_documents_move_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: 标识此 文档 的 唯一整数值。
+        required: true
+      tags:
+      - v1
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/DocumentMove'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/DocumentMove'
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DocumentMove'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Document'
+          description: ''
+  /api/v1/documents/{id}/permanent-delete/:
+    post:
+      operationId: v1_documents_permanent_delete_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: 标识此 文档 的 唯一整数值。
+        required: true
+      tags:
+      - v1
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/DocumentMutation'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/DocumentMutation'
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DocumentMutation'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/documents/{id}/restore/:
+    post:
+      operationId: v1_documents_restore_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: 标识此 文档 的 唯一整数值。
+        required: true
+      tags:
+      - v1
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/DocumentMutation'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/DocumentMutation'
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DocumentMutation'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Document'
+          description: ''
+  /api/v1/documents/{id}/versions/:
+    post:
+      operationId: v1_documents_versions_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: 标识此 文档 的 唯一整数值。
+        required: true
+      tags:
+      - v1
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/DocumentVersionUpload'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/DocumentVersionUpload'
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DocumentVersionUpload'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentVersion'
+          description: ''
+  /api/v1/documents/batch-download/:
+    post:
+      operationId: v1_documents_batch_download_create
+      tags:
+      - v1
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/DocumentBatchDownload'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/DocumentBatchDownload'
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DocumentBatchDownload'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: string
+                format: binary
+          description: ''
+  /api/v1/documents/trash/:
+    get:
+      operationId: v1_documents_trash_list
+      parameters:
+      - in: query
+        name: access_level
+        schema:
+          type: string
+          title: 访问级别
+          enum:
+          - internal
+          - restricted
+        description: |-
+          * `internal` - 内部
+          * `restricted` - 受限
+      - in: query
+        name: folder
+        schema:
+          type: integer
+      - name: ordering
+        required: false
+        in: query
+        description: 用于排序结果的字段。
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: 分页结果集中的页码。
+        schema:
+          type: integer
+      - in: query
+        name: project
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: 搜索关键词。
+        schema:
+          type: string
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedDocumentList'
+          description: ''
+  /api/v1/folders/:
+    get:
+      operationId: v1_folders_list
+      parameters:
+      - name: ordering
+        required: false
+        in: query
+        description: 用于排序结果的字段。
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: 分页结果集中的页码。
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: 搜索关键词。
+        schema:
+          type: string
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedFolderList'
+          description: ''
+    post:
+      operationId: v1_folders_create
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Folder'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Folder'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Folder'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Folder'
+          description: ''
+  /api/v1/folders/{id}/:
+    get:
+      operationId: v1_folders_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: 标识此 文件夹 的 唯一整数值。
+        required: true
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Folder'
+          description: ''
+    put:
+      operationId: v1_folders_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: 标识此 文件夹 的 唯一整数值。
+        required: true
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Folder'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Folder'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Folder'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Folder'
+          description: ''
+    patch:
+      operationId: v1_folders_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: 标识此 文件夹 的 唯一整数值。
+        required: true
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedFolder'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedFolder'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedFolder'
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Folder'
+          description: ''
+    delete:
+      operationId: v1_folders_destroy
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: 标识此 文件夹 的 唯一整数值。
+        required: true
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/folders/{id}/disable/:
+    post:
+      operationId: v1_folders_disable_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: 标识此 文件夹 的 唯一整数值。
+        required: true
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '204':
+          description: 文件夹已停用
+  /api/v1/folders/{id}/move/:
+    post:
+      operationId: v1_folders_move_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: 标识此 文件夹 的 唯一整数值。
+        required: true
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FolderMove'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/FolderMove'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/FolderMove'
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Folder'
+          description: ''
+  /api/v1/folders/tree/:
+    get:
+      operationId: v1_folders_tree_retrieve
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/v1/health/:
+    get:
+      operationId: v1_health_retrieve
+      tags:
+      - v1
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/v1/notifications/:
+    get:
+      operationId: v1_notifications_list
+      parameters:
+      - in: query
+        name: category
+        schema:
+          type: string
+          title: 分类
+          enum:
+          - access
+          - document
+          - system
+        description: |-
+          * `system` - 系统
+          * `document` - 文档
+          * `access` - 授权
+      - in: query
+        name: is_read
+        schema:
+          type: boolean
+      - name: ordering
+        required: false
+        in: query
+        description: 用于排序结果的字段。
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: 分页结果集中的页码。
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: 搜索关键词。
+        schema:
+          type: string
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedNotificationList'
+          description: ''
+  /api/v1/notifications/{id}/:
+    get:
+      operationId: v1_notifications_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: 标识此 通知 的 唯一整数值。
+        required: true
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Notification'
+          description: ''
+  /api/v1/notifications/{id}/read/:
+    post:
+      operationId: v1_notifications_read_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: 标识此 通知 的 唯一整数值。
+        required: true
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Notification'
+          description: ''
+  /api/v1/notifications/{id}/unread/:
+    post:
+      operationId: v1_notifications_unread_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: 标识此 通知 的 唯一整数值。
+        required: true
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Notification'
+          description: ''
+  /api/v1/projects/:
+    get:
+      operationId: v1_projects_list
+      parameters:
+      - name: ordering
+        required: false
+        in: query
+        description: 用于排序结果的字段。
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: 分页结果集中的页码。
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: 搜索关键词。
+        schema:
+          type: string
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedProjectList'
+          description: ''
+    post:
+      operationId: v1_projects_create
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Project'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Project'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Project'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+          description: ''
+  /api/v1/projects/{id}/:
+    get:
+      operationId: v1_projects_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: 标识此 项目 的 唯一整数值。
+        required: true
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+          description: ''
+    put:
+      operationId: v1_projects_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: 标识此 项目 的 唯一整数值。
+        required: true
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Project'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Project'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Project'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+          description: ''
+    patch:
+      operationId: v1_projects_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: 标识此 项目 的 唯一整数值。
+        required: true
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedProject'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedProject'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedProject'
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+          description: ''
+    delete:
+      operationId: v1_projects_destroy
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: 标识此 项目 的 唯一整数值。
+        required: true
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/projects/{id}/archive/:
+    post:
+      operationId: v1_projects_archive_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: 标识此 项目 的 唯一整数值。
+        required: true
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+          description: ''
+  /api/v1/projects/{id}/unarchive/:
+    post:
+      operationId: v1_projects_unarchive_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: 标识此 项目 的 唯一整数值。
+        required: true
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+          description: ''
+  /api/v1/projects/{project_pk}/members/:
+    get:
+      operationId: v1_projects_members_list
+      parameters:
+      - name: ordering
+        required: false
+        in: query
+        description: 用于排序结果的字段。
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: 分页结果集中的页码。
+        schema:
+          type: integer
+      - in: path
+        name: project_pk
+        schema:
+          type: integer
+        required: true
+      - name: search
+        required: false
+        in: query
+        description: 搜索关键词。
+        schema:
+          type: string
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedProjectMemberList'
+          description: ''
+    post:
+      operationId: v1_projects_members_create
+      parameters:
+      - in: path
+        name: project_pk
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectMember'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ProjectMember'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ProjectMember'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectMember'
+          description: ''
+  /api/v1/projects/{project_pk}/members/{id}/:
+    get:
+      operationId: v1_projects_members_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      - in: path
+        name: project_pk
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectMember'
+          description: ''
+    put:
+      operationId: v1_projects_members_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      - in: path
+        name: project_pk
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectMember'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ProjectMember'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ProjectMember'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectMember'
+          description: ''
+    patch:
+      operationId: v1_projects_members_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      - in: path
+        name: project_pk
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedProjectMember'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedProjectMember'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedProjectMember'
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectMember'
+          description: ''
+    delete:
+      operationId: v1_projects_members_destroy
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      - in: path
+        name: project_pk
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/temporary-access-grants/:
+    get:
+      operationId: v1_temporary_access_grants_list
+      parameters:
+      - in: query
+        name: document_version
+        schema:
+          type: integer
+      - name: ordering
+        required: false
+        in: query
+        description: 用于排序结果的字段。
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: 分页结果集中的页码。
+        schema:
+          type: integer
+      - in: query
+        name: revoked_at
+        schema:
+          type: string
+          format: date-time
+      - name: search
+        required: false
+        in: query
+        description: 搜索关键词。
+        schema:
+          type: string
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedTemporaryAccessGrantList'
+          description: ''
+    post:
+      operationId: v1_temporary_access_grants_create
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TemporaryAccessGrantCreate'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TemporaryAccessGrantCreate'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TemporaryAccessGrantCreate'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TemporaryAccessGrantCreated'
+          description: ''
+  /api/v1/temporary-access-grants/{id}/:
+    get:
+      operationId: v1_temporary_access_grants_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: 标识此 临时访问授权 的 唯一整数值。
+        required: true
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TemporaryAccessGrant'
+          description: ''
+  /api/v1/temporary-access-grants/{id}/revoke/:
+    post:
+      operationId: v1_temporary_access_grants_revoke_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: 标识此 临时访问授权 的 唯一整数值。
+        required: true
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TemporaryAccessGrant'
+          description: ''
+  /api/v1/temporary-access/{token}/download/:
+    get:
+      operationId: v1_temporary_access_download_retrieve
+      parameters:
+      - in: path
+        name: token
+        schema:
+          type: string
+        required: true
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: string
+                format: binary
+          description: ''
+  /api/v1/users/:
+    get:
+      operationId: v1_users_list
+      parameters:
+      - name: ordering
+        required: false
+        in: query
+        description: 用于排序结果的字段。
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: 分页结果集中的页码。
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: 搜索关键词。
+        schema:
+          type: string
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedUserList'
+          description: ''
+    post:
+      operationId: v1_users_create
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserCreate'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/UserCreate'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/UserCreate'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserCreate'
+          description: ''
+  /api/v1/users/{id}/:
+    get:
+      operationId: v1_users_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: 标识此 用户 的 唯一整数值。
+        required: true
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+          description: ''
+    put:
+      operationId: v1_users_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: 标识此 用户 的 唯一整数值。
+        required: true
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/User'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/User'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/User'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+          description: ''
+    patch:
+      operationId: v1_users_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: 标识此 用户 的 唯一整数值。
+        required: true
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedUser'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedUser'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedUser'
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+          description: ''
+    delete:
+      operationId: v1_users_destroy
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: 标识此 用户 的 唯一整数值。
+        required: true
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/users/{id}/disable/:
+    post:
+      operationId: v1_users_disable_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: 标识此 用户 的 唯一整数值。
+        required: true
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/User'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/User'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/User'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+          description: ''
+  /api/v1/users/{id}/reset-password/:
+    post:
+      operationId: v1_users_reset_password_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: 标识此 用户 的 唯一整数值。
+        required: true
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/User'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/User'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/User'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+          description: ''
+components:
+  schemas:
+    AccessLevelEnum:
+      enum:
+      - internal
+      - restricted
+      type: string
+      description: |-
+        * `internal` - 内部
+        * `restricted` - 受限
+    AuditLog:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        user:
+          type: integer
+          readOnly: true
+          nullable: true
+          title: 操作者
+        user_username:
+          type: string
+          readOnly: true
+        user_real_name:
+          type: string
+          readOnly: true
+        action:
+          type: string
+          readOnly: true
+          title: 动作
+        resource_type:
+          type: string
+          readOnly: true
+          title: 资源类型
+        resource_id:
+          type: string
+          readOnly: true
+          title: 资源 ID
+        result:
+          allOf:
+          - $ref: '#/components/schemas/ResultEnum'
+          readOnly: true
+          title: 结果
+        ip_address:
+          type: string
+          readOnly: true
+          nullable: true
+          title: IP 地址
+        user_agent:
+          type: string
+          readOnly: true
+        request_id:
+          type: string
+          readOnly: true
+          title: 请求 ID
+        before_data:
+          readOnly: true
+          nullable: true
+          title: 变更前
+        after_data:
+          readOnly: true
+          nullable: true
+          title: 变更后
+        error_message:
+          type: string
+          readOnly: true
+          title: 错误原因
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+          title: 创建时间
+      required:
+      - action
+      - after_data
+      - before_data
+      - created_at
+      - error_message
+      - id
+      - ip_address
+      - request_id
+      - resource_id
+      - resource_type
+      - result
+      - user
+      - user_agent
+      - user_real_name
+      - user_username
+    CategoryEnum:
+      enum:
+      - system
+      - document
+      - access
+      type: string
+      description: |-
+        * `system` - 系统
+        * `document` - 文档
+        * `access` - 授权
+    ChangePassword:
+      type: object
+      properties:
+        old_password:
+          type: string
+        new_password:
+          type: string
+      required:
+      - new_password
+      - old_password
+    Document:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        project:
+          type: integer
+          readOnly: true
+          nullable: true
+          title: 所属项目
+        project_name:
+          type: string
+          readOnly: true
+        folder:
+          type: integer
+          readOnly: true
+          title: 所属文件夹
+        folder_name:
+          type: string
+          readOnly: true
+        title:
+          type: string
+          readOnly: true
+          title: 文档标题
+        description:
+          type: string
+          readOnly: true
+          title: 描述
+        access_level:
+          allOf:
+          - $ref: '#/components/schemas/AccessLevelEnum'
+          readOnly: true
+          title: 访问级别
+        current_version:
+          allOf:
+          - $ref: '#/components/schemas/DocumentVersion'
+          readOnly: true
+        lock_version:
+          type: integer
+          readOnly: true
+          title: 乐观锁版本
+        deleted_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          title: 删除时间
+        deleted_by:
+          type: integer
+          readOnly: true
+          nullable: true
+          title: 删除人
+        deleted_by_name:
+          type: string
+          readOnly: true
+        created_by:
+          type: integer
+          readOnly: true
+          nullable: true
+          title: 创建人
+        created_by_name:
+          type: string
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+          title: 创建时间
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+          title: 更新时间
+      required:
+      - access_level
+      - created_at
+      - created_by
+      - created_by_name
+      - current_version
+      - deleted_at
+      - deleted_by
+      - deleted_by_name
+      - description
+      - folder
+      - folder_name
+      - id
+      - lock_version
+      - project
+      - project_name
+      - title
+      - updated_at
+    DocumentBatchDownload:
+      type: object
+      properties:
+        document_ids:
+          type: array
+          items:
+            type: integer
+            minimum: 1
+          maxItems: 20
+          minItems: 1
+      required:
+      - document_ids
+    DocumentGrant:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        document:
+          type: integer
+          title: 文档
+        document_title:
+          type: string
+          readOnly: true
+        user:
+          type: integer
+          title: 被授权用户
+        user_username:
+          type: string
+          readOnly: true
+        user_real_name:
+          type: string
+          readOnly: true
+        can_view:
+          type: boolean
+          title: 可查看
+        can_download:
+          type: boolean
+          title: 可下载
+        can_update:
+          type: boolean
+          title: 可更新
+        can_delete:
+          type: boolean
+          title: 可删除
+        can_restore:
+          type: boolean
+          title: 可恢复
+        can_manage:
+          type: boolean
+          title: 可管理授权
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+          title: 过期时间
+        is_expired:
+          type: boolean
+          readOnly: true
+        is_active:
+          type: boolean
+          readOnly: true
+        created_by:
+          type: integer
+          readOnly: true
+          nullable: true
+          title: 授权人
+        created_by_name:
+          type: string
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+          title: 创建时间
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+          title: 更新时间
+        revoked_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          title: 撤销时间
+        revoked_by:
+          type: integer
+          readOnly: true
+          nullable: true
+          title: 撤销人
+        revoked_by_name:
+          type: string
+          readOnly: true
+      required:
+      - created_at
+      - created_by
+      - created_by_name
+      - document
+      - document_title
+      - id
+      - is_active
+      - is_expired
+      - revoked_at
+      - revoked_by
+      - revoked_by_name
+      - updated_at
+      - user
+      - user_real_name
+      - user_username
+    DocumentMove:
+      type: object
+      properties:
+        folder:
+          type: integer
+        expected_updated_at:
+          type: string
+          format: date-time
+      required:
+      - expected_updated_at
+      - folder
+    DocumentMutation:
+      type: object
+      properties:
+        expected_updated_at:
+          type: string
+          format: date-time
+      required:
+      - expected_updated_at
+    DocumentUpdate:
+      type: object
+      properties:
+        title:
+          type: string
+          maxLength: 255
+        description:
+          type: string
+        access_level:
+          $ref: '#/components/schemas/AccessLevelEnum'
+        expected_updated_at:
+          type: string
+          format: date-time
+      required:
+      - expected_updated_at
+    DocumentUpload:
+      type: object
+      properties:
+        folder:
+          type: integer
+        file:
+          type: string
+          format: uri
+        title:
+          type: string
+          maxLength: 255
+        description:
+          type: string
+        access_level:
+          allOf:
+          - $ref: '#/components/schemas/AccessLevelEnum'
+          default: internal
+      required:
+      - file
+      - folder
+    DocumentVersion:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        document:
+          type: integer
+          readOnly: true
+          title: 文档
+        version_number:
+          type: integer
+          readOnly: true
+          title: 版本号
+        original_filename:
+          type: string
+          readOnly: true
+          title: 原始文件名
+        content_type:
+          type: string
+          readOnly: true
+          title: 内容类型
+        file_size:
+          type: integer
+          readOnly: true
+          title: 文件大小
+        sha256:
+          type: string
+          readOnly: true
+          title: SHA-256
+        uploaded_by:
+          type: integer
+          readOnly: true
+          nullable: true
+          title: 上传人
+        uploaded_by_name:
+          type: string
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+          title: 创建时间
+      required:
+      - content_type
+      - created_at
+      - document
+      - file_size
+      - id
+      - original_filename
+      - sha256
+      - uploaded_by
+      - uploaded_by_name
+      - version_number
+    DocumentVersionUpload:
+      type: object
+      properties:
+        file:
+          type: string
+          format: uri
+      required:
+      - file
+    Folder:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        project:
+          type: integer
+          nullable: true
+          title: 所属项目
+        project_name:
+          type: string
+          readOnly: true
+        parent:
+          type: integer
+          nullable: true
+          title: 父文件夹
+        name:
+          type: string
+          title: 文件夹名称
+          maxLength: 120
+        code:
+          type: string
+          title: 文件夹编码
+          maxLength: 50
+        sort_order:
+          type: integer
+          maximum: 4294967295
+          minimum: 0
+          format: int64
+          title: 排序
+        is_active:
+          type: boolean
+          readOnly: true
+          title: 启用
+        is_system_root:
+          type: boolean
+          readOnly: true
+          title: 系统根分类
+        created_by:
+          type: integer
+          readOnly: true
+          nullable: true
+          title: 创建人
+        created_by_name:
+          type: string
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+          title: 创建时间
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+          title: 更新时间
+      required:
+      - created_at
+      - created_by
+      - created_by_name
+      - id
+      - is_active
+      - is_system_root
+      - name
+      - project_name
+      - updated_at
+    FolderMove:
+      type: object
+      properties:
+        parent:
+          type: integer
+          nullable: true
+        sort_order:
+          type: integer
+          minimum: 0
+    Login:
+      type: object
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+      required:
+      - password
+      - username
+    Notification:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        title:
+          type: string
+          readOnly: true
+          title: 标题
+        message:
+          type: string
+          readOnly: true
+          title: 内容
+        category:
+          allOf:
+          - $ref: '#/components/schemas/CategoryEnum'
+          readOnly: true
+          title: 分类
+        resource_type:
+          type: string
+          readOnly: true
+          title: 资源类型
+        resource_id:
+          type: string
+          readOnly: true
+          title: 资源 ID
+        is_read:
+          type: boolean
+          readOnly: true
+          title: 已读
+        read_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          title: 阅读时间
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+          title: 创建时间
+      required:
+      - category
+      - created_at
+      - id
+      - is_read
+      - message
+      - read_at
+      - resource_id
+      - resource_type
+      - title
+    PaginatedAuditLogList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/AuditLog'
+    PaginatedDocumentGrantList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/DocumentGrant'
+    PaginatedDocumentList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Document'
+    PaginatedFolderList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Folder'
+    PaginatedNotificationList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Notification'
+    PaginatedProjectList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Project'
+    PaginatedProjectMemberList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProjectMember'
+    PaginatedTemporaryAccessGrantList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/TemporaryAccessGrant'
+    PaginatedUserList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/User'
+    PatchedDocumentGrant:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        document:
+          type: integer
+          title: 文档
+        document_title:
+          type: string
+          readOnly: true
+        user:
+          type: integer
+          title: 被授权用户
+        user_username:
+          type: string
+          readOnly: true
+        user_real_name:
+          type: string
+          readOnly: true
+        can_view:
+          type: boolean
+          title: 可查看
+        can_download:
+          type: boolean
+          title: 可下载
+        can_update:
+          type: boolean
+          title: 可更新
+        can_delete:
+          type: boolean
+          title: 可删除
+        can_restore:
+          type: boolean
+          title: 可恢复
+        can_manage:
+          type: boolean
+          title: 可管理授权
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+          title: 过期时间
+        is_expired:
+          type: boolean
+          readOnly: true
+        is_active:
+          type: boolean
+          readOnly: true
+        created_by:
+          type: integer
+          readOnly: true
+          nullable: true
+          title: 授权人
+        created_by_name:
+          type: string
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+          title: 创建时间
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+          title: 更新时间
+        revoked_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          title: 撤销时间
+        revoked_by:
+          type: integer
+          readOnly: true
+          nullable: true
+          title: 撤销人
+        revoked_by_name:
+          type: string
+          readOnly: true
+    PatchedDocumentUpdate:
+      type: object
+      properties:
+        title:
+          type: string
+          maxLength: 255
+        description:
+          type: string
+        access_level:
+          $ref: '#/components/schemas/AccessLevelEnum'
+        expected_updated_at:
+          type: string
+          format: date-time
+    PatchedFolder:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        project:
+          type: integer
+          nullable: true
+          title: 所属项目
+        project_name:
+          type: string
+          readOnly: true
+        parent:
+          type: integer
+          nullable: true
+          title: 父文件夹
+        name:
+          type: string
+          title: 文件夹名称
+          maxLength: 120
+        code:
+          type: string
+          title: 文件夹编码
+          maxLength: 50
+        sort_order:
+          type: integer
+          maximum: 4294967295
+          minimum: 0
+          format: int64
+          title: 排序
+        is_active:
+          type: boolean
+          readOnly: true
+          title: 启用
+        is_system_root:
+          type: boolean
+          readOnly: true
+          title: 系统根分类
+        created_by:
+          type: integer
+          readOnly: true
+          nullable: true
+          title: 创建人
+        created_by_name:
+          type: string
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+          title: 创建时间
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+          title: 更新时间
+    PatchedProject:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          title: 项目名称
+          maxLength: 120
+        code:
+          type: string
+          title: 项目编号
+          maxLength: 50
+        description:
+          type: string
+          title: 描述
+        manager:
+          type: integer
+          nullable: true
+          title: 项目负责人
+        manager_name:
+          type: string
+          readOnly: true
+        status:
+          allOf:
+          - $ref: '#/components/schemas/ProjectStatusEnum'
+          readOnly: true
+          title: 状态
+        created_by:
+          type: integer
+          readOnly: true
+          nullable: true
+          title: 创建人
+        created_by_name:
+          type: string
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+          title: 创建时间
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+          title: 更新时间
+        archived_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          title: 归档时间
+        archived_by:
+          type: integer
+          readOnly: true
+          nullable: true
+          title: 归档人
+    PatchedProjectMember:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        project:
+          type: integer
+          readOnly: true
+          title: 项目
+        user:
+          type: integer
+          title: 用户
+        user_username:
+          type: string
+          readOnly: true
+        user_real_name:
+          type: string
+          readOnly: true
+        role:
+          allOf:
+          - $ref: '#/components/schemas/ProjectMemberRoleEnum'
+          title: 项目角色
+        can_upload:
+          type: boolean
+          title: 可上传
+        can_download_restricted:
+          type: boolean
+          title: 可下载受限文件
+        can_manage_folder:
+          type: boolean
+          title: 可管理文件夹
+        can_delete:
+          type: boolean
+          title: 可删除
+        can_restore:
+          type: boolean
+          title: 可恢复
+        can_manage_permission:
+          type: boolean
+          title: 可管理授权
+        joined_at:
+          type: string
+          format: date-time
+          readOnly: true
+          title: 加入时间
+    PatchedUser:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        username:
+          type: string
+          title: 用户名
+          description: 必填；长度为150个字符或以下；只能包含字母、数字、特殊字符“@”、“.”、“-”和“_”。
+          pattern: ^[\w.@+-]+$
+          maxLength: 150
+        real_name:
+          type: string
+          title: 真实姓名
+          maxLength: 80
+        employee_no:
+          type: string
+          nullable: true
+          title: 员工编号
+          maxLength: 50
+        role:
+          allOf:
+          - $ref: '#/components/schemas/UserRoleEnum'
+          title: 角色
+        phone:
+          type: string
+          title: 手机号
+          maxLength: 30
+        email:
+          type: string
+          format: email
+          title: 电子邮件地址
+          maxLength: 254
+        is_active:
+          type: boolean
+          title: 有效
+          description: 指明用户是否被认为是活跃的。以反选代替删除帐号。
+        must_change_password:
+          type: boolean
+          title: 首次登录需修改密码
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+          title: 创建时间
+    Project:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          title: 项目名称
+          maxLength: 120
+        code:
+          type: string
+          title: 项目编号
+          maxLength: 50
+        description:
+          type: string
+          title: 描述
+        manager:
+          type: integer
+          nullable: true
+          title: 项目负责人
+        manager_name:
+          type: string
+          readOnly: true
+        status:
+          allOf:
+          - $ref: '#/components/schemas/ProjectStatusEnum'
+          readOnly: true
+          title: 状态
+        created_by:
+          type: integer
+          readOnly: true
+          nullable: true
+          title: 创建人
+        created_by_name:
+          type: string
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+          title: 创建时间
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+          title: 更新时间
+        archived_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          title: 归档时间
+        archived_by:
+          type: integer
+          readOnly: true
+          nullable: true
+          title: 归档人
+      required:
+      - archived_at
+      - archived_by
+      - code
+      - created_at
+      - created_by
+      - created_by_name
+      - id
+      - manager_name
+      - name
+      - status
+      - updated_at
+    ProjectMember:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        project:
+          type: integer
+          readOnly: true
+          title: 项目
+        user:
+          type: integer
+          title: 用户
+        user_username:
+          type: string
+          readOnly: true
+        user_real_name:
+          type: string
+          readOnly: true
+        role:
+          allOf:
+          - $ref: '#/components/schemas/ProjectMemberRoleEnum'
+          title: 项目角色
+        can_upload:
+          type: boolean
+          title: 可上传
+        can_download_restricted:
+          type: boolean
+          title: 可下载受限文件
+        can_manage_folder:
+          type: boolean
+          title: 可管理文件夹
+        can_delete:
+          type: boolean
+          title: 可删除
+        can_restore:
+          type: boolean
+          title: 可恢复
+        can_manage_permission:
+          type: boolean
+          title: 可管理授权
+        joined_at:
+          type: string
+          format: date-time
+          readOnly: true
+          title: 加入时间
+      required:
+      - id
+      - joined_at
+      - project
+      - user
+      - user_real_name
+      - user_username
+    ProjectMemberRoleEnum:
+      enum:
+      - manager
+      - operator
+      - viewer
+      type: string
+      description: |-
+        * `manager` - 负责人
+        * `operator` - 资料整理员
+        * `viewer` - 查看者
+    ProjectStatusEnum:
+      enum:
+      - active
+      - archived
+      type: string
+      description: |-
+        * `active` - 进行中
+        * `archived` - 已归档
+    ResultEnum:
+      enum:
+      - success
+      - failure
+      - denied
+      type: string
+      description: |-
+        * `success` - 成功
+        * `failure` - 失败
+        * `denied` - 拒绝
+    TemporaryAccessGrant:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        document_version:
+          type: integer
+          title: 文档版本
+        document:
+          type: integer
+          readOnly: true
+        document_title:
+          type: string
+          readOnly: true
+        original_filename:
+          type: string
+          readOnly: true
+        max_downloads:
+          type: integer
+          maximum: 4294967295
+          minimum: 0
+          format: int64
+          title: 最大下载次数
+        used_count:
+          type: integer
+          readOnly: true
+          title: 已使用次数
+        remaining_downloads:
+          type: integer
+          readOnly: true
+        expires_at:
+          type: string
+          format: date-time
+          title: 过期时间
+        is_expired:
+          type: boolean
+          readOnly: true
+        is_active:
+          type: boolean
+          readOnly: true
+        created_by:
+          type: integer
+          readOnly: true
+          nullable: true
+          title: 创建人
+        created_by_name:
+          type: string
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+          title: 创建时间
+        revoked_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          title: 撤销时间
+        revoked_by:
+          type: integer
+          readOnly: true
+          nullable: true
+          title: 撤销人
+        revoked_by_name:
+          type: string
+          readOnly: true
+        last_used_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          title: 最后使用时间
+      required:
+      - created_at
+      - created_by
+      - created_by_name
+      - document
+      - document_title
+      - document_version
+      - expires_at
+      - id
+      - is_active
+      - is_expired
+      - last_used_at
+      - original_filename
+      - remaining_downloads
+      - revoked_at
+      - revoked_by
+      - revoked_by_name
+      - used_count
+    TemporaryAccessGrantCreate:
+      type: object
+      properties:
+        document_version:
+          type: integer
+        expires_at:
+          type: string
+          format: date-time
+        max_downloads:
+          type: integer
+          minimum: 1
+          default: 1
+      required:
+      - document_version
+    TemporaryAccessGrantCreated:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        document_version:
+          type: integer
+          title: 文档版本
+        document:
+          type: integer
+          readOnly: true
+        document_title:
+          type: string
+          readOnly: true
+        original_filename:
+          type: string
+          readOnly: true
+        max_downloads:
+          type: integer
+          maximum: 4294967295
+          minimum: 0
+          format: int64
+          title: 最大下载次数
+        used_count:
+          type: integer
+          readOnly: true
+          title: 已使用次数
+        remaining_downloads:
+          type: integer
+          readOnly: true
+        expires_at:
+          type: string
+          format: date-time
+          title: 过期时间
+        is_expired:
+          type: boolean
+          readOnly: true
+        is_active:
+          type: boolean
+          readOnly: true
+        created_by:
+          type: integer
+          readOnly: true
+          nullable: true
+          title: 创建人
+        created_by_name:
+          type: string
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+          title: 创建时间
+        revoked_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          title: 撤销时间
+        revoked_by:
+          type: integer
+          readOnly: true
+          nullable: true
+          title: 撤销人
+        revoked_by_name:
+          type: string
+          readOnly: true
+        last_used_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          title: 最后使用时间
+        token:
+          type: string
+          readOnly: true
+        download_url:
+          type: string
+          readOnly: true
+      required:
+      - created_at
+      - created_by
+      - created_by_name
+      - document
+      - document_title
+      - document_version
+      - download_url
+      - expires_at
+      - id
+      - is_active
+      - is_expired
+      - last_used_at
+      - original_filename
+      - remaining_downloads
+      - revoked_at
+      - revoked_by
+      - revoked_by_name
+      - token
+      - used_count
+    User:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        username:
+          type: string
+          title: 用户名
+          description: 必填；长度为150个字符或以下；只能包含字母、数字、特殊字符“@”、“.”、“-”和“_”。
+          pattern: ^[\w.@+-]+$
+          maxLength: 150
+        real_name:
+          type: string
+          title: 真实姓名
+          maxLength: 80
+        employee_no:
+          type: string
+          nullable: true
+          title: 员工编号
+          maxLength: 50
+        role:
+          allOf:
+          - $ref: '#/components/schemas/UserRoleEnum'
+          title: 角色
+        phone:
+          type: string
+          title: 手机号
+          maxLength: 30
+        email:
+          type: string
+          format: email
+          title: 电子邮件地址
+          maxLength: 254
+        is_active:
+          type: boolean
+          title: 有效
+          description: 指明用户是否被认为是活跃的。以反选代替删除帐号。
+        must_change_password:
+          type: boolean
+          title: 首次登录需修改密码
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+          title: 创建时间
+      required:
+      - created_at
+      - id
+      - real_name
+      - username
+    UserCreate:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        username:
+          type: string
+          title: 用户名
+          description: 必填；长度为150个字符或以下；只能包含字母、数字、特殊字符“@”、“.”、“-”和“_”。
+          pattern: ^[\w.@+-]+$
+          maxLength: 150
+        password:
+          type: string
+          writeOnly: true
+          minLength: 8
+        real_name:
+          type: string
+          title: 真实姓名
+          maxLength: 80
+        employee_no:
+          type: string
+          nullable: true
+          title: 员工编号
+          maxLength: 50
+        role:
+          allOf:
+          - $ref: '#/components/schemas/UserRoleEnum'
+          title: 角色
+        phone:
+          type: string
+          title: 手机号
+          maxLength: 30
+        email:
+          type: string
+          format: email
+          title: 电子邮件地址
+          maxLength: 254
+        is_active:
+          type: boolean
+          title: 有效
+          description: 指明用户是否被认为是活跃的。以反选代替删除帐号。
+        must_change_password:
+          type: boolean
+          title: 首次登录需修改密码
+      required:
+      - id
+      - password
+      - real_name
+      - username
+    UserRoleEnum:
+      enum:
+      - system_admin
+      - project_manager
+      - data_operator
+      type: string
+      description: |-
+        * `system_admin` - 系统管理员
+        * `project_manager` - 项目负责人
+        * `data_operator` - 资料整理员
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: sessionid
