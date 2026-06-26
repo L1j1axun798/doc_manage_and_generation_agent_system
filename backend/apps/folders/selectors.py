@@ -4,6 +4,7 @@ from django.db.models import Q, QuerySet
 
 from apps.projects.selectors import visible_projects_for_user
 
+from .defaults import LEGACY_PROJECT_FOLDER_NAMES
 from .models import Folder
 
 
@@ -46,7 +47,9 @@ def folder_tree_for_user(user: Any, project_id: str | None = None) -> list[Folde
     if project_id in {"public", "null", "none"}:
         queryset = queryset.filter(project__isnull=True)
     elif project_id:
-        queryset = queryset.filter(project_id=project_id)
+        queryset = queryset.filter(project_id=project_id).exclude(
+            name__in=LEGACY_PROJECT_FOLDER_NAMES,
+        )
     folders = list(queryset.order_by("sort_order", "id"))
     return build_tree(folders)
 

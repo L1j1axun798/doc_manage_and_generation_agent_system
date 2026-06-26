@@ -213,14 +213,55 @@ def test_disable_folder_rejects_active_children(client):
 def test_init_public_folders_command_creates_default_roots():
     call_command("init_public_folders")
 
+    names = set(
+        Folder.objects.filter(
+            project__isnull=True,
+            parent__isnull=True,
+            is_system_root=True,
+        ).values_list("name", flat=True)
+    )
+
     assert (
         Folder.objects.filter(
             project__isnull=True,
             parent__isnull=True,
             is_system_root=True,
         ).count()
-        == 7
+        == 8
     )
+    assert {
+        "竣工档案资料",
+        "公司资质",
+        "人员资质",
+        "工具及年检资质",
+        "仪器仪表设备年检资质",
+        "车辆年检资质",
+        "个人防护用品",
+        "归档资料",
+    } == names
+
+
+@pytest.mark.django_db
+def test_project_folder_tree_hides_legacy_project_folders(client):
+    admin = make_user("admin", User.Role.SYSTEM_ADMIN)
+    project = Project.objects.create(name="项目", code="P001", created_by=admin)
+    Folder.objects.create(
+        project=project,
+        name="竣工档案资料",
+        code="PUBLIC-COMPLETION",
+        created_by=admin,
+    )
+    Folder.objects.create(project=project, name="过程资料", created_by=admin)
+    Folder.objects.create(project=project, name="检测报告", created_by=admin)
+    client.force_login(admin)
+
+    response = client.get(f"/api/v1/folders/tree/?project_id={project.id}")
+
+    assert response.status_code == 200
+    names = {node["name"] for node in response.json()}
+    assert "竣工档案资料" in names
+    assert "过程资料" not in names
+    assert "检测报告" not in names
 
 
 @pytest.mark.django_db

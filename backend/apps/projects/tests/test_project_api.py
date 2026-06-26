@@ -2,6 +2,8 @@ import pytest
 from django.contrib.auth import get_user_model
 
 from apps.audit.models import AuditLog
+from apps.documents.models import Document
+from apps.folders.models import Folder
 from apps.projects.models import Project, ProjectMember
 
 User = get_user_model()
@@ -39,6 +41,22 @@ def test_system_admin_can_create_project_and_manager_membership(client):
     assert project.created_by == admin
     assert membership.role == ProjectMember.Role.MANAGER
     assert membership.can_manage_permission is True
+    assert list(
+        Folder.objects.filter(project=project, parent__isnull=True)
+        .order_by("sort_order")
+        .values_list(
+            "name",
+            flat=True,
+        )
+    ) == [
+        "竣工档案资料",
+        "公司资质",
+        "人员资质",
+        "工具及年检资质",
+        "仪器仪表设备年检资质",
+        "车辆年检资质",
+        "个人防护用品",
+    ]
     assert AuditLog.objects.filter(action="project.create", result="success").exists()
 
 
@@ -192,6 +210,49 @@ def test_archive_and_unarchive_rules(client):
     assert unarchive_denied_response.status_code == 403
     assert unarchive_response.status_code == 200
     assert project.status == Project.Status.ACTIVE
+
+
+@pytest.mark.django_db
+def test_archive_project_groups_folders_by_archive_year(client):
+    admin = make_user("admin", User.Role.SYSTEM_ADMIN)
+    project = Project.objects.create(name="风场检测", code="P001", created_by=admin)
+    root_folder = Folder.objects.create(project=project, name="检测报告", created_by=admin)
+    child_folder = Folder.objects.create(
+        project=project,
+        parent=root_folder,
+        name="叶片检测",
+        created_by=admin,
+    )
+    document = Document.objects.create(
+        project=project,
+        folder=child_folder,
+        title="检测报告",
+        created_by=admin,
+    )
+    client.force_login(admin)
+
+    response = client.post(f"/api/v1/projects/{project.id}/archive/")
+
+    project.refresh_from_db()
+    year = project.archived_at.year
+    archive_root = Folder.objects.get(project=None, parent=None, name="归档资料")
+    archive_year = Folder.objects.get(project=None, parent=archive_root, name=f"{year}年归档资料")
+    project_container = Folder.objects.get(project=project, code=f"PROJECT-ARCHIVE-{project.id}")
+    root_folder.refresh_from_db()
+    child_folder.refresh_from_db()
+    document.refresh_from_db()
+    document_list_response = client.get(f"/api/v1/documents/?folder={archive_root.id}")
+
+    assert response.status_code == 200
+    assert archive_root.is_system_root is True
+    assert archive_year.is_system_root is False
+    assert project_container.parent == archive_year
+    assert root_folder.parent == project_container
+    assert child_folder.parent == root_folder
+    assert document.project == project
+    assert document_list_response.status_code == 200
+    assert document_list_response.json()["count"] == 1
+    assert document_list_response.json()["results"][0]["id"] == document.id
 
 
 @pytest.mark.django_db

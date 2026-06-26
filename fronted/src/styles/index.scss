@@ -334,10 +334,9 @@ body {
 
 .folder-tree--top {
   display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
-  grid-auto-rows: 84px;
+  grid-template-columns: minmax(0, 1fr);
   min-height: auto;
-  gap: clamp(8px, 1.4vw, 18px);
+  gap: 12px;
   align-items: stretch;
   overflow-x: visible;
   padding: 14px clamp(20px, 4vw, 56px) 14px;
@@ -353,6 +352,30 @@ body {
   display: flex;
   align-items: center;
   min-height: 32px;
+}
+
+.folder-tree__item {
+  min-width: 0;
+}
+
+.folder-tree--top .folder-tree__roots {
+  display: grid;
+  grid-template-columns: repeat(var(--folder-tree-top-count, 7), minmax(0, 1fr));
+  grid-auto-rows: 84px;
+  gap: clamp(8px, 1.4vw, 18px);
+  align-items: stretch;
+  min-width: 0;
+}
+
+.folder-tree--top .folder-tree__item {
+  position: relative;
+  height: 84px;
+  min-width: 0;
+}
+
+.folder-tree--top .folder-tree__item--archive {
+  padding-left: clamp(12px, 1.6vw, 22px);
+  border-left: 1px solid var(--color-border);
 }
 
 .folder-tree__node {
@@ -385,6 +408,11 @@ body {
   font-weight: 600;
   line-height: 1.25;
   text-align: center;
+}
+
+.folder-tree--top .folder-tree__item--archive .folder-tree__node {
+  color: #4c647d;
+  background: #fafcff;
 }
 
 .folder-tree--top .folder-tree__node:focus-visible {
@@ -433,6 +461,48 @@ body {
 }
 
 .folder-tree--top .folder-tree__node.is-active .folder-tree__icon {
+  color: #0f5cff;
+}
+
+.folder-tree__archive-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--color-border);
+}
+
+.folder-tree__archive-node {
+  display: inline-grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  min-height: 40px;
+  gap: 6px;
+  padding: 8px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  color: #4c647d;
+  background: #fafcff;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+  text-align: center;
+}
+
+.folder-tree__archive-icon {
+  color: #8ba0ba;
+  font-size: 18px;
+}
+
+.folder-tree__archive-node:hover,
+.folder-tree__archive-node.is-active {
+  border-color: #c7dbff;
+  color: #0f5cff;
+  background: #eef5ff;
+}
+
+.folder-tree__archive-node.is-active .folder-tree__archive-icon {
   color: #0f5cff;
 }
 

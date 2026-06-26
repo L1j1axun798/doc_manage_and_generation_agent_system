@@ -15,12 +15,14 @@ import type { FolderTreeNode } from '../documents.types'
 import {
   getPublicRootFolderDefinition,
   getPublicRootFolderNodes,
+  type PublicRootFolderKey,
 } from '../utils/public-root-folders'
 
 interface FlatFolderNode extends FolderTreeNode {
   depth: number
   displayName: string
   icon: Component
+  publicRootKey?: PublicRootFolderKey
 }
 
 const props = defineProps<{
@@ -47,6 +49,34 @@ const visibleNodes = computed(() => {
     icon: getFolderIcon(node.name),
   }))
 })
+const topTreeStyle = computed(() =>
+  isTopPresentation.value
+    ? { '--folder-tree-top-count': String(Math.max(visibleNodes.value.length, 1)) }
+    : undefined,
+)
+const archiveNode = computed(() =>
+  isTopPresentation.value
+    ? visibleNodes.value.find((node) => node.publicRootKey === 'archive')
+    : undefined,
+)
+const archiveYearNodes = computed<FlatFolderNode[]>(() =>
+  archiveNode.value
+    ? archiveNode.value.children.map((node) => ({
+        ...node,
+        depth: 1,
+        displayName: node.name,
+        icon: FolderChecked,
+        publicRootKey: 'archive',
+      }))
+    : [],
+)
+const showArchiveYears = computed(
+  () =>
+    isTopPresentation.value &&
+    archiveYearNodes.value.length > 0 &&
+    archiveNode.value !== undefined &&
+    isNodeActive(archiveNode.value),
+)
 
 function selectFolder(folderId: number | undefined): void {
   if (props.modelValue === folderId) {
@@ -54,6 +84,14 @@ function selectFolder(folderId: number | undefined): void {
   }
 
   emit('update:modelValue', folderId)
+}
+
+function isNodeActive(node: FlatFolderNode): boolean {
+  if (props.modelValue === node.id) {
+    return true
+  }
+
+  return node.publicRootKey === 'archive' && node.children.some((child) => child.id === props.modelValue)
 }
 
 function flattenFolders(nodes: FolderTreeNode[], depth = 0): FlatFolderNode[] {
@@ -65,6 +103,10 @@ function flattenFolders(nodes: FolderTreeNode[], depth = 0): FlatFolderNode[] {
 
 function getFolderIcon(name: string): Component {
   const definition = getPublicRootFolderDefinition(name)
+
+  if (definition?.key === 'archive') {
+    return FolderChecked
+  }
 
   if (definition?.key === 'company') {
     return OfficeBuilding
@@ -102,6 +144,7 @@ function getFolderIcon(name: string): Component {
   <aside
     class="folder-tree"
     :class="{ 'folder-tree--top': isTopPresentation }"
+    :style="topTreeStyle"
     aria-label="文件夹树"
   >
     <div v-if="!isTopPresentation" class="folder-tree__header">
@@ -122,20 +165,62 @@ function getFolderIcon(name: string): Component {
         <span>全部资料</span>
       </button>
 
-      <button
-        v-for="node in visibleNodes"
-        :key="node.id"
-        class="folder-tree__node"
-        :class="{ 'is-active': modelValue === node.id }"
-        :style="isTopPresentation ? undefined : { paddingLeft: `${12 + node.depth * 18}px` }"
-        type="button"
-        @click="selectFolder(node.id)"
-      >
-        <el-icon v-if="isTopPresentation" class="folder-tree__icon">
-          <component :is="node.icon" />
-        </el-icon>
-        <span>{{ node.displayName }}</span>
-      </button>
+      <template v-if="isTopPresentation">
+        <div class="folder-tree__roots">
+          <div
+            v-for="node in visibleNodes"
+            :key="node.id"
+            class="folder-tree__item"
+            :class="{ 'folder-tree__item--archive': node.publicRootKey === 'archive' }"
+          >
+            <button
+              class="folder-tree__node"
+              :class="{ 'is-active': isNodeActive(node) }"
+              type="button"
+              @click="selectFolder(node.id)"
+            >
+              <el-icon class="folder-tree__icon">
+                <component :is="node.icon" />
+              </el-icon>
+              <span>{{ node.displayName }}</span>
+            </button>
+          </div>
+        </div>
+
+        <div v-if="showArchiveYears" class="folder-tree__archive-list">
+          <button
+            v-for="yearNode in archiveYearNodes"
+            :key="yearNode.id"
+            class="folder-tree__archive-node"
+            :class="{ 'is-active': modelValue === yearNode.id }"
+            type="button"
+            @click="selectFolder(yearNode.id)"
+          >
+            <el-icon class="folder-tree__archive-icon">
+              <component :is="yearNode.icon" />
+            </el-icon>
+            <span>{{ yearNode.displayName }}</span>
+          </button>
+        </div>
+      </template>
+
+      <template v-else>
+        <div
+          v-for="node in visibleNodes"
+          :key="node.id"
+          class="folder-tree__item"
+        >
+          <button
+            class="folder-tree__node"
+            :class="{ 'is-active': isNodeActive(node) }"
+            :style="{ paddingLeft: `${12 + node.depth * 18}px` }"
+            type="button"
+            @click="selectFolder(node.id)"
+          >
+            <span>{{ node.displayName }}</span>
+          </button>
+        </div>
+      </template>
 
       <el-empty v-if="visibleNodes.length === 0" description="暂无目录" :image-size="72" />
     </template>

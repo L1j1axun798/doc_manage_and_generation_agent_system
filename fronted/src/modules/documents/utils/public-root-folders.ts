@@ -1,6 +1,7 @@
 import type { FolderTreeNode } from '../documents.types'
 
 export type PublicRootFolderKey =
+  | 'archive'
   | 'completion'
   | 'company'
   | 'staff'
@@ -18,6 +19,12 @@ export interface PublicRootFolderDefinition {
 export interface PublicRootFolderNode extends FolderTreeNode {
   displayName: string
   publicRootKey: PublicRootFolderKey
+}
+
+const ARCHIVE_ROOT_DEFINITION: PublicRootFolderDefinition = {
+  key: 'archive',
+  label: '归档资料',
+  matches: ['归档资料'],
 }
 
 export const PUBLIC_ROOT_FOLDER_DEFINITIONS: PublicRootFolderDefinition[] = [
@@ -61,6 +68,14 @@ export const PUBLIC_ROOT_FOLDER_DEFINITIONS: PublicRootFolderDefinition[] = [
 export function getPublicRootFolderDefinition(
   folderName: string,
 ): PublicRootFolderDefinition | undefined {
+  if (isArchiveYearRoot(folderName)) {
+    return ARCHIVE_ROOT_DEFINITION
+  }
+
+  if (folderName === ARCHIVE_ROOT_DEFINITION.label) {
+    return ARCHIVE_ROOT_DEFINITION
+  }
+
   return PUBLIC_ROOT_FOLDER_DEFINITIONS.find((definition) =>
     definition.matches.some((match) => folderName.includes(match)),
   )
@@ -68,6 +83,8 @@ export function getPublicRootFolderDefinition(
 
 export function getPublicRootFolderNodes(nodes: FolderTreeNode[]): PublicRootFolderNode[] {
   const byKey = new Map<PublicRootFolderKey, PublicRootFolderNode>()
+  const archiveYearNodes: PublicRootFolderNode[] = []
+  let archiveRoot: PublicRootFolderNode | undefined
 
   for (const node of nodes) {
     if (node.parent !== null) {
@@ -75,7 +92,30 @@ export function getPublicRootFolderNodes(nodes: FolderTreeNode[]): PublicRootFol
     }
 
     const definition = getPublicRootFolderDefinition(node.name)
-    if (!definition || byKey.has(definition.key)) {
+    if (!definition) {
+      continue
+    }
+
+    if (definition.key === 'archive') {
+      if (node.name === ARCHIVE_ROOT_DEFINITION.label) {
+        archiveRoot = {
+          ...node,
+          displayName: ARCHIVE_ROOT_DEFINITION.label,
+          publicRootKey: definition.key,
+          children: [...node.children].sort(compareArchiveYearsDesc),
+        }
+        continue
+      }
+
+      archiveYearNodes.push({
+        ...node,
+        displayName: node.name,
+        publicRootKey: definition.key,
+      })
+      continue
+    }
+
+    if (byKey.has(definition.key)) {
       continue
     }
 
@@ -86,7 +126,39 @@ export function getPublicRootFolderNodes(nodes: FolderTreeNode[]): PublicRootFol
     })
   }
 
-  return PUBLIC_ROOT_FOLDER_DEFINITIONS
+  const fixedNodes = PUBLIC_ROOT_FOLDER_DEFINITIONS
     .map((definition) => byKey.get(definition.key))
     .filter((node): node is PublicRootFolderNode => node !== undefined)
+
+  const sortedArchiveYears = archiveYearNodes.sort(compareArchiveYearsDesc)
+
+  if (!archiveRoot && sortedArchiveYears.length === 0) {
+    return fixedNodes
+  }
+
+  if (archiveRoot) {
+    archiveRoot = {
+      ...archiveRoot,
+      children: [...archiveRoot.children, ...sortedArchiveYears].sort(compareArchiveYearsDesc),
+    }
+  } else {
+    const latestArchiveYear = sortedArchiveYears[0]
+    archiveRoot = {
+      ...latestArchiveYear,
+      name: ARCHIVE_ROOT_DEFINITION.label,
+      displayName: ARCHIVE_ROOT_DEFINITION.label,
+      publicRootKey: 'archive',
+      children: sortedArchiveYears,
+    }
+  }
+
+  return [...fixedNodes, archiveRoot]
+}
+
+function isArchiveYearRoot(folderName: string): boolean {
+  return /^\d{4}年归档资料$/.test(folderName)
+}
+
+function compareArchiveYearsDesc(left: FolderTreeNode, right: FolderTreeNode): number {
+  return right.name.localeCompare(left.name, 'zh-Hans-CN')
 }

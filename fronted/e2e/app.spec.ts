@@ -451,8 +451,8 @@ test('shows project management detail, members, documents and archive', async ({
           id: 20,
           project: 1,
           parent: null,
-          name: '检测报告',
-          code: 'REPORT',
+          name: '竣工档案资料',
+          code: 'PUBLIC-COMPLETION',
           sort_order: 10,
           is_active: true,
           is_system_root: false,
@@ -468,7 +468,15 @@ test('shows project management detail, members, documents and archive', async ({
         count: 1,
         next: null,
         previous: null,
-        results: [{ ...documentFixture, project: 1, project_name: '前端联调示例项目', folder: 20, folder_name: '检测报告' }],
+        results: [
+          {
+            ...documentFixture,
+            project: 1,
+            project_name: '前端联调示例项目',
+            folder: 20,
+            folder_name: '竣工档案资料',
+          },
+        ],
       }),
     })
   })
@@ -491,7 +499,7 @@ test('shows project management detail, members, documents and archive', async ({
   await expect(page.getByRole('cell', { name: '项目负责人' })).toBeVisible()
 
   await page.getByRole('tab', { name: '项目资料' }).click()
-  await expect(page.getByRole('button', { name: '检测报告' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '竣工档案资料' })).toBeVisible()
   await expect(page.getByText('安全生产许可证')).toBeVisible()
 
   await page.getByRole('tab', { name: '归档信息' }).click()

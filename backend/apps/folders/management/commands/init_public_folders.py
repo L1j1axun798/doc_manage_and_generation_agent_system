@@ -2,33 +2,54 @@ from typing import Any
 
 from django.core.management.base import BaseCommand
 
+from apps.folders.defaults import ARCHIVE_ROOT, STANDARD_PUBLIC_ROOTS
 from apps.folders.models import Folder
 
 
 class Command(BaseCommand):
     help = "初始化公共资料基础目录"
 
-    DEFAULT_FOLDERS = [
-        "完工资料档案",
-        "公司资质",
-        "人员资质",
-        "工器具年检资质",
-        "劳动防护用品资料",
-        "仪器设备年检资质",
-        "车辆年检及资质",
-    ]
-
     def handle(self, *args: Any, **options: Any) -> None:
-        for index, name in enumerate(self.DEFAULT_FOLDERS, start=1):
-            Folder.objects.get_or_create(
+        for definition in [*STANDARD_PUBLIC_ROOTS, ARCHIVE_ROOT]:
+            folder = (
+                Folder.objects.filter(
+                    project=None,
+                    parent=None,
+                    name__in=definition.names,
+                )
+                .order_by("id")
+                .first()
+            )
+            if folder is None:
+                folder = Folder.objects.create(
+                    project=None,
+                    parent=None,
+                    name=definition.name,
+                    code=definition.code,
+                    sort_order=definition.sort_order,
+                    is_system_root=True,
+                )
+                continue
+
+            folder.name = definition.name
+            folder.code = definition.code
+            folder.sort_order = definition.sort_order
+            folder.is_system_root = True
+            folder.is_active = True
+            folder.save(
+                update_fields=[
+                    "name",
+                    "code",
+                    "sort_order",
+                    "is_system_root",
+                    "is_active",
+                    "updated_at",
+                ]
+            )
+
+            Folder.objects.filter(
                 project=None,
                 parent=None,
-                name=name,
-                defaults={
-                    "code": f"PUBLIC-{index:02d}",
-                    "sort_order": index,
-                    "is_system_root": True,
-                },
-            )
-            Folder.objects.filter(project=None, parent=None, name=name).update(is_system_root=True)
+                name__in=definition.aliases,
+            ).exclude(pk=folder.pk).update(is_active=False)
         self.stdout.write(self.style.SUCCESS("公共资料基础目录已初始化"))

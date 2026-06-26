@@ -192,7 +192,7 @@ async function unarchiveCurrentProject(): Promise<void> {
       </el-tab-pane>
 
       <el-tab-pane label="项目资料" name="documents">
-        <DocumentExplorer :project-id="project.id" />
+        <DocumentExplorer :project-id="project.id" scope="project" />
       </el-tab-pane>
 
       <el-tab-pane label="归档信息" name="archive">

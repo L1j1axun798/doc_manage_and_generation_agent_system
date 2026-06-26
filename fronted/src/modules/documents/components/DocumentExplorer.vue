@@ -185,7 +185,11 @@ function syncTopFolderSelection(): void {
     return
   }
 
-  const selectedFolderExists = publicRootNodes.some((node) => node.id === selectedFolderId.value)
+  const selectedFolderExists = publicRootNodes.some(
+    (node) =>
+      node.id === selectedFolderId.value ||
+      node.children.some((child) => child.id === selectedFolderId.value),
+  )
   if (!selectedFolderExists) {
     selectedFolderId.value = publicRootNodes[0].id
   }

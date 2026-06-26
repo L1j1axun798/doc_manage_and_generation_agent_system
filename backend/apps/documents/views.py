@@ -1,13 +1,18 @@
 from urllib.parse import quote
 
+from django.db.models import Q
 from django.http import FileResponse
 from drf_spectacular.utils import extend_schema
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError
 from rest_framework.generics import get_object_or_404
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+
+from apps.folders.defaults import ARCHIVE_ROOT, standard_root_for_code, standard_root_for_name
+from apps.folders.models import Folder
 
 from .models import Document
 from .selectors import (
@@ -48,7 +53,7 @@ class DocumentViewSet(
     serializer_class = DocumentSerializer
     parser_classes = [MultiPartParser, FormParser, JSONParser]
     permission_classes = [IsAuthenticated]
-    filterset_fields = ["project", "folder", "access_level"]
+    filterset_fields = ["project", "access_level"]
     search_fields = [
         "title",
         "description",
@@ -62,6 +67,13 @@ class DocumentViewSet(
         if getattr(self, "swagger_fake_view", False):
             return Document.objects.none()
         return visible_documents_for_user(self.request.user)
+
+    def filter_queryset(self, queryset):
+        queryset = super().filter_queryset(queryset)
+        folder_id = self.request.query_params.get("folder")
+        if not folder_id:
+            return queryset
+        return queryset.filter(folder_id__in=descendant_folder_ids(folder_id))
 
     def get_object(self):
         return get_object_or_404(self.get_queryset(), pk=self.kwargs["pk"])
@@ -253,3 +265,45 @@ class DocumentViewSet(
         response["Content-Disposition"] = f"attachment; filename*=UTF-8''{filename}"
         response["Content-Length"] = str(version.file_size)
         return response
+
+
+def descendant_folder_ids(raw_folder_id: str) -> list[int]:
+    try:
+        folder_id = int(raw_folder_id)
+    except (TypeError, ValueError) as exc:
+        raise ValidationError({"folder": "目录参数必须是整数"}) from exc
+
+    folder = Folder.objects.filter(pk=folder_id, is_active=True).first()
+    if folder is None:
+        return [folder_id]
+
+    root_ids = [folder_id]
+    if folder.project_id is None and folder.parent_id is None:
+        definition = standard_root_for_code(folder.code) or standard_root_for_name(folder.name)
+        if definition is not None:
+            equivalent_root_ids = Folder.objects.filter(
+                Q(code=definition.code) | Q(name__in=definition.names),
+                is_active=True,
+            ).values_list("id", flat=True)
+            root_ids.extend(equivalent_root_ids)
+        elif folder.code == ARCHIVE_ROOT.code or folder.name == ARCHIVE_ROOT.name:
+            root_ids.extend(
+                Folder.objects.filter(
+                    is_active=True,
+                    project__isnull=True,
+                    parent=folder,
+                ).values_list("id", flat=True)
+            )
+
+    folder_ids = list(dict.fromkeys(root_ids))
+    frontier = folder_ids.copy()
+    while frontier:
+        child_ids = list(
+            Folder.objects.filter(parent_id__in=frontier, is_active=True).values_list(
+                "id",
+                flat=True,
+            )
+        )
+        frontier = [child_id for child_id in child_ids if child_id not in folder_ids]
+        folder_ids.extend(frontier)
+    return folder_ids

@@ -251,3 +251,42 @@ def test_document_list_filter_by_folder_and_access_level(client, tmp_path, setti
     assert payload["count"] == 1
     assert payload["results"][0]["title"] == "受限报告"
     assert payload["results"][0]["current_version"]["sha256"] == sha256(b"restricted").hexdigest()
+
+
+@pytest.mark.django_db
+def test_public_root_folder_filter_includes_matching_project_folders(client, tmp_path, settings):
+    settings.FILE_STORAGE_ROOT = tmp_path
+    admin = make_user("admin", User.Role.SYSTEM_ADMIN)
+    project = Project.objects.create(name="项目", code="P001", created_by=admin)
+    public_root = Folder.objects.create(
+        name="竣工档案资料",
+        code="PUBLIC-COMPLETION",
+        is_system_root=True,
+        created_by=admin,
+    )
+    project_root = Folder.objects.create(
+        project=project,
+        name="竣工档案资料",
+        code="PUBLIC-COMPLETION",
+        created_by=admin,
+    )
+    legacy_project_folder = Folder.objects.create(
+        project=project,
+        name="检测报告",
+        code="REPORT",
+        created_by=admin,
+    )
+    client.force_login(admin)
+    create_document_via_api(client, folder=project_root, title="标准目录报告", content=b"standard")
+    create_document_via_api(
+        client,
+        folder=legacy_project_folder,
+        title="历史目录报告",
+        content=b"legacy",
+    )
+
+    response = client.get(f"/api/v1/documents/?folder={public_root.id}")
+
+    assert response.status_code == 200
+    titles = {item["title"] for item in response.json()["results"]}
+    assert {"标准目录报告", "历史目录报告"} <= titles

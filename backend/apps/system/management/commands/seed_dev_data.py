@@ -11,11 +11,12 @@ from django.utils import timezone
 from apps.access.models import DocumentGrant
 from apps.documents.models import Document
 from apps.documents.services import create_document
+from apps.folders.defaults import STANDARD_PUBLIC_ROOTS
 from apps.folders.models import Folder
 from apps.notifications.models import Notification
 from apps.notifications.services import create_notification
 from apps.projects.models import Project, ProjectMember
-from apps.projects.services import manager_member_defaults
+from apps.projects.services import ensure_project_standard_folders, manager_member_defaults
 
 User = get_user_model()
 
@@ -78,29 +79,39 @@ class Command(BaseCommand):
                 },
             )
             self._upsert_members(project=project, manager=manager, operator=operator, viewer=viewer)
+            ensure_project_standard_folders(actor=admin, project=project)
 
+            company_root = next(
+                definition
+                for definition in STANDARD_PUBLIC_ROOTS
+                if definition.code == "PUBLIC-COMPANY"
+            )
+            completion_root = next(
+                definition
+                for definition in STANDARD_PUBLIC_ROOTS
+                if definition.code == "PUBLIC-COMPLETION"
+            )
             public_folder, _ = Folder.objects.update_or_create(
                 project=None,
                 parent=None,
-                name="公司资质",
+                code=company_root.code,
                 defaults={
-                    "code": "QUALIFICATION",
+                    "name": company_root.name,
                     "is_system_root": True,
-                    "sort_order": 10,
+                    "sort_order": company_root.sort_order,
                     "created_by": admin,
                 },
             )
-            process_folder, _ = Folder.objects.update_or_create(
-                project=project,
-                parent=None,
-                name="过程资料",
-                defaults={"code": "PROCESS", "sort_order": 10, "created_by": admin},
-            )
             report_folder, _ = Folder.objects.update_or_create(
                 project=project,
-                parent=process_folder,
-                name="检测报告",
-                defaults={"code": "REPORT", "sort_order": 20, "created_by": admin},
+                parent=None,
+                code=completion_root.code,
+                defaults={
+                    "name": completion_root.name,
+                    "sort_order": completion_root.sort_order,
+                    "created_by": admin,
+                    "is_active": True,
+                },
             )
 
             public_document = self._ensure_document(
