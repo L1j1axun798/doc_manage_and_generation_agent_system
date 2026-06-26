@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Search } from '@element-plus/icons-vue'
+import { Moon, Search, Sunny } from '@element-plus/icons-vue'
 import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
@@ -13,11 +13,19 @@ const router = useRouter()
 const authStore = useAuthStore()
 const menuItems = computed(() => buildMainMenu(authStore.user?.role))
 const globalSearch = ref('')
+const THEME_STORAGE_KEY = 'wind-doc-system.theme'
 
 const activeMenu = computed(() => route.meta.activeMenu || route.path)
-const userDisplayName = computed(() => authStore.user?.real_name || authStore.user?.username || '')
+const username = computed(() => authStore.user?.username || '-')
 const roleLabel = computed(() => (authStore.user ? getRoleLabel(authStore.user.role) : ''))
 const canUseGlobalSearch = computed(() => authStore.user?.role !== 'temporary_user')
+const avatarInitial = computed(() => {
+  const source = authStore.user?.real_name?.trim() || authStore.user?.username?.trim() || ''
+  return source.slice(0, 1).toUpperCase() || '-'
+})
+const themeMode = ref<ThemeMode>(resolveInitialTheme())
+const isDarkTheme = computed(() => themeMode.value === 'dark')
+const themeToggleLabel = computed(() => (isDarkTheme.value ? '切换浅色模式' : '切换深色模式'))
 
 function handleMenuSelect(index: string): void {
   void router.push(index)
@@ -48,6 +56,45 @@ async function handleCommand(command: string): Promise<void> {
     await router.replace('/login')
   }
 }
+
+type ThemeMode = 'light' | 'dark'
+
+function resolveInitialTheme(): ThemeMode {
+  if (typeof window === 'undefined') {
+    return 'light'
+  }
+
+  try {
+    const storedTheme = window.localStorage.getItem(THEME_STORAGE_KEY)
+    if (storedTheme === 'light' || storedTheme === 'dark') {
+      return storedTheme
+    }
+  } catch {
+    // Ignore unavailable storage and use the default light theme.
+  }
+
+  return 'light'
+}
+
+function applyTheme(mode: ThemeMode): void {
+  if (typeof document !== 'undefined') {
+    document.documentElement.dataset.theme = mode
+    document.documentElement.style.colorScheme = mode
+  }
+
+  try {
+    window.localStorage.setItem(THEME_STORAGE_KEY, mode)
+  } catch {
+    // Theme switching should still work even if persistence is unavailable.
+  }
+}
+
+function toggleTheme(): void {
+  themeMode.value = isDarkTheme.value ? 'light' : 'dark'
+  applyTheme(themeMode.value)
+}
+
+applyTheme(themeMode.value)
 </script>
 
 <template>
@@ -95,10 +142,27 @@ async function handleCommand(command: string): Promise<void> {
           <el-button type="primary" @click="submitGlobalSearch">全局搜索</el-button>
         </div>
 
+        <el-tooltip :content="themeToggleLabel" placement="bottom">
+          <el-button
+            :aria-label="themeToggleLabel"
+            circle
+            class="main-layout__theme-toggle"
+            :title="themeToggleLabel"
+            @click="toggleTheme"
+          >
+            <el-icon>
+              <component :is="isDarkTheme ? Sunny : Moon" />
+            </el-icon>
+          </el-button>
+        </el-tooltip>
+
         <el-dropdown class="main-layout__user" trigger="click" @command="handleCommand">
           <button class="main-layout__user-button" type="button">
-            <span>{{ userDisplayName }}</span>
-            <small>{{ roleLabel }}</small>
+            <span class="main-layout__user-avatar" aria-hidden="true">{{ avatarInitial }}</span>
+            <span class="main-layout__user-meta">
+              <span class="main-layout__user-name">{{ username }}</span>
+              <small>{{ roleLabel }}</small>
+            </span>
           </button>
           <template #dropdown>
             <el-dropdown-menu>

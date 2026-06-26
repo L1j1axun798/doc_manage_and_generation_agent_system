@@ -4,4 +4,26 @@
   --color-border: #d9dee5;
   --color-text-primary: #1f2933;
   --color-text-secondary: #687382;
+  --color-control-bg: #ffffff;
+  --color-control-hover-bg: #f3f7f5;
+}
+
+:root[data-theme='dark'] {
+  --color-bg-page: #111713;
+  --color-bg-surface: #18211d;
+  --color-border: #334139;
+  --color-text-primary: #eef4ef;
+  --color-text-secondary: #a7b8ae;
+  --color-control-bg: #202b26;
+  --color-control-hover-bg: #29372f;
+  --el-bg-color: #18211d;
+  --el-bg-color-page: #111713;
+  --el-bg-color-overlay: #202b26;
+  --el-border-color: #334139;
+  --el-border-color-light: #3f4d45;
+  --el-fill-color-blank: #18211d;
+  --el-fill-color-light: #202b26;
+  --el-text-color-primary: #eef4ef;
+  --el-text-color-regular: #d5ded8;
+  --el-text-color-secondary: #a7b8ae;
 }
