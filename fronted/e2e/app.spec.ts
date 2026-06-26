@@ -17,7 +17,7 @@ test('redirects anonymous users from root to login', async ({ page }) => {
 
   await page.goto('/')
 
-  await expect(page.getByRole('heading', { name: '风电资料系统' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '绿能信盾资料管理系统' })).toBeVisible()
   await expect(page.getByRole('button', { name: '登录' })).toBeVisible()
   await expect(page).toHaveURL(/\/login/)
 })

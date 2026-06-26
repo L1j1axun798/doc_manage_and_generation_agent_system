@@ -79,8 +79,6 @@ async function handleCommand(command: string): Promise<void> {
 
     <el-container>
       <el-header class="main-layout__header" height="56px">
-        <div class="main-layout__header-title">{{ route.meta.title }}</div>
-
         <div v-if="canUseGlobalSearch" class="main-layout__global-search" role="search">
           <el-input
             v-model="globalSearch"

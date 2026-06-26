@@ -23,6 +23,6 @@ it('mounts the dashboard route', async () => {
     },
   })
 
-  expect(wrapper.text()).toContain('风电资料系统')
+  expect(wrapper.text()).toContain('绿能信盾资料管理系统')
   expect(wrapper.text()).toContain('登录')
 })

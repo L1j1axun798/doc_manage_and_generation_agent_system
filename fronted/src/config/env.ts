@@ -1,4 +1,4 @@
-const DEFAULT_APP_TITLE = '绿能信盾(保定)资料管系统'
+const DEFAULT_APP_TITLE = '绿能信盾资料管理系统'
 const DEFAULT_API_BASE_URL = '/api/v1'
 
 export function normalizeApiBaseUrl(value: string): string {

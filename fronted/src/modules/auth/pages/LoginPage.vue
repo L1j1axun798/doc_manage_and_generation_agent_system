@@ -45,8 +45,8 @@ async function submitLogin(): Promise<void> {
       <div class="login-page__brand">
         <span class="login-page__brand-mark" aria-hidden="true">W</span>
         <div>
-          <p>Wind Document System</p>
-          <h1 id="login-title">风电资料系统</h1>
+          <!-- <p>Wind Document System</p> -->
+          <h1 id="login-title">绿能信盾资料管理系统</h1>
         </div>
       </div>
 
@@ -55,7 +55,7 @@ async function submitLogin(): Promise<void> {
           <el-input
             v-model="form.username"
             autocomplete="username"
-            placeholder="请输入用户名"
+            placeholder="请输入用户名/手机号"
             size="large"
           />
         </el-form-item>
@@ -64,7 +64,7 @@ async function submitLogin(): Promise<void> {
           <el-input
             v-model="form.password"
             autocomplete="current-password"
-            placeholder="请输入密码"
+            placeholder="请输入您的密码"
             show-password
             size="large"
             type="password"

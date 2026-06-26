@@ -38,8 +38,8 @@ onMounted(async () => {
 <template>
   <section class="dashboard-page">
     <header class="dashboard-page__header">
-      <p class="dashboard-page__eyebrow">Wind Document System</p>
-      <h1>风电资料系统</h1>
+      <!-- <p class="dashboard-page__eyebrow">Wind Document System</p> -->
+      <h1>绿能信盾资料管理系统</h1>
     </header>
 
     <div class="dashboard-page__metrics" aria-label="首页概览">

@@ -26,7 +26,7 @@ backend/
 
 ## 开发环境
 
-执行后端命令前，先激活项目虚拟环境：
+执行前端、后端命令前，先激活项目虚拟环境：
 
 ```bash
 conda activate doc_system

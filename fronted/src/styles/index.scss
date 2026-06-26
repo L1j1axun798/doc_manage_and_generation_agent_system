@@ -71,13 +71,6 @@ body {
   background: var(--color-bg-surface);
 }
 
-.main-layout__header-title {
-  flex: 0 0 auto;
-  color: var(--color-text-primary);
-  font-size: 16px;
-  font-weight: 700;
-}
-
 .main-layout__global-search {
   display: grid;
   grid-template-columns: minmax(180px, 280px) auto;
