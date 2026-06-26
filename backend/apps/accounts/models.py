@@ -7,6 +7,7 @@ class User(AbstractUser):
         SYSTEM_ADMIN = "system_admin", "系统管理员"
         PROJECT_MANAGER = "project_manager", "项目负责人"
         DATA_OPERATOR = "data_operator", "资料整理员"
+        TEMPORARY_USER = "temporary_user", "临时用户"
 
     real_name = models.CharField("真实姓名", max_length=80)
     employee_no = models.CharField("员工编号", max_length=50, unique=True, null=True, blank=True)
@@ -28,3 +29,7 @@ class User(AbstractUser):
     @property
     def is_system_admin(self) -> bool:
         return self.is_superuser or self.role == self.Role.SYSTEM_ADMIN
+
+    @property
+    def is_temporary_user(self) -> bool:
+        return self.role == self.Role.TEMPORARY_USER

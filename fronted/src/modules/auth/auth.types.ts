@@ -1,4 +1,4 @@
-export type UserRole = 'system_admin' | 'project_manager' | 'data_operator'
+export type UserRole = 'system_admin' | 'project_manager' | 'data_operator' | 'temporary_user'
 
 export interface AuthUser {
   id: number

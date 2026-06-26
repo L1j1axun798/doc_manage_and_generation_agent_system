@@ -43,6 +43,16 @@ export function installRouterGuards(router: Router): void {
         }
       }
 
+      if (
+        authStore.user?.role === 'temporary_user'
+        && to.meta.layout === 'main'
+        && to.name !== 'change-password'
+      ) {
+        return {
+          path: '/403',
+        }
+      }
+
       const allowedRoles = to.meta.roles
       if (allowedRoles && authStore.user && !allowedRoles.includes(authStore.user.role)) {
         return {
@@ -55,7 +65,10 @@ export function installRouterGuards(router: Router): void {
       await authStore.initializeSession()
 
       if (authStore.isAuthenticated) {
-        return authStore.user?.must_change_password ? '/change-password' : '/dashboard'
+        if (authStore.user?.must_change_password) {
+          return '/change-password'
+        }
+        return authStore.user?.role === 'temporary_user' ? '/403' : '/dashboard'
       }
     }
 

@@ -7,6 +7,8 @@ from .models import Document
 
 
 def can_upload_document(user: Any, project: Project | None) -> bool:
+    if getattr(user, "is_temporary_user", False):
+        return False
     if getattr(user, "is_system_admin", False):
         return True
     if project is None:
@@ -16,6 +18,8 @@ def can_upload_document(user: Any, project: Project | None) -> bool:
 
 
 def can_download_document(user: Any, document: Document) -> bool:
+    if getattr(user, "is_temporary_user", False):
+        return False
     if getattr(user, "is_system_admin", False):
         return True
     if _has_active_grant(user, document, "download"):
@@ -29,6 +33,8 @@ def can_download_document(user: Any, document: Document) -> bool:
 
 
 def can_view_document(user: Any, document: Document) -> bool:
+    if getattr(user, "is_temporary_user", False):
+        return False
     if getattr(user, "is_system_admin", False):
         return True
     if _has_active_grant(user, document, "view"):
@@ -42,6 +48,8 @@ def can_view_document(user: Any, document: Document) -> bool:
 
 
 def can_update_document(user: Any, document: Document) -> bool:
+    if getattr(user, "is_temporary_user", False):
+        return False
     if getattr(user, "is_system_admin", False):
         return True
     if _has_active_grant(user, document, "update"):
@@ -53,6 +61,8 @@ def can_update_document(user: Any, document: Document) -> bool:
 
 
 def can_delete_document(user: Any, document: Document) -> bool:
+    if getattr(user, "is_temporary_user", False):
+        return False
     if getattr(user, "is_system_admin", False):
         return True
     if _has_active_grant(user, document, "delete"):
@@ -64,6 +74,8 @@ def can_delete_document(user: Any, document: Document) -> bool:
 
 
 def can_restore_document(user: Any, document: Document) -> bool:
+    if getattr(user, "is_temporary_user", False):
+        return False
     if getattr(user, "is_system_admin", False):
         return True
     if _has_active_grant(user, document, "restore"):
@@ -75,6 +87,8 @@ def can_restore_document(user: Any, document: Document) -> bool:
 
 
 def can_permanently_delete_document(user: Any, document: Document) -> bool:
+    if getattr(user, "is_temporary_user", False):
+        return False
     return bool(getattr(user, "is_system_admin", False))
 
 

@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { Search } from '@element-plus/icons-vue'
+import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { appConfig } from '@/config/app'
@@ -11,13 +12,29 @@ const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
 const menuItems = computed(() => buildMainMenu(authStore.user?.role))
+const globalSearch = ref('')
 
 const activeMenu = computed(() => route.meta.activeMenu || route.path)
 const userDisplayName = computed(() => authStore.user?.real_name || authStore.user?.username || '')
 const roleLabel = computed(() => (authStore.user ? getRoleLabel(authStore.user.role) : ''))
+const canUseGlobalSearch = computed(() => authStore.user?.role !== 'temporary_user')
 
 function handleMenuSelect(index: string): void {
   void router.push(index)
+}
+
+function submitGlobalSearch(): void {
+  const keyword = globalSearch.value.trim()
+  if (!keyword) {
+    return
+  }
+
+  void router.push({
+    path: '/documents',
+    query: {
+      search: keyword,
+    },
+  })
 }
 
 async function handleCommand(command: string): Promise<void> {
@@ -63,6 +80,22 @@ async function handleCommand(command: string): Promise<void> {
     <el-container>
       <el-header class="main-layout__header" height="56px">
         <div class="main-layout__header-title">{{ route.meta.title }}</div>
+
+        <div v-if="canUseGlobalSearch" class="main-layout__global-search" role="search">
+          <el-input
+            v-model="globalSearch"
+            clearable
+            placeholder="全局搜索资料"
+            @keyup.enter="submitGlobalSearch"
+          >
+            <template #prefix>
+              <el-icon>
+                <Search />
+              </el-icon>
+            </template>
+          </el-input>
+          <el-button type="primary" @click="submitGlobalSearch">全局搜索</el-button>
+        </div>
 
         <el-dropdown class="main-layout__user" trigger="click" @command="handleCommand">
           <button class="main-layout__user-button" type="button">

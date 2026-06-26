@@ -79,22 +79,16 @@ class Command(BaseCommand):
             )
             self._upsert_members(project=project, manager=manager, operator=operator, viewer=viewer)
 
-            public_root, _ = Folder.objects.update_or_create(
-                name="开发公共资料",
-                project=None,
-                parent=None,
-                defaults={
-                    "code": "DEV_PUBLIC",
-                    "is_system_root": True,
-                    "is_active": True,
-                    "created_by": admin,
-                },
-            )
             public_folder, _ = Folder.objects.update_or_create(
                 project=None,
-                parent=public_root,
+                parent=None,
                 name="公司资质",
-                defaults={"code": "QUALIFICATION", "sort_order": 10, "created_by": admin},
+                defaults={
+                    "code": "QUALIFICATION",
+                    "is_system_root": True,
+                    "sort_order": 10,
+                    "created_by": admin,
+                },
             )
             process_folder, _ = Folder.objects.update_or_create(
                 project=project,

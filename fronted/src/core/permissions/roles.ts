@@ -4,6 +4,7 @@ export const ROLE_LABELS: Record<UserRole, string> = {
   system_admin: '系统管理员',
   project_manager: '项目负责人',
   data_operator: '资料整理员',
+  temporary_user: '临时用户',
 }
 
 export function getRoleLabel(role: UserRole): string {

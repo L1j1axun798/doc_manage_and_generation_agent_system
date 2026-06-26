@@ -18,6 +18,8 @@ def base_documents_for_user(user: Any, *, include_deleted: bool = False) -> Quer
     )
     if not include_deleted:
         queryset = queryset.filter(deleted_at__isnull=True)
+    if getattr(user, "is_temporary_user", False):
+        return queryset.none()
     if getattr(user, "is_system_admin", False):
         return queryset
     visible_project_ids = visible_projects_for_user(user).values("id")

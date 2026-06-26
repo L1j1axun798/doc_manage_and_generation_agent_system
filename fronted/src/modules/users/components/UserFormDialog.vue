@@ -34,7 +34,12 @@ const form = reactive<UserCreatePayload>({
 })
 
 const isEdit = computed(() => Boolean(props.user))
-const title = computed(() => (isEdit.value ? '编辑用户' : '创建用户'))
+const title = computed(() => {
+  if (isEdit.value) {
+    return '编辑用户'
+  }
+  return '创建用户'
+})
 
 watch(
   () => [props.modelValue, props.user] as const,
@@ -89,11 +94,19 @@ function submit(): void {
   })
 }
 
-const roleOptions: Array<{ label: string; value: UserRole }> = [
-  { label: '系统管理员', value: 'system_admin' },
-  { label: '项目负责人', value: 'project_manager' },
-  { label: '资料整理员', value: 'data_operator' },
-]
+const roleOptions = computed<Array<{ label: string; value: UserRole }>>(() => {
+  const options: Array<{ label: string; value: UserRole }> = [
+    { label: '系统管理员', value: 'system_admin' },
+    { label: '项目负责人', value: 'project_manager' },
+    { label: '资料整理员', value: 'data_operator' },
+  ]
+
+  if (props.user?.role === 'temporary_user') {
+    options.push({ label: '临时用户', value: 'temporary_user' })
+  }
+
+  return options
+})
 </script>
 
 <template>

@@ -3,11 +3,18 @@ import { formatDateTime, formatFileSize } from '@/shared/utils/format'
 import type { DocumentItem } from '../documents.types'
 import AccessLevelTag from './AccessLevelTag.vue'
 
-defineProps<{
-  documents: DocumentItem[]
-  loading?: boolean
-  mode?: 'active' | 'trash'
-}>()
+withDefaults(
+  defineProps<{
+    documents: DocumentItem[]
+    fixedActions?: boolean
+    height?: number | string
+    loading?: boolean
+    mode?: 'active' | 'trash'
+  }>(),
+  {
+    fixedActions: true,
+  },
+)
 
 const emit = defineEmits<{
   view: [document: DocumentItem]
@@ -24,6 +31,7 @@ const emit = defineEmits<{
   <el-table
     class="document-table"
     :data="documents"
+    :height="height"
     :loading="loading"
     row-key="id"
   >
@@ -58,7 +66,7 @@ const emit = defineEmits<{
       </template>
     </el-table-column>
 
-    <el-table-column label="操作" fixed="right" width="260">
+    <el-table-column label="操作" :fixed="fixedActions ? 'right' : false" width="260">
       <template #default="{ row }: { row: DocumentItem }">
         <el-button link type="primary" @click="emit('view', row)">详情</el-button>
         <template v-if="mode === 'trash'">

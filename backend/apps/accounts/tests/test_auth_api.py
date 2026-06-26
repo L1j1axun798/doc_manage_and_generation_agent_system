@@ -36,6 +36,35 @@ def test_admin_can_create_user(client):
 
 
 @pytest.mark.django_db
+def test_admin_can_create_temporary_user(client):
+    admin = User.objects.create_user(
+        username="admin",
+        password="AdminPass123!",
+        real_name="管理员",
+        role=User.Role.SYSTEM_ADMIN,
+    )
+    client.force_login(admin)
+
+    response = client.post(
+        "/api/v1/users/",
+        {
+            "username": "temp-user",
+            "password": "TempUserPass123!",
+            "real_name": "临时用户",
+            "role": User.Role.TEMPORARY_USER,
+            "must_change_password": False,
+        },
+        content_type="application/json",
+    )
+
+    assert response.status_code == 201
+    user = User.objects.get(username="temp-user")
+    assert user.role == User.Role.TEMPORARY_USER
+    assert user.is_temporary_user is True
+    assert user.check_password("TempUserPass123!")
+
+
+@pytest.mark.django_db
 def test_non_admin_cannot_create_user(client):
     user = User.objects.create_user(
         username="operator",

@@ -21,6 +21,8 @@ class FolderTreeNode(TypedDict):
 
 def visible_folders_for_user(user: Any) -> QuerySet[Folder]:
     queryset = Folder.objects.select_related("project", "parent", "created_by")
+    if getattr(user, "is_temporary_user", False):
+        return queryset.none()
     if getattr(user, "is_system_admin", False):
         return queryset
     visible_project_ids = visible_projects_for_user(user).values("id")

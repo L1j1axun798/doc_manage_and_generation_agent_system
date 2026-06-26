@@ -160,7 +160,9 @@ async function submitResetPassword(newPassword?: string): Promise<void> {
         <h1>用户管理</h1>
         <p>维护系统账号、角色、状态和首次登录改密要求。</p>
       </div>
-      <el-button type="primary" @click="openCreate">创建用户</el-button>
+      <div class="user-page__header-actions">
+        <el-button type="primary" @click="openCreate">创建用户</el-button>
+      </div>
     </header>
 
     <section class="user-page__search">

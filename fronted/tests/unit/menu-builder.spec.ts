@@ -15,3 +15,7 @@ it('hides administrator-only menus from data operators', () => {
   expect(menuTitles).not.toContain('用户管理')
   expect(menuTitles).not.toContain('审计中心')
 })
+
+it('does not expose main menus to temporary users', () => {
+  expect(buildMainMenu('temporary_user')).toEqual([])
+})

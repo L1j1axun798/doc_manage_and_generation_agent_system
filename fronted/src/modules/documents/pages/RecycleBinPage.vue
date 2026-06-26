@@ -9,6 +9,6 @@ import DocumentExplorer from '../components/DocumentExplorer.vue'
       <p>查看已删除资料，并按后端权限恢复。</p>
     </header>
 
-    <DocumentExplorer mode="trash" />
+    <DocumentExplorer mode="trash" :show-folders="false" />
   </section>
 </template>

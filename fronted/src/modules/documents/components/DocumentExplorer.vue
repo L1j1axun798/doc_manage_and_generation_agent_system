@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { computed, onMounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 
 import { getErrorMessage } from '@/core/http/error-normalizer'
 import type { ApiPage } from '@/shared/types/api.types'
@@ -33,16 +34,37 @@ import DocumentTable from './DocumentTable.vue'
 import DocumentUploadDialog from './DocumentUploadDialog.vue'
 import DocumentVersionUploadDialog from './DocumentVersionUploadDialog.vue'
 import FolderTree from './FolderTree.vue'
+import { getPublicRootFolderNodes } from '../utils/public-root-folders'
 
 const props = withDefaults(
   defineProps<{
+    folderLayout?: 'side' | 'top'
     mode?: 'active' | 'trash'
+    showFolders?: boolean
+    scope?: 'all' | 'public' | 'project'
+    syncSearchQuery?: boolean
     projectId?: number
   }>(),
   {
+    folderLayout: 'side',
     mode: 'active',
+    showFolders: true,
+    scope: 'all',
+    syncSearchQuery: false,
   },
 )
+
+const route = useRoute()
+
+function resolveFolderTreeParam(): number | 'public' | undefined {
+  if (props.scope === 'public') {
+    return 'public'
+  }
+  if (props.scope === 'project') {
+    return props.projectId
+  }
+  return undefined
+}
 
 const folderTree = ref<FolderTreeNode[]>([])
 const selectedFolderId = ref<number>()
@@ -63,37 +85,109 @@ const editVisible = ref(false)
 const moveVisible = ref(false)
 const versionVisible = ref(false)
 const mutationLoading = ref(false)
+const suppressNextFolderReload = ref(false)
 
 const isEmpty = computed(() => !listLoading.value && documents.value.length === 0)
 const isTrashMode = computed(() => props.mode === 'trash')
+const isTopPublicFolderMode = computed(
+  () => props.showFolders && props.folderLayout === 'top' && props.scope === 'public',
+)
 
 onMounted(async () => {
-  await Promise.all([loadFolderTree(), loadDocuments()])
+  applyRouteSearch(false)
+  await Promise.all([props.showFolders ? loadFolderTree() : Promise.resolve(), loadDocuments()])
 })
 
 watch(
-  () => props.projectId,
+  () => [props.showFolders, props.scope, props.projectId] as const,
   () => {
     selectedFolderId.value = undefined
     page.value = 1
-    void Promise.all([loadFolderTree(), loadDocuments()])
+    folderTree.value = []
+    void Promise.all([props.showFolders ? loadFolderTree() : Promise.resolve(), loadDocuments()])
   },
 )
 
 watch(selectedFolderId, () => {
+  if (suppressNextFolderReload.value) {
+    suppressNextFolderReload.value = false
+    return
+  }
+
   page.value = 1
   void loadDocuments()
 })
 
+watch(
+  () => (props.syncSearchQuery ? route.query.search : undefined),
+  () => {
+    applyRouteSearch(true)
+  },
+)
+
+function getRouteSearch(): string {
+  return typeof route.query.search === 'string' ? route.query.search : ''
+}
+
+function applyRouteSearch(reload: boolean): void {
+  if (!props.syncSearchQuery) {
+    return
+  }
+
+  const nextSearch = getRouteSearch()
+  if (search.value === nextSearch) {
+    return
+  }
+
+  search.value = nextSearch
+  if (selectedFolderId.value !== undefined) {
+    suppressNextFolderReload.value = true
+    selectedFolderId.value = undefined
+  }
+  page.value = 1
+
+  if (reload) {
+    void loadDocuments()
+  }
+}
+
 async function loadFolderTree(): Promise<void> {
+  if (!props.showFolders) {
+    folderTree.value = []
+    return
+  }
+
   treeLoading.value = true
 
   try {
-    folderTree.value = await fetchFolderTree(props.projectId)
+    folderTree.value = await fetchFolderTree(resolveFolderTreeParam())
+    syncTopFolderSelection()
   } catch (error) {
     ElMessage.error(getErrorMessage(error))
   } finally {
     treeLoading.value = false
+  }
+}
+
+function syncTopFolderSelection(): void {
+  if (!isTopPublicFolderMode.value) {
+    return
+  }
+
+  if (props.syncSearchQuery && search.value.trim()) {
+    selectedFolderId.value = undefined
+    return
+  }
+
+  const publicRootNodes = getPublicRootFolderNodes(folderTree.value)
+  if (publicRootNodes.length === 0) {
+    selectedFolderId.value = undefined
+    return
+  }
+
+  const selectedFolderExists = publicRootNodes.some((node) => node.id === selectedFolderId.value)
+  if (!selectedFolderExists) {
+    selectedFolderId.value = publicRootNodes[0].id
   }
 }
 
@@ -105,8 +199,8 @@ async function loadDocuments(): Promise<void> {
       page: page.value,
       search: search.value,
       ordering: ordering.value,
-      project: props.projectId,
-      folder: selectedFolderId.value,
+      project: props.scope === 'project' ? props.projectId : undefined,
+      folder: props.showFolders ? selectedFolderId.value : undefined,
       access_level: accessLevel.value || undefined,
     }
     const response: ApiPage<DocumentItem> = isTrashMode.value
@@ -296,37 +390,48 @@ async function handleRestore(document: DocumentItem): Promise<void> {
 </script>
 
 <template>
-  <section class="document-explorer">
+  <section
+    class="document-explorer"
+    :class="[`document-explorer--${folderLayout}`, { 'document-explorer--no-folders': !showFolders }]"
+  >
     <FolderTree
+      v-if="showFolders"
       v-model="selectedFolderId"
+      :presentation="folderLayout"
       :loading="treeLoading"
       :nodes="folderTree"
     />
 
     <div class="document-explorer__workspace">
-      <DocumentSearchPanel
-        v-model:access-level="accessLevel"
-        v-model:ordering="ordering"
-        v-model:search="search"
-        :loading="listLoading"
-        @reset="resetFilters"
-        @submit="submitSearch"
-      />
+      <slot name="header" />
 
-      <div class="document-explorer__toolbar">
-        <el-button
-          v-if="!isTrashMode"
-          type="primary"
-          @click="uploadVisible = true"
-        >
-          上传资料
-        </el-button>
-        <RouterLink v-if="!isTrashMode" to="/documents/recycle-bin">回收站</RouterLink>
-        <RouterLink v-else to="/documents">返回资料中心</RouterLink>
+      <div class="document-explorer__actions">
+        <DocumentSearchPanel
+          v-model:access-level="accessLevel"
+          v-model:ordering="ordering"
+          v-model:search="search"
+          :loading="listLoading"
+          @reset="resetFilters"
+          @submit="submitSearch"
+        />
+
+        <div class="document-explorer__toolbar">
+          <el-button
+            v-if="!isTrashMode"
+            type="primary"
+            @click="uploadVisible = true"
+          >
+            上传资料
+          </el-button>
+          <RouterLink v-if="!isTrashMode" to="/documents/recycle-bin">回收站</RouterLink>
+          <RouterLink v-else to="/documents">返回资料中心</RouterLink>
+        </div>
       </div>
 
       <DocumentTable
         :documents="documents"
+        :fixed-actions="folderLayout !== 'top'"
+        :height="folderLayout === 'top' ? 480 : undefined"
         :loading="listLoading"
         :mode="props.mode"
         @delete="handleDelete"
@@ -338,7 +443,7 @@ async function handleRestore(document: DocumentItem): Promise<void> {
         @view="openDocumentDetail"
       />
 
-      <el-empty v-if="isEmpty" description="暂无资料" />
+      <el-empty v-if="isEmpty && folderLayout !== 'top'" description="暂无资料" />
 
       <footer class="document-explorer__pagination">
         <el-pagination

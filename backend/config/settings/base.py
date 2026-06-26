@@ -146,6 +146,7 @@ SPECTACULAR_SETTINGS = {
             ("system_admin", "系统管理员"),
             ("project_manager", "项目负责人"),
             ("data_operator", "资料整理员"),
+            ("temporary_user", "临时用户"),
         ],
         "ProjectStatusEnum": [
             ("active", "进行中"),

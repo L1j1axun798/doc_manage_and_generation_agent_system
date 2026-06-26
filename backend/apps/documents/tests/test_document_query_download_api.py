@@ -78,6 +78,29 @@ def test_document_list_is_paginated_searchable_and_filtered_by_visibility(
 
 
 @pytest.mark.django_db
+def test_temporary_user_cannot_search_or_download_regular_documents(client, tmp_path, settings):
+    settings.FILE_STORAGE_ROOT = tmp_path
+    admin = make_user("admin", User.Role.SYSTEM_ADMIN)
+    temporary_user = make_user("temp", User.Role.TEMPORARY_USER)
+    folder = Folder.objects.create(name="公司资质", is_system_root=True, created_by=admin)
+    client.force_login(admin)
+    document = create_document_via_api(
+        client,
+        folder=folder,
+        title="安全生产许可证",
+        content=b"public internal document",
+    )
+    client.force_login(temporary_user)
+
+    list_response = client.get("/api/v1/documents/?search=许可证")
+    download_response = client.get(f"/api/v1/documents/{document['id']}/download/")
+
+    assert list_response.status_code == 200
+    assert list_response.json()["count"] == 0
+    assert download_response.status_code == 404
+
+
+@pytest.mark.django_db
 def test_internal_document_current_version_downloads_and_writes_audit(
     client,
     tmp_path,
