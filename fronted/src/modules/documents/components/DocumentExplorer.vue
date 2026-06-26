@@ -41,6 +41,7 @@ const props = withDefaults(
     folderLayout?: 'side' | 'top'
     mode?: 'active' | 'trash'
     showFolders?: boolean
+    showFolderNavigation?: boolean
     scope?: 'all' | 'public' | 'project'
     syncSearchQuery?: boolean
     projectId?: number
@@ -49,6 +50,7 @@ const props = withDefaults(
     folderLayout: 'side',
     mode: 'active',
     showFolders: true,
+    showFolderNavigation: true,
     scope: 'all',
     syncSearchQuery: false,
   },
@@ -89,8 +91,9 @@ const suppressNextFolderReload = ref(false)
 
 const isEmpty = computed(() => !listLoading.value && documents.value.length === 0)
 const isTrashMode = computed(() => props.mode === 'trash')
+const shouldShowFolderNavigation = computed(() => props.showFolders && props.showFolderNavigation)
 const isTopPublicFolderMode = computed(
-  () => props.showFolders && props.folderLayout === 'top' && props.scope === 'public',
+  () => shouldShowFolderNavigation.value && props.folderLayout === 'top' && props.scope === 'public',
 )
 
 onMounted(async () => {
@@ -204,7 +207,7 @@ async function loadDocuments(): Promise<void> {
       search: search.value,
       ordering: ordering.value,
       project: props.scope === 'project' ? props.projectId : undefined,
-      folder: props.showFolders ? selectedFolderId.value : undefined,
+      folder: shouldShowFolderNavigation.value ? selectedFolderId.value : undefined,
       access_level: accessLevel.value || undefined,
     }
     const response: ApiPage<DocumentItem> = isTrashMode.value
@@ -396,10 +399,13 @@ async function handleRestore(document: DocumentItem): Promise<void> {
 <template>
   <section
     class="document-explorer"
-    :class="[`document-explorer--${folderLayout}`, { 'document-explorer--no-folders': !showFolders }]"
+    :class="[
+      `document-explorer--${folderLayout}`,
+      { 'document-explorer--no-folders': !shouldShowFolderNavigation },
+    ]"
   >
     <FolderTree
-      v-if="showFolders"
+      v-if="shouldShowFolderNavigation"
       v-model="selectedFolderId"
       :presentation="folderLayout"
       :loading="treeLoading"

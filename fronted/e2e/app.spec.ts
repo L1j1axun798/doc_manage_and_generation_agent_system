@@ -499,7 +499,7 @@ test('shows project management detail, members, documents and archive', async ({
   await expect(page.getByRole('cell', { name: '项目负责人' })).toBeVisible()
 
   await page.getByRole('tab', { name: '项目资料' }).click()
-  await expect(page.getByRole('button', { name: '竣工档案资料' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '竣工档案资料' })).toHaveCount(0)
   await expect(page.getByText('安全生产许可证')).toBeVisible()
 
   await page.getByRole('tab', { name: '归档信息' }).click()
