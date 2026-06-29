@@ -1,9 +1,11 @@
 <script setup lang="ts">
+import { Close } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 
 import { getErrorMessage } from '@/core/http/error-normalizer'
+import { useAuthStore } from '@/modules/auth/stores/auth.store'
 import type { ApiPage } from '@/shared/types/api.types'
 import {
   deleteDocument,
@@ -17,7 +19,7 @@ import {
   uploadDocument,
   uploadDocumentVersion,
 } from '../api/documents.api'
-import { fetchFolderTree } from '../api/folders.api'
+import { createFolder, fetchFolderTree } from '../api/folders.api'
 import type {
   DocumentAccessLevel,
   DocumentItem,
@@ -34,7 +36,10 @@ import DocumentTable from './DocumentTable.vue'
 import DocumentUploadDialog from './DocumentUploadDialog.vue'
 import DocumentVersionUploadDialog from './DocumentVersionUploadDialog.vue'
 import FolderTree from './FolderTree.vue'
-import { getPublicRootFolderNodes } from '../utils/public-root-folders'
+import {
+  getPublicRootFolderNodes,
+  type PublicRootFolderNode,
+} from '../utils/public-root-folders'
 
 const props = withDefaults(
   defineProps<{
@@ -57,6 +62,7 @@ const props = withDefaults(
 )
 
 const route = useRoute()
+const authStore = useAuthStore()
 
 function resolveFolderTreeParam(): number | 'public' | undefined {
   if (props.scope === 'public') {
@@ -88,6 +94,7 @@ const moveVisible = ref(false)
 const versionVisible = ref(false)
 const mutationLoading = ref(false)
 const suppressNextFolderReload = ref(false)
+const hiddenDocumentResultsFolderId = ref<number>()
 
 const isEmpty = computed(() => !listLoading.value && documents.value.length === 0)
 const isTrashMode = computed(() => props.mode === 'trash')
@@ -95,6 +102,61 @@ const shouldShowFolderNavigation = computed(() => props.showFolders && props.sho
 const isTopPublicFolderMode = computed(
   () => shouldShowFolderNavigation.value && props.folderLayout === 'top' && props.scope === 'public',
 )
+const publicRootNodes = computed(() =>
+  isTopPublicFolderMode.value ? getPublicRootFolderNodes(folderTree.value) : [],
+)
+const selectedPublicRootNode = computed<PublicRootFolderNode | undefined>(() => {
+  const folderId = selectedFolderId.value
+  if (!isTopPublicFolderMode.value || folderId === undefined) {
+    return undefined
+  }
+
+  return publicRootNodes.value.find(
+    (node) => node.id === folderId || hasDescendant(node, folderId),
+  )
+})
+const subfolderPanelRoot = computed(() => {
+  const root = selectedPublicRootNode.value
+  if (!root || !['staff', 'technicalSolution'].includes(root.publicRootKey)) {
+    return undefined
+  }
+  return root
+})
+const subfolderItems = computed(() => subfolderPanelRoot.value?.children ?? [])
+const isStaffRootLanding = computed(
+  () =>
+    selectedPublicRootNode.value?.publicRootKey === 'staff' &&
+    selectedFolderId.value === selectedPublicRootNode.value.id,
+)
+const canCloseDocumentResults = computed(
+  () =>
+    Boolean(selectedFolderId.value) &&
+    ['staff', 'technicalSolution'].includes(selectedPublicRootNode.value?.publicRootKey ?? '') &&
+    !isStaffRootLanding.value,
+)
+const isDocumentResultsHidden = computed(
+  () =>
+    canCloseDocumentResults.value &&
+    selectedFolderId.value === hiddenDocumentResultsFolderId.value,
+)
+const shouldShowDocumentResults = computed(
+  () => !isStaffRootLanding.value && !isDocumentResultsHidden.value,
+)
+const subfolderPanelTitle = computed(() =>
+  subfolderPanelRoot.value?.publicRootKey === 'staff' ? '人员项' : '部件分类',
+)
+const subfolderPanelCountText = computed(() =>
+  subfolderPanelRoot.value?.publicRootKey === 'staff'
+    ? `员工数：${subfolderItems.value.length}`
+    : `分类数：${subfolderItems.value.length}`,
+)
+const subfolderPanelEmptyText = computed(() =>
+  subfolderPanelRoot.value?.publicRootKey === 'staff'
+    ? '暂无人员项'
+    : '暂无部件分类，可在系统管理中创建技术方案子目录',
+)
+const canUpload = computed(() => !isTrashMode.value && !isStaffRootLanding.value)
+const canCreateStaffFolder = computed(() => authStore.isSystemAdmin && isStaffRootLanding.value)
 
 onMounted(async () => {
   applyRouteSearch(false)
@@ -118,6 +180,7 @@ watch(selectedFolderId, () => {
   }
 
   page.value = 1
+  hiddenDocumentResultsFolderId.value = undefined
   void loadDocuments()
 })
 
@@ -182,23 +245,86 @@ function syncTopFolderSelection(): void {
     return
   }
 
-  const publicRootNodes = getPublicRootFolderNodes(folderTree.value)
-  if (publicRootNodes.length === 0) {
+  if (publicRootNodes.value.length === 0) {
     selectedFolderId.value = undefined
     return
   }
 
-  const selectedFolderExists = publicRootNodes.some(
-    (node) =>
-      node.id === selectedFolderId.value ||
-      node.children.some((child) => child.id === selectedFolderId.value),
+  const folderId = selectedFolderId.value
+  const selectedFolderExists = publicRootNodes.value.some(
+    (node) => folderId !== undefined && (node.id === folderId || hasDescendant(node, folderId)),
   )
   if (!selectedFolderExists) {
-    selectedFolderId.value = publicRootNodes[0].id
+    selectedFolderId.value = publicRootNodes.value[0].id
+  }
+}
+
+function hasDescendant(node: FolderTreeNode, folderId: number): boolean {
+  return node.children.some((child) => child.id === folderId || hasDescendant(child, folderId))
+}
+
+function selectSubfolder(folderId: number): void {
+  hiddenDocumentResultsFolderId.value = undefined
+  selectedFolderId.value = folderId
+}
+
+function closeDocumentResults(): void {
+  if (!canCloseDocumentResults.value || selectedFolderId.value === undefined) {
+    return
+  }
+
+  hiddenDocumentResultsFolderId.value = selectedFolderId.value
+}
+
+async function createStaffFolder(): Promise<void> {
+  const root = selectedPublicRootNode.value
+  if (!root || root.publicRootKey !== 'staff') {
+    return
+  }
+
+  let result: { value?: string }
+  try {
+    result = await ElMessageBox.prompt('请输入人员姓名', '添加用户', {
+      confirmButtonText: '添加',
+      cancelButtonText: '取消',
+      inputPlaceholder: '例如：张三',
+      inputValidator: (value) => Boolean(value.trim()) || '请填写人员姓名',
+    })
+  } catch {
+    return
+  }
+
+  const name = result.value?.trim()
+  if (!name) {
+    return
+  }
+
+  mutationLoading.value = true
+  try {
+    await createFolder({
+      project: null,
+      parent: root.id,
+      name,
+      code: '',
+      sort_order: subfolderItems.value.length + 1,
+    })
+    ElMessage.success('用户已添加')
+    await loadFolderTree()
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error))
+  } finally {
+    mutationLoading.value = false
   }
 }
 
 async function loadDocuments(): Promise<void> {
+  if (isStaffRootLanding.value) {
+    documents.value = []
+    total.value = 0
+    listLoading.value = false
+    return
+  }
+
   listLoading.value = true
 
   try {
@@ -415,7 +541,49 @@ async function handleRestore(document: DocumentItem): Promise<void> {
     <div class="document-explorer__workspace">
       <slot name="header" />
 
-      <div class="document-explorer__actions">
+      <section
+        v-if="subfolderPanelRoot"
+        class="document-subfolder-panel"
+        :class="{ 'document-subfolder-panel--staff': subfolderPanelRoot?.publicRootKey === 'staff' }"
+        :aria-label="subfolderPanelTitle"
+      >
+        <header class="document-subfolder-panel__header">
+          <h2>{{ subfolderPanelTitle }}</h2>
+          <div class="document-subfolder-panel__meta">
+            <span>{{ subfolderPanelCountText }}</span>
+            <el-button
+              v-if="canCreateStaffFolder"
+              :loading="mutationLoading"
+              size="small"
+              type="primary"
+              @click="createStaffFolder"
+            >
+              添加用户
+            </el-button>
+          </div>
+        </header>
+
+        <div v-if="subfolderItems.length > 0" class="document-subfolder-panel__grid">
+          <button
+            v-for="item in subfolderItems"
+            :key="item.id"
+            class="document-subfolder-panel__item"
+            :class="{ 'is-active': selectedFolderId === item.id }"
+            type="button"
+            @click="selectSubfolder(item.id)"
+          >
+            {{ item.name }}
+          </button>
+        </div>
+
+        <el-empty
+          v-else
+          :description="subfolderPanelEmptyText"
+          :image-size="72"
+        />
+      </section>
+
+      <div v-if="shouldShowDocumentResults" class="document-explorer__actions">
         <DocumentSearchPanel
           v-model:access-level="accessLevel"
           v-model:ordering="ordering"
@@ -427,7 +595,7 @@ async function handleRestore(document: DocumentItem): Promise<void> {
 
         <div class="document-explorer__toolbar">
           <el-button
-            v-if="!isTrashMode"
+            v-if="canUpload"
             type="primary"
             @click="uploadVisible = true"
           >
@@ -435,10 +603,21 @@ async function handleRestore(document: DocumentItem): Promise<void> {
           </el-button>
           <RouterLink v-if="!isTrashMode" to="/documents/recycle-bin">回收站</RouterLink>
           <RouterLink v-else to="/documents">返回资料中心</RouterLink>
+          <el-button
+            v-if="canCloseDocumentResults"
+            :icon="Close"
+            aria-label="关闭模块"
+            class="document-explorer__close-results"
+            circle
+            text
+            title="关闭"
+            @click="closeDocumentResults"
+          />
         </div>
       </div>
 
       <DocumentTable
+        v-if="shouldShowDocumentResults"
         :documents="documents"
         :fixed-actions="folderLayout !== 'top'"
         :height="folderLayout === 'top' ? 480 : undefined"
@@ -453,9 +632,12 @@ async function handleRestore(document: DocumentItem): Promise<void> {
         @view="openDocumentDetail"
       />
 
-      <el-empty v-if="isEmpty && folderLayout !== 'top'" description="暂无资料" />
+      <el-empty
+        v-if="shouldShowDocumentResults && isEmpty && folderLayout !== 'top'"
+        description="暂无资料"
+      />
 
-      <footer class="document-explorer__pagination">
+      <footer v-if="shouldShowDocumentResults" class="document-explorer__pagination">
         <el-pagination
           background
           layout="prev, pager, next, total"

@@ -286,7 +286,7 @@ def descendant_folder_ids(raw_folder_id: str) -> list[int]:
                 is_active=True,
             ).values_list("id", flat=True)
             root_ids.extend(equivalent_root_ids)
-        elif folder.code == ARCHIVE_ROOT.code or folder.name == ARCHIVE_ROOT.name:
+        elif folder.code == ARCHIVE_ROOT.code or folder.name in ARCHIVE_ROOT.names:
             root_ids.extend(
                 Folder.objects.filter(
                     is_active=True,

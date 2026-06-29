@@ -3,6 +3,7 @@ export interface SystemFolder {
   project: number | null
   project_name: string | null
   parent: number | null
+  parent_name: string | null
   name: string
   code: string
   sort_order: number

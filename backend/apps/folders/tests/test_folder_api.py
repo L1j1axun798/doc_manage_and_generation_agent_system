@@ -210,6 +210,28 @@ def test_disable_folder_rejects_active_children(client):
 
 
 @pytest.mark.django_db
+def test_folder_list_searches_and_returns_parent_name(client):
+    admin = make_user("admin", User.Role.SYSTEM_ADMIN)
+    root = Folder.objects.create(
+        name="人员资质",
+        code="PUBLIC-STAFF",
+        is_system_root=True,
+        created_by=admin,
+    )
+    Folder.objects.create(parent=root, name="张三", code="STAFF-ZS", created_by=admin)
+    Folder.objects.create(name="公司资质", is_system_root=True, created_by=admin)
+    client.force_login(admin)
+
+    response = client.get("/api/v1/folders/?search=张三&ordering=name")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["count"] == 1
+    assert payload["results"][0]["name"] == "张三"
+    assert payload["results"][0]["parent_name"] == "人员资质"
+
+
+@pytest.mark.django_db
 def test_init_public_folders_command_creates_default_roots():
     call_command("init_public_folders")
 
@@ -227,17 +249,20 @@ def test_init_public_folders_command_creates_default_roots():
             parent__isnull=True,
             is_system_root=True,
         ).count()
-        == 8
+        == 11
     )
     assert {
-        "竣工档案资料",
+        "竣工资料档案",
         "公司资质",
-        "人员资质",
-        "工具及年检资质",
+        "技术方案",
+        "报告模板",
+        "工器具及年检资质",
         "仪器仪表设备年检资质",
         "车辆年检资质",
+        "人员资质",
+        "人员保险单",
         "个人防护用品",
-        "归档资料",
+        "已归档文件",
     } == names
 
 
@@ -247,7 +272,7 @@ def test_project_folder_tree_hides_legacy_project_folders(client):
     project = Project.objects.create(name="项目", code="P001", created_by=admin)
     Folder.objects.create(
         project=project,
-        name="竣工档案资料",
+        name="竣工资料档案",
         code="PUBLIC-COMPLETION",
         created_by=admin,
     )
@@ -259,7 +284,7 @@ def test_project_folder_tree_hides_legacy_project_folders(client):
 
     assert response.status_code == 200
     names = {node["name"] for node in response.json()}
-    assert "竣工档案资料" in names
+    assert "竣工资料档案" in names
     assert "过程资料" not in names
     assert "检测报告" not in names
 

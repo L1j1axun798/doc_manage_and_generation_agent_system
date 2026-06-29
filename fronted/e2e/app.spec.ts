@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import type { FolderTreeNode } from '../src/modules/documents/documents.types'
 
 test('redirects anonymous users from root to login', async ({ page }) => {
   await page.route('**/api/v1/auth/csrf/', async (route) => {
@@ -30,22 +31,140 @@ test('shows the not found page for unknown routes', async ({ page }) => {
 
 test('shows document center with folder tree and document detail', async ({ page }) => {
   await mockAuthenticatedSession(page)
+  const publicFolderTree: FolderTreeNode[] = [
+    {
+      id: 10,
+      project: null,
+      parent: null,
+      name: '公司资质',
+      code: 'PUBLIC-COMPANY',
+      sort_order: 2,
+      is_active: true,
+      is_system_root: true,
+      children: [],
+    },
+    {
+      id: 30,
+      project: null,
+      parent: null,
+      name: '人员资质',
+      code: 'PUBLIC-STAFF',
+      sort_order: 8,
+      is_active: true,
+      is_system_root: true,
+      children: [
+        {
+          id: 31,
+          project: null,
+          parent: 30,
+          name: '张三',
+          code: '',
+          sort_order: 1,
+          is_active: true,
+          is_system_root: false,
+          children: [],
+        },
+        {
+          id: 32,
+          project: null,
+          parent: 30,
+          name: '李四',
+          code: '',
+          sort_order: 2,
+          is_active: true,
+          is_system_root: false,
+          children: [],
+        },
+      ],
+    },
+    {
+      id: 40,
+      project: null,
+      parent: null,
+      name: '人员保险单',
+      code: 'PUBLIC-STAFF-INSURANCE',
+      sort_order: 9,
+      is_active: true,
+      is_system_root: true,
+      children: [],
+    },
+    {
+      id: 50,
+      project: null,
+      parent: null,
+      name: '技术方案',
+      code: 'PUBLIC-TECH-SOLUTION',
+      sort_order: 3,
+      is_active: true,
+      is_system_root: true,
+      children: [
+        {
+          id: 51,
+          project: null,
+          parent: 50,
+          name: '风机叶片',
+          code: '',
+          sort_order: 1,
+          is_active: true,
+          is_system_root: false,
+          children: [],
+        },
+      ],
+    },
+    {
+      id: 60,
+      project: null,
+      parent: null,
+      name: '报告模板',
+      code: 'PUBLIC-REPORT-TEMPLATE',
+      sort_order: 4,
+      is_active: true,
+      is_system_root: true,
+      children: [],
+    },
+    {
+      id: 90,
+      project: null,
+      parent: null,
+      name: '已归档文件',
+      code: 'PUBLIC-ARCHIVE',
+      sort_order: 99,
+      is_active: true,
+      is_system_root: true,
+      children: [],
+    },
+  ]
   await page.route('**/api/v1/folders/tree/**', async (route) => {
     await route.fulfill({
       contentType: 'application/json',
-      body: JSON.stringify([
-        {
-          id: 10,
-          project: null,
-          parent: null,
-          name: '公司资质',
-          code: 'CERT',
-          sort_order: 10,
-          is_active: true,
-          is_system_root: true,
-          children: [],
-        },
-      ]),
+      body: JSON.stringify(publicFolderTree),
+    })
+  })
+  await page.route('**/api/v1/folders/', async (route) => {
+    if (route.request().method() !== 'POST') {
+      await route.fallback()
+      return
+    }
+
+    const payload = route.request().postDataJSON() as { name: string; parent: number }
+    const createdFolder: FolderTreeNode = {
+      id: 33,
+      project: null,
+      parent: payload.parent,
+      name: payload.name,
+      code: '',
+      sort_order: 3,
+      is_active: true,
+      is_system_root: false,
+      children: [],
+    }
+    publicFolderTree
+      .find((folder) => folder.id === payload.parent)
+      ?.children.push(createdFolder)
+    await route.fulfill({
+      contentType: 'application/json',
+      status: 201,
+      body: JSON.stringify(createdFolder),
     })
   })
   await page.route('**/api/v1/documents/?**', async (route) => {
@@ -80,9 +199,52 @@ test('shows document center with folder tree and document detail', async ({ page
 
   await expect(page.getByRole('heading', { name: '资料中心' })).toBeVisible()
   await expect(page.getByRole('button', { name: '公司资质' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '人员保险单' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '技术方案' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '报告模板' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '已归档文件' })).toBeVisible()
   await expect(page.getByText('安全生产许可证')).toBeVisible()
   await expect(page.getByRole('button', { name: '上传资料' })).toBeVisible()
   await expect(page.getByRole('link', { name: '回收站' })).toBeVisible()
+
+  await page.getByRole('button', { name: '人员资质' }).click()
+  await expect(page.getByRole('heading', { name: '人员项' })).toBeVisible()
+  await expect(page.getByText('员工数：2')).toBeVisible()
+  await expect(page.getByRole('button', { name: '张三' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '李四' })).toBeVisible()
+  const staffGridColumnCount = await page
+    .locator('.document-subfolder-panel--staff .document-subfolder-panel__grid')
+    .evaluate((element) =>
+      getComputedStyle(element).gridTemplateColumns.split(' ').filter(Boolean).length,
+    )
+  expect(staffGridColumnCount).toBe(1)
+  await expect(page.getByRole('button', { name: '上传资料' })).toHaveCount(0)
+  await page.getByRole('button', { name: '添加用户' }).click()
+  await page.getByRole('textbox', { name: '请输入人员姓名' }).fill('王五')
+  await page.getByRole('button', { name: '添加', exact: true }).click()
+  await expect(page.getByText('用户已添加')).toBeVisible()
+  await expect(page.getByText('员工数：3')).toBeVisible()
+  await expect(page.getByRole('button', { name: '王五' })).toBeVisible()
+
+  await page.getByRole('button', { name: '张三' }).click()
+  await expect(page.getByRole('button', { name: '上传资料' })).toBeVisible()
+  await expect(page.getByText('安全生产许可证')).toBeVisible()
+  await page.getByRole('button', { name: '关闭模块' }).click()
+  await expect(page.getByRole('heading', { name: '人员项' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '张三' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '上传资料' })).toHaveCount(0)
+  await page.getByRole('button', { name: '张三' }).click()
+  await expect(page.getByRole('button', { name: '上传资料' })).toBeVisible()
+
+  await page.getByRole('button', { name: '技术方案' }).click()
+  await expect(page.getByRole('heading', { name: '部件分类' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '风机叶片' })).toBeVisible()
+  await page.getByRole('button', { name: '风机叶片' }).click()
+  await page.getByRole('button', { name: '关闭模块' }).click()
+  await expect(page.getByRole('heading', { name: '部件分类' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '风机叶片' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '详情' })).toHaveCount(0)
+  await page.getByRole('button', { name: '风机叶片' }).click()
 
   await page.getByRole('button', { name: '详情' }).click()
   await expect(page.getByText('文档详情')).toBeVisible()
@@ -451,9 +613,20 @@ test('shows project management detail, members, documents and archive', async ({
           id: 20,
           project: 1,
           parent: null,
-          name: '竣工档案资料',
+          name: '竣工资料档案',
           code: 'PUBLIC-COMPLETION',
           sort_order: 10,
+          is_active: true,
+          is_system_root: false,
+          children: [],
+        },
+        {
+          id: 21,
+          project: 1,
+          parent: null,
+          name: '人员资质',
+          code: 'PUBLIC-STAFF',
+          sort_order: 8,
           is_active: true,
           is_system_root: false,
           children: [],
@@ -474,7 +647,7 @@ test('shows project management detail, members, documents and archive', async ({
             project: 1,
             project_name: '前端联调示例项目',
             folder: 20,
-            folder_name: '竣工档案资料',
+            folder_name: '竣工资料档案',
           },
         ],
       }),
@@ -499,8 +672,14 @@ test('shows project management detail, members, documents and archive', async ({
   await expect(page.getByRole('cell', { name: '项目负责人' })).toBeVisible()
 
   await page.getByRole('tab', { name: '项目资料' }).click()
-  await expect(page.getByRole('button', { name: '竣工档案资料' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '竣工资料档案' })).toHaveCount(0)
   await expect(page.getByText('安全生产许可证')).toBeVisible()
+  await page.getByRole('button', { name: '上传资料' }).click()
+  await expect(page.getByRole('heading', { name: '上传资料' })).toBeVisible()
+  await page.getByPlaceholder('选择目录').click()
+  await expect(page.getByText('人员资质')).toBeVisible()
+  await page.keyboard.press('Escape')
+  await page.keyboard.press('Escape')
 
   await page.getByRole('tab', { name: '归档信息' }).click()
   await page.getByRole('button', { name: '归档项目' }).click()

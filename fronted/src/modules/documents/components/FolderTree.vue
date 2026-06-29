@@ -91,6 +91,10 @@ function isNodeActive(node: FlatFolderNode): boolean {
     return true
   }
 
+  if (isTopPresentation.value && node.children.some((child) => child.id === props.modelValue)) {
+    return true
+  }
+
   return node.publicRootKey === 'archive' && node.children.some((child) => child.id === props.modelValue)
 }
 
@@ -114,6 +118,14 @@ function getFolderIcon(name: string): Component {
 
   if (definition?.key === 'staff') {
     return User
+  }
+
+  if (definition?.key === 'technicalSolution') {
+    return Tools
+  }
+
+  if (definition?.key === 'reportTemplate' || definition?.key === 'staffInsurance') {
+    return Document
   }
 
   if (definition?.key === 'tools') {

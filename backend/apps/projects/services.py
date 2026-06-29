@@ -1,6 +1,7 @@
 from typing import Any
 
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
@@ -260,18 +261,27 @@ def get_or_create_archive_year_folder(*, actor: Any, year: int) -> Folder:
 
 
 def get_or_create_archive_root_folder(*, actor: Any) -> Folder:
-    folder, _ = Folder.objects.get_or_create(
-        project=None,
-        parent=None,
-        name=ARCHIVE_ROOT.name,
-        defaults={
-            "code": ARCHIVE_ROOT.code,
-            "sort_order": ARCHIVE_ROOT.sort_order,
-            "is_system_root": True,
-            "created_by": actor,
-        },
+    folder = (
+        Folder.objects.filter(project=None, parent=None)
+        .filter(Q(code=ARCHIVE_ROOT.code) | Q(name__in=ARCHIVE_ROOT.names))
+        .order_by("id")
+        .first()
     )
+    if folder is None:
+        folder = Folder.objects.create(
+            project=None,
+            parent=None,
+            name=ARCHIVE_ROOT.name,
+            code=ARCHIVE_ROOT.code,
+            sort_order=ARCHIVE_ROOT.sort_order,
+            is_system_root=True,
+            created_by=actor,
+        )
+
     changed_fields = []
+    if folder.name != ARCHIVE_ROOT.name:
+        folder.name = ARCHIVE_ROOT.name
+        changed_fields.append("name")
     if folder.code != ARCHIVE_ROOT.code:
         folder.code = ARCHIVE_ROOT.code
         changed_fields.append("code")

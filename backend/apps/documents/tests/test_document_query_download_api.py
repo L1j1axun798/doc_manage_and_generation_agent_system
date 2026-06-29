@@ -259,14 +259,14 @@ def test_public_root_folder_filter_includes_matching_project_folders(client, tmp
     admin = make_user("admin", User.Role.SYSTEM_ADMIN)
     project = Project.objects.create(name="项目", code="P001", created_by=admin)
     public_root = Folder.objects.create(
-        name="竣工档案资料",
+        name="竣工资料档案",
         code="PUBLIC-COMPLETION",
         is_system_root=True,
         created_by=admin,
     )
     project_root = Folder.objects.create(
         project=project,
-        name="竣工档案资料",
+        name="竣工资料档案",
         code="PUBLIC-COMPLETION",
         created_by=admin,
     )

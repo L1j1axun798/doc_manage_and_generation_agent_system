@@ -26,6 +26,9 @@ it('keeps only requested public root folders in fixed display order', () => {
     folder({ id: 5, name: '劳动防护用品资料' }),
     folder({ id: 2, name: '公司资质' }),
     folder({ id: 3, name: '人员资质' }),
+    folder({ id: 11, name: '人员保险单' }),
+    folder({ id: 12, name: '技术方案' }),
+    folder({ id: 13, name: '报告模板' }),
     folder({ id: 6, name: '仪器设备年检资质' }),
     folder({ id: 8, name: '公司资质' }),
     folder({ id: 9, name: '2026年归档资料' }),
@@ -33,16 +36,19 @@ it('keeps only requested public root folders in fixed display order', () => {
   ])
 
   expect(nodes.map((node) => node.displayName)).toEqual([
-    '竣工档案资料',
+    '竣工资料档案',
     '公司资质',
-    '人员资质',
-    '工具及年检资质',
+    '技术方案',
+    '报告模板',
+    '工器具及年检资质',
     '仪器仪表设备年检资质',
     '车辆年检资质',
+    '人员资质',
+    '人员保险单',
     '个人防护用品',
-    '归档资料',
+    '已归档文件',
   ])
-  expect(nodes.map((node) => node.id)).toEqual([1, 2, 3, 4, 6, 7, 5, 9])
+  expect(nodes.map((node) => node.id)).toEqual([1, 2, 12, 13, 4, 6, 7, 3, 11, 5, 9])
   expect(nodes.at(-1)?.children.map((node) => node.name)).toEqual([
     '2026年归档资料',
     '2025年归档资料',
@@ -51,10 +57,10 @@ it('keeps only requested public root folders in fixed display order', () => {
 
 it('uses real archive root with archive years as child folders', () => {
   const nodes = getPublicRootFolderNodes([
-    folder({ id: 1, name: '竣工档案资料' }),
+    folder({ id: 1, name: '竣工资料档案' }),
     folder({
       id: 9,
-      name: '归档资料',
+      name: '已归档文件',
       code: 'PUBLIC-ARCHIVE',
       sort_order: 99,
       children: [
@@ -64,7 +70,7 @@ it('uses real archive root with archive years as child folders', () => {
     }),
   ])
 
-  expect(nodes.map((node) => node.displayName)).toEqual(['竣工档案资料', '归档资料'])
+  expect(nodes.map((node) => node.displayName)).toEqual(['竣工资料档案', '已归档文件'])
   expect(nodes.at(-1)?.id).toBe(9)
   expect(nodes.at(-1)?.children.map((node) => node.name)).toEqual([
     '2026年归档资料',

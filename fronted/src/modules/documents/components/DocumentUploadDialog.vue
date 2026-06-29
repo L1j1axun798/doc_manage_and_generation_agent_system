@@ -2,7 +2,7 @@
 import { computed, reactive, ref, watch } from 'vue'
 
 import type { DocumentAccessLevel, DocumentUploadPayload, FolderTreeNode } from '../documents.types'
-import { flattenFolderOptions } from '../utils/folders'
+import { flattenDocumentTargetFolderOptions } from '../utils/folders'
 
 const props = defineProps<{
   modelValue: boolean
@@ -20,10 +20,10 @@ const visible = computed({
   get: () => props.modelValue,
   set: (value: boolean) => emit('update:modelValue', value),
 })
-const folderOptions = computed(() => flattenFolderOptions(props.folders))
+const folderOptions = computed(() => flattenDocumentTargetFolderOptions(props.folders))
 const file = ref<File | null>(null)
 const form = reactive({
-  folder: props.initialFolderId,
+  folder: resolveInitialFolderId(),
   title: '',
   description: '',
   access_level: 'internal' as DocumentAccessLevel,
@@ -33,11 +33,20 @@ watch(
   () => props.modelValue,
   (opened) => {
     if (opened) {
-      form.folder = props.initialFolderId
+      form.folder = resolveInitialFolderId()
       file.value = null
     }
   },
 )
+
+function resolveInitialFolderId(): number | undefined {
+  if (!props.initialFolderId) {
+    return undefined
+  }
+  return folderOptions.value.some((option) => option.id === props.initialFolderId)
+    ? props.initialFolderId
+    : undefined
+}
 
 function handleFileChange(event: Event): void {
   const input = event.target as HTMLInputElement

@@ -31,7 +31,7 @@ const emit = defineEmits<{
     </el-table-column>
 
     <el-table-column label="父级" width="90">
-      <template #default="{ row }: { row: SystemFolder }">{{ row.parent || '-' }}</template>
+      <template #default="{ row }: { row: SystemFolder }">{{ row.parent_name || row.parent || '-' }}</template>
     </el-table-column>
 
     <el-table-column label="排序" width="80" prop="sort_order" />

@@ -49,12 +49,15 @@ def test_system_admin_can_create_project_and_manager_membership(client):
             flat=True,
         )
     ) == [
-        "竣工档案资料",
+        "竣工资料档案",
         "公司资质",
-        "人员资质",
-        "工具及年检资质",
+        "技术方案",
+        "报告模板",
+        "工器具及年检资质",
         "仪器仪表设备年检资质",
         "车辆年检资质",
+        "人员资质",
+        "人员保险单",
         "个人防护用品",
     ]
     assert AuditLog.objects.filter(action="project.create", result="success").exists()
@@ -235,7 +238,7 @@ def test_archive_project_groups_folders_by_archive_year(client):
 
     project.refresh_from_db()
     year = project.archived_at.year
-    archive_root = Folder.objects.get(project=None, parent=None, name="归档资料")
+    archive_root = Folder.objects.get(project=None, parent=None, name="已归档文件")
     archive_year = Folder.objects.get(project=None, parent=archive_root, name=f"{year}年归档资料")
     project_container = Folder.objects.get(project=project, code=f"PROJECT-ARCHIVE-{project.id}")
     root_folder.refresh_from_db()

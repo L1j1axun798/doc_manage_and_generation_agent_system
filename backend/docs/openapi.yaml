@@ -2319,6 +2319,10 @@ components:
           type: integer
           nullable: true
           title: 父文件夹
+        parent_name:
+          type: string
+          nullable: true
+          readOnly: true
         name:
           type: string
           title: 文件夹名称
@@ -2367,6 +2371,7 @@ components:
       - is_active
       - is_system_root
       - name
+      - parent_name
       - project_name
       - updated_at
     FolderMove:
@@ -2759,6 +2764,10 @@ components:
           type: integer
           nullable: true
           title: 父文件夹
+        parent_name:
+          type: string
+          nullable: true
+          readOnly: true
         name:
           type: string
           title: 文件夹名称

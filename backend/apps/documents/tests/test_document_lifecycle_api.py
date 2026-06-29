@@ -78,6 +78,63 @@ def test_document_move_requires_same_project_and_updates_lock(client, tmp_path, 
 
 
 @pytest.mark.django_db
+def test_document_move_rejects_staff_root_but_allows_employee_folder(client, tmp_path, settings):
+    settings.FILE_STORAGE_ROOT = tmp_path
+    admin = make_user("admin", User.Role.SYSTEM_ADMIN)
+    source = Folder.objects.create(name="公司资质", is_system_root=True, created_by=admin)
+    staff_root = Folder.objects.create(
+        name="人员资质",
+        code="PUBLIC-STAFF",
+        is_system_root=True,
+        created_by=admin,
+    )
+    employee_folder = Folder.objects.create(parent=staff_root, name="张三", created_by=admin)
+    client.force_login(admin)
+    document = create_document(client, folder=source)
+
+    root_response = client.post(
+        f"/api/v1/documents/{document['id']}/move/",
+        {"folder": staff_root.id, "expected_updated_at": expected(document["id"])},
+        content_type="application/json",
+    )
+    employee_response = client.post(
+        f"/api/v1/documents/{document['id']}/move/",
+        {"folder": employee_folder.id, "expected_updated_at": expected(document["id"])},
+        content_type="application/json",
+    )
+
+    assert root_response.status_code == 400
+    assert employee_response.status_code == 200
+    assert employee_response.json()["folder"] == employee_folder.id
+
+
+@pytest.mark.django_db
+def test_document_move_allows_project_staff_root(client, tmp_path, settings):
+    settings.FILE_STORAGE_ROOT = tmp_path
+    admin = make_user("admin", User.Role.SYSTEM_ADMIN)
+    project = Project.objects.create(name="项目", code="P001", created_by=admin)
+    source = Folder.objects.create(project=project, name="源目录", created_by=admin)
+    staff_root = Folder.objects.create(
+        project=project,
+        name="人员资质",
+        code="PUBLIC-STAFF",
+        is_system_root=False,
+        created_by=admin,
+    )
+    client.force_login(admin)
+    document = create_document(client, folder=source)
+
+    response = client.post(
+        f"/api/v1/documents/{document['id']}/move/",
+        {"folder": staff_root.id, "expected_updated_at": expected(document["id"])},
+        content_type="application/json",
+    )
+
+    assert response.status_code == 200
+    assert response.json()["folder"] == staff_root.id
+
+
+@pytest.mark.django_db
 def test_document_update_rejects_stale_expected_updated_at(client, tmp_path, settings):
     settings.FILE_STORAGE_ROOT = tmp_path
     admin = make_user("admin", User.Role.SYSTEM_ADMIN)

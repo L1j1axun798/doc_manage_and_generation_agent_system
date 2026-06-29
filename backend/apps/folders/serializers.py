@@ -5,6 +5,7 @@ from .models import Folder
 
 class FolderSerializer(serializers.ModelSerializer):
     project_name = serializers.CharField(source="project.name", read_only=True)
+    parent_name = serializers.CharField(source="parent.name", read_only=True, allow_null=True)
     created_by_name = serializers.CharField(source="created_by.real_name", read_only=True)
 
     class Meta:
@@ -14,6 +15,7 @@ class FolderSerializer(serializers.ModelSerializer):
             "project",
             "project_name",
             "parent",
+            "parent_name",
             "name",
             "code",
             "sort_order",
@@ -28,6 +30,7 @@ class FolderSerializer(serializers.ModelSerializer):
             "id",
             "is_active",
             "is_system_root",
+            "parent_name",
             "created_by",
             "created_by_name",
             "created_at",

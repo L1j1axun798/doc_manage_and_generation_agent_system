@@ -16,6 +16,9 @@ class FolderViewSet(viewsets.ModelViewSet):
     queryset = Folder.objects.none()
     serializer_class = FolderSerializer
     permission_classes = [IsAuthenticated]
+    search_fields = ["name", "code", "project__name", "parent__name"]
+    ordering_fields = ["sort_order", "name", "created_at", "updated_at"]
+    ordering = ["sort_order", "id"]
 
     def get_queryset(self):
         if getattr(self, "swagger_fake_view", False):

@@ -10,6 +10,7 @@ from django.utils import timezone
 from rest_framework.exceptions import APIException, PermissionDenied, ValidationError
 
 from apps.audit.services import audit_log
+from apps.folders.defaults import standard_root_for_code, standard_root_for_name
 from apps.folders.models import Folder
 from apps.projects.models import Project
 from common.storage import LocalDocumentStorage, StoredFile
@@ -426,6 +427,7 @@ def build_batch_download_zip(
 def _ensure_upload_allowed(*, actor: Any, folder: Folder) -> None:
     if not folder.is_active:
         raise ValidationError("文件夹已停用，不能上传文件")
+    _ensure_not_staff_root_folder(folder=folder)
     project: Project | None = folder.project
     if project is not None and project.status == Project.Status.ARCHIVED:
         raise ValidationError("项目已归档，不能上传文件")
@@ -465,8 +467,22 @@ def _touch_document(document: Document, extra_fields: list[str] | None = None) -
 def _validate_target_folder(*, document: Document, folder: Folder) -> None:
     if not folder.is_active:
         raise ValidationError("目标文件夹已停用")
+    _ensure_not_staff_root_folder(folder=folder)
     if folder.project_id != document.project_id:
         raise ValidationError("目标文件夹和文档项目不一致")
+
+
+def _ensure_not_staff_root_folder(*, folder: Folder) -> None:
+    if not _is_staff_root_folder(folder):
+        return
+    raise ValidationError("人员资质根目录不能直接存储文件，请选择具体人员文件夹")
+
+
+def _is_staff_root_folder(folder: Folder) -> bool:
+    if folder.parent_id is not None or folder.project_id is not None:
+        return False
+    definition = standard_root_for_code(folder.code) or standard_root_for_name(folder.name)
+    return definition is not None and definition.code == "PUBLIC-STAFF"
 
 
 def _unique_archive_name(filename: str, used_names: set[str]) -> str:

@@ -4,10 +4,13 @@ export type PublicRootFolderKey =
   | 'archive'
   | 'completion'
   | 'company'
-  | 'staff'
+  | 'technicalSolution'
+  | 'reportTemplate'
   | 'tools'
   | 'instrument'
   | 'vehicle'
+  | 'staff'
+  | 'staffInsurance'
   | 'protection'
 
 export interface PublicRootFolderDefinition {
@@ -23,14 +26,14 @@ export interface PublicRootFolderNode extends FolderTreeNode {
 
 const ARCHIVE_ROOT_DEFINITION: PublicRootFolderDefinition = {
   key: 'archive',
-  label: '归档资料',
-  matches: ['归档资料'],
+  label: '已归档文件',
+  matches: ['已归档文件', '归档材料', '归档资料'],
 }
 
 export const PUBLIC_ROOT_FOLDER_DEFINITIONS: PublicRootFolderDefinition[] = [
   {
     key: 'completion',
-    label: '竣工档案资料',
+    label: '竣工资料档案',
     matches: ['竣工', '完工', '档案'],
   },
   {
@@ -39,13 +42,18 @@ export const PUBLIC_ROOT_FOLDER_DEFINITIONS: PublicRootFolderDefinition[] = [
     matches: ['公司资质'],
   },
   {
-    key: 'staff',
-    label: '人员资质',
-    matches: ['人员资质'],
+    key: 'technicalSolution',
+    label: '技术方案',
+    matches: ['技术方案'],
+  },
+  {
+    key: 'reportTemplate',
+    label: '报告模板',
+    matches: ['报告模板'],
   },
   {
     key: 'tools',
-    label: '工具及年检资质',
+    label: '工器具及年检资质',
     matches: ['工具', '工器具'],
   },
   {
@@ -57,6 +65,16 @@ export const PUBLIC_ROOT_FOLDER_DEFINITIONS: PublicRootFolderDefinition[] = [
     key: 'vehicle',
     label: '车辆年检资质',
     matches: ['车辆'],
+  },
+  {
+    key: 'staff',
+    label: '人员资质',
+    matches: ['人员资质'],
+  },
+  {
+    key: 'staffInsurance',
+    label: '人员保险单',
+    matches: ['人员保险单', '人员报销单'],
   },
   {
     key: 'protection',
@@ -97,7 +115,7 @@ export function getPublicRootFolderNodes(nodes: FolderTreeNode[]): PublicRootFol
     }
 
     if (definition.key === 'archive') {
-      if (node.name === ARCHIVE_ROOT_DEFINITION.label) {
+      if (ARCHIVE_ROOT_DEFINITION.matches.includes(node.name)) {
         archiveRoot = {
           ...node,
           displayName: ARCHIVE_ROOT_DEFINITION.label,
@@ -153,6 +171,17 @@ export function getPublicRootFolderNodes(nodes: FolderTreeNode[]): PublicRootFol
   }
 
   return [...fixedNodes, archiveRoot]
+}
+
+export function isStaffRootFolderNode(
+  node: Pick<FolderTreeNode, 'code' | 'name' | 'parent' | 'project'>,
+): boolean {
+  if (node.parent !== null || node.project !== null) {
+    return false
+  }
+
+  const definition = getPublicRootFolderDefinition(node.name)
+  return node.code === 'PUBLIC-STAFF' || definition?.key === 'staff'
 }
 
 function isArchiveYearRoot(folderName: string): boolean {

@@ -99,6 +99,66 @@ def test_upload_rejects_oversized_file_with_413(client, tmp_path, settings):
 
 
 @pytest.mark.django_db
+def test_upload_rejects_staff_root_but_allows_employee_folder(client, tmp_path, settings):
+    settings.FILE_STORAGE_ROOT = tmp_path
+    admin = make_user("admin", User.Role.SYSTEM_ADMIN)
+    staff_root = Folder.objects.create(
+        name="人员资质",
+        code="PUBLIC-STAFF",
+        is_system_root=True,
+        created_by=admin,
+    )
+    employee_folder = Folder.objects.create(parent=staff_root, name="张三", created_by=admin)
+    client.force_login(admin)
+
+    root_response = client.post(
+        "/api/v1/documents/",
+        {
+            "folder": staff_root.id,
+            "file": upload_file("certificate.pdf", b"root"),
+        },
+    )
+    employee_response = client.post(
+        "/api/v1/documents/",
+        {
+            "folder": employee_folder.id,
+            "file": upload_file("certificate.pdf", b"employee"),
+        },
+    )
+
+    assert root_response.status_code == 400
+    assert employee_response.status_code == 201
+    assert Document.objects.count() == 1
+    assert Document.objects.get().folder == employee_folder
+
+
+@pytest.mark.django_db
+def test_upload_allows_project_staff_root(client, tmp_path, settings):
+    settings.FILE_STORAGE_ROOT = tmp_path
+    admin = make_user("admin", User.Role.SYSTEM_ADMIN)
+    project = Project.objects.create(name="项目", code="P001", created_by=admin)
+    staff_root = Folder.objects.create(
+        project=project,
+        name="人员资质",
+        code="PUBLIC-STAFF",
+        is_system_root=False,
+        created_by=admin,
+    )
+    client.force_login(admin)
+
+    response = client.post(
+        "/api/v1/documents/",
+        {
+            "folder": staff_root.id,
+            "file": upload_file("certificate.pdf", b"project staff root"),
+        },
+    )
+
+    assert response.status_code == 201
+    assert Document.objects.get().folder == staff_root
+
+
+@pytest.mark.django_db
 def test_member_without_upload_permission_is_denied(client, tmp_path, settings):
     settings.FILE_STORAGE_ROOT = tmp_path
     admin = make_user("admin", User.Role.SYSTEM_ADMIN)
