@@ -290,6 +290,21 @@ def test_project_folder_tree_hides_legacy_project_folders(client):
 
 
 @pytest.mark.django_db
+def test_project_folder_tree_ensures_missing_standard_roots(client):
+    admin = make_user("admin", User.Role.SYSTEM_ADMIN)
+    project = Project.objects.create(name="项目", code="P001", created_by=admin)
+    client.force_login(admin)
+
+    response = client.get(f"/api/v1/folders/tree/?project_id={project.id}")
+
+    assert response.status_code == 200
+    names = {node["name"] for node in response.json()}
+    assert "人员资质" in names
+    assert "竣工资料档案" in names
+    assert Folder.objects.filter(project=project, parent__isnull=True, name="人员资质").exists()
+
+
+@pytest.mark.django_db
 def test_system_root_folder_cannot_move_or_disable(client):
     admin = make_user("admin", User.Role.SYSTEM_ADMIN)
     root = Folder.objects.create(name="公司资质", is_system_root=True, created_by=admin)

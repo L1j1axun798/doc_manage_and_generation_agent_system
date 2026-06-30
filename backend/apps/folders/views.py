@@ -6,6 +6,10 @@ from rest_framework.generics import get_object_or_404
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from apps.projects.models import Project
+from apps.projects.selectors import visible_projects_for_user
+from apps.projects.services import ensure_project_standard_folders
+
 from .models import Folder
 from .selectors import active_visible_folders_for_user, folder_tree_for_user
 from .serializers import FolderMoveSerializer, FolderSerializer
@@ -46,7 +50,20 @@ class FolderViewSet(viewsets.ModelViewSet):
     @extend_schema(responses=OpenApiTypes.OBJECT)
     @action(detail=False, methods=["get"])
     def tree(self, request):
+        self._ensure_project_standard_folders(request.query_params.get("project_id"))
         return Response(folder_tree_for_user(request.user, request.query_params.get("project_id")))
+
+    def _ensure_project_standard_folders(self, project_id: str | None) -> None:
+        if not project_id or project_id in {"public", "null", "none"}:
+            return
+        project = (
+            visible_projects_for_user(self.request.user)
+            .filter(pk=project_id, status=Project.Status.ACTIVE)
+            .first()
+        )
+        if project is None:
+            return
+        ensure_project_standard_folders(actor=self.request.user, project=project)
 
     @extend_schema(request=FolderMoveSerializer, responses=FolderSerializer)
     @action(detail=True, methods=["post"])

@@ -156,7 +156,9 @@ const subfolderPanelEmptyText = computed(() =>
     : '暂无部件分类，可在系统管理中创建技术方案子目录',
 )
 const canUpload = computed(() => !isTrashMode.value && !isStaffRootLanding.value)
-const canCreateStaffFolder = computed(() => authStore.isSystemAdmin && isStaffRootLanding.value)
+const canCreateStaffFolder = computed(
+  () => authStore.isSystemAdmin && subfolderPanelRoot.value?.publicRootKey === 'staff',
+)
 
 onMounted(async () => {
   applyRouteSearch(false)

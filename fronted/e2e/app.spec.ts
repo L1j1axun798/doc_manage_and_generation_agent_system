@@ -228,6 +228,7 @@ test('shows document center with folder tree and document detail', async ({ page
 
   await page.getByRole('button', { name: '张三' }).click()
   await expect(page.getByRole('button', { name: '上传资料' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '添加用户' })).toBeVisible()
   await expect(page.getByText('安全生产许可证')).toBeVisible()
   await page.getByRole('button', { name: '关闭模块' }).click()
   await expect(page.getByRole('heading', { name: '人员项' })).toBeVisible()
@@ -676,10 +677,10 @@ test('shows project management detail, members, documents and archive', async ({
   await expect(page.getByText('安全生产许可证')).toBeVisible()
   await page.getByRole('button', { name: '上传资料' }).click()
   await expect(page.getByRole('heading', { name: '上传资料' })).toBeVisible()
-  await page.getByPlaceholder('选择目录').click()
+  await page.getByRole('combobox', { name: /目录/ }).click()
   await expect(page.getByText('人员资质')).toBeVisible()
   await page.keyboard.press('Escape')
-  await page.keyboard.press('Escape')
+  await page.getByRole('button', { name: '取消' }).click()
 
   await page.getByRole('tab', { name: '归档信息' }).click()
   await page.getByRole('button', { name: '归档项目' }).click()
