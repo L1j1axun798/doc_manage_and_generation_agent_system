@@ -3,6 +3,7 @@ from django.contrib.auth import get_user_model
 from django.core.management import call_command
 
 from apps.audit.models import AuditLog
+from apps.documents.models import Document
 from apps.folders.models import Folder
 from apps.projects.models import Project, ProjectMember
 
@@ -207,6 +208,21 @@ def test_disable_folder_rejects_active_children(client):
     assert response.status_code == 400
     root.refresh_from_db()
     assert root.is_active is True
+
+
+@pytest.mark.django_db
+def test_disable_folder_rejects_existing_documents(client):
+    admin = make_user("admin", User.Role.SYSTEM_ADMIN)
+    system_root = Folder.objects.create(name="公司资质", is_system_root=True, created_by=admin)
+    company_folder = Folder.objects.create(parent=system_root, name="示例公司", created_by=admin)
+    Document.objects.create(folder=company_folder, title="营业执照", created_by=admin)
+    client.force_login(admin)
+
+    response = client.post(f"/api/v1/folders/{company_folder.id}/disable/")
+
+    assert response.status_code == 400
+    company_folder.refresh_from_db()
+    assert company_folder.is_active is True
 
 
 @pytest.mark.django_db

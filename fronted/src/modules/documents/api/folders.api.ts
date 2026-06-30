@@ -20,3 +20,7 @@ export async function createFolder(payload: FolderCreatePayload): Promise<Folder
   const response = await apiClient.post<FolderTreeNode>('/folders/', payload)
   return response.data
 }
+
+export async function disableFolder(folderId: number): Promise<void> {
+  await apiClient.post(`/folders/${folderId}/disable/`)
+}

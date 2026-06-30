@@ -82,7 +82,8 @@ def test_temporary_user_cannot_search_or_download_regular_documents(client, tmp_
     settings.FILE_STORAGE_ROOT = tmp_path
     admin = make_user("admin", User.Role.SYSTEM_ADMIN)
     temporary_user = make_user("temp", User.Role.TEMPORARY_USER)
-    folder = Folder.objects.create(name="公司资质", is_system_root=True, created_by=admin)
+    root = Folder.objects.create(name="公司资质", is_system_root=True, created_by=admin)
+    folder = Folder.objects.create(parent=root, name="安全生产许可证", created_by=admin)
     client.force_login(admin)
     document = create_document_via_api(
         client,

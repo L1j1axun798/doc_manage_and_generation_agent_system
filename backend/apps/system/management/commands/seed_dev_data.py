@@ -91,7 +91,7 @@ class Command(BaseCommand):
                 for definition in STANDARD_PUBLIC_ROOTS
                 if definition.code == "PUBLIC-COMPLETION"
             )
-            public_folder, _ = Folder.objects.update_or_create(
+            public_root, _ = Folder.objects.update_or_create(
                 project=None,
                 parent=None,
                 code=company_root.code,
@@ -99,6 +99,18 @@ class Command(BaseCommand):
                     "name": company_root.name,
                     "is_system_root": True,
                     "sort_order": company_root.sort_order,
+                    "created_by": admin,
+                },
+            )
+            public_folder, _ = Folder.objects.update_or_create(
+                project=None,
+                parent=public_root,
+                code="PUBLIC-COMPANY-DEMO",
+                defaults={
+                    "name": "示例公司",
+                    "is_system_root": False,
+                    "is_active": True,
+                    "sort_order": 1,
                     "created_by": admin,
                 },
             )

@@ -41,7 +41,30 @@ test('shows document center with folder tree and document detail', async ({ page
       sort_order: 2,
       is_active: true,
       is_system_root: true,
-      children: [],
+      children: [
+        {
+          id: 11,
+          project: null,
+          parent: 10,
+          name: '华能新能源有限公司',
+          code: '',
+          sort_order: 1,
+          is_active: true,
+          is_system_root: false,
+          children: [],
+        },
+        {
+          id: 12,
+          project: null,
+          parent: 10,
+          name: '大唐风电有限公司',
+          code: '',
+          sort_order: 2,
+          is_active: true,
+          is_system_root: false,
+          children: [],
+        },
+      ],
     },
     {
       id: 30,
@@ -140,6 +163,16 @@ test('shows document center with folder tree and document detail', async ({ page
       body: JSON.stringify(publicFolderTree),
     })
   })
+  await page.route('**/api/v1/folders/*/disable/', async (route) => {
+    const folderId = Number(route.request().url().match(/\/folders\/(\d+)\/disable\//)?.[1])
+    for (const root of publicFolderTree) {
+      root.children = root.children.filter((child) => child.id !== folderId)
+    }
+    await route.fulfill({
+      status: 204,
+    })
+  })
+  let nextFolderId = 100
   await page.route('**/api/v1/folders/', async (route) => {
     if (route.request().method() !== 'POST') {
       await route.fallback()
@@ -148,7 +181,7 @@ test('shows document center with folder tree and document detail', async ({ page
 
     const payload = route.request().postDataJSON() as { name: string; parent: number }
     const createdFolder: FolderTreeNode = {
-      id: 33,
+      id: nextFolderId++,
       project: null,
       parent: payload.parent,
       name: payload.name,
@@ -197,55 +230,73 @@ test('shows document center with folder tree and document detail', async ({ page
 
   await page.goto('/documents')
 
-  await expect(page.getByRole('heading', { name: '资料中心' })).toBeVisible()
   await expect(page.getByRole('button', { name: '公司资质' })).toBeVisible()
   await expect(page.getByRole('button', { name: '人员保险单' })).toBeVisible()
   await expect(page.getByRole('button', { name: '技术方案' })).toBeVisible()
   await expect(page.getByRole('button', { name: '报告模板' })).toBeVisible()
   await expect(page.getByRole('button', { name: '已归档文件' })).toBeVisible()
-  await expect(page.getByText('安全生产许可证')).toBeVisible()
+  await expect(page.getByRole('heading', { name: '公司名单' })).toBeVisible()
+  await expect(page.getByText('公司数：2')).toBeVisible()
+  await expect(page.getByRole('button', { name: '华能新能源有限公司' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '大唐风电有限公司' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '上传资料' })).toHaveCount(0)
+  await page.getByRole('button', { name: '添加公司' }).click()
+  await page.getByRole('textbox', { name: '请输入公司名称' }).fill('中广核风电有限公司')
+  await page.getByRole('button', { name: '添加', exact: true }).click()
+  await expect(page.getByText('公司已添加')).toBeVisible()
+  await expect(page.getByText('公司数：3')).toBeVisible()
+  await expect(page.getByRole('button', { name: '中广核风电有限公司' })).toBeVisible()
+  await page
+    .locator('.document-subfolder-panel__item')
+    .filter({ hasText: '中广核风电有限公司' })
+    .getByRole('button', { name: '删除子项' })
+    .click()
+  await expect(page.getByText('删除公司')).toBeVisible()
+  await page.getByRole('button', { name: '删除', exact: true }).click()
+  await expect(page.getByText('公司已删除')).toBeVisible()
+  await expect(page.getByText('公司数：2')).toBeVisible()
+  await expect(page.getByRole('button', { name: '中广核风电有限公司' })).toHaveCount(0)
+  await page.getByRole('button', { name: '华能新能源有限公司' }).click()
   await expect(page.getByRole('button', { name: '上传资料' })).toBeVisible()
+  await expect(page.locator('tbody').getByRole('button', { name: '安全生产许可证' })).toBeVisible()
   await expect(page.getByRole('link', { name: '回收站' })).toBeVisible()
 
   await page.getByRole('button', { name: '人员资质' }).click()
-  await expect(page.getByRole('heading', { name: '人员项' })).toBeVisible()
-  await expect(page.getByText('员工数：2')).toBeVisible()
+  await expect(page.getByRole('heading', { name: '人员名单' })).toBeVisible()
+  await expect(page.getByText('人员数：2')).toBeVisible()
   await expect(page.getByRole('button', { name: '张三' })).toBeVisible()
   await expect(page.getByRole('button', { name: '李四' })).toBeVisible()
-  const staffGridColumnCount = await page
-    .locator('.document-subfolder-panel--staff .document-subfolder-panel__grid')
-    .evaluate((element) =>
-      getComputedStyle(element).gridTemplateColumns.split(' ').filter(Boolean).length,
-    )
-  expect(staffGridColumnCount).toBe(1)
   await expect(page.getByRole('button', { name: '上传资料' })).toHaveCount(0)
   await page.getByRole('button', { name: '添加用户' }).click()
   await page.getByRole('textbox', { name: '请输入人员姓名' }).fill('王五')
   await page.getByRole('button', { name: '添加', exact: true }).click()
   await expect(page.getByText('用户已添加')).toBeVisible()
-  await expect(page.getByText('员工数：3')).toBeVisible()
+  await expect(page.getByText('人员数：3')).toBeVisible()
   await expect(page.getByRole('button', { name: '王五' })).toBeVisible()
+  await page
+    .locator('.document-subfolder-panel__item')
+    .filter({ hasText: '王五' })
+    .getByRole('button', { name: '删除子项' })
+    .click()
+  await expect(page.getByText('删除人员')).toBeVisible()
+  await page.getByRole('button', { name: '删除', exact: true }).click()
+  await expect(page.getByText('人员已删除')).toBeVisible()
+  await expect(page.getByText('人员数：2')).toBeVisible()
+  await expect(page.getByRole('button', { name: '王五' })).toHaveCount(0)
 
   await page.getByRole('button', { name: '张三' }).click()
   await expect(page.getByRole('button', { name: '上传资料' })).toBeVisible()
-  await expect(page.getByRole('button', { name: '添加用户' })).toBeVisible()
-  await expect(page.getByText('安全生产许可证')).toBeVisible()
+  await expect(page.locator('tbody').getByRole('button', { name: '安全生产许可证' })).toBeVisible()
   await page.getByRole('button', { name: '关闭模块' }).click()
-  await expect(page.getByRole('heading', { name: '人员项' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '人员名单' })).toBeVisible()
   await expect(page.getByRole('button', { name: '张三' })).toBeVisible()
   await expect(page.getByRole('button', { name: '上传资料' })).toHaveCount(0)
   await page.getByRole('button', { name: '张三' }).click()
   await expect(page.getByRole('button', { name: '上传资料' })).toBeVisible()
 
   await page.getByRole('button', { name: '技术方案' }).click()
-  await expect(page.getByRole('heading', { name: '部件分类' })).toBeVisible()
-  await expect(page.getByRole('button', { name: '风机叶片' })).toBeVisible()
-  await page.getByRole('button', { name: '风机叶片' }).click()
-  await page.getByRole('button', { name: '关闭模块' }).click()
-  await expect(page.getByRole('heading', { name: '部件分类' })).toBeVisible()
-  await expect(page.getByRole('button', { name: '风机叶片' })).toBeVisible()
-  await expect(page.getByRole('button', { name: '详情' })).toHaveCount(0)
-  await page.getByRole('button', { name: '风机叶片' }).click()
+  await expect(page.getByRole('heading', { name: '部件分类' })).toHaveCount(0)
+  await expect(page.locator('tbody').getByRole('button', { name: '安全生产许可证' })).toBeVisible()
 
   await page.getByRole('button', { name: '详情' }).click()
   await expect(page.getByText('文档详情')).toBeVisible()

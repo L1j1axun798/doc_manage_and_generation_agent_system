@@ -78,34 +78,50 @@ def test_document_move_requires_same_project_and_updates_lock(client, tmp_path, 
 
 
 @pytest.mark.django_db
-def test_document_move_rejects_staff_root_but_allows_employee_folder(client, tmp_path, settings):
+def test_document_move_rejects_public_qualification_roots_but_allows_child_folder(
+    client,
+    tmp_path,
+    settings,
+):
     settings.FILE_STORAGE_ROOT = tmp_path
     admin = make_user("admin", User.Role.SYSTEM_ADMIN)
-    source = Folder.objects.create(name="公司资质", is_system_root=True, created_by=admin)
+    company_root = Folder.objects.create(
+        name="公司资质",
+        code="PUBLIC-COMPANY",
+        is_system_root=True,
+        created_by=admin,
+    )
+    source = Folder.objects.create(parent=company_root, name="示例公司", created_by=admin)
     staff_root = Folder.objects.create(
         name="人员资质",
         code="PUBLIC-STAFF",
         is_system_root=True,
         created_by=admin,
     )
-    employee_folder = Folder.objects.create(parent=staff_root, name="张三", created_by=admin)
+    staff_folder = Folder.objects.create(parent=staff_root, name="张三", created_by=admin)
     client.force_login(admin)
     document = create_document(client, folder=source)
 
-    root_response = client.post(
+    company_root_response = client.post(
+        f"/api/v1/documents/{document['id']}/move/",
+        {"folder": company_root.id, "expected_updated_at": expected(document["id"])},
+        content_type="application/json",
+    )
+    staff_root_response = client.post(
         f"/api/v1/documents/{document['id']}/move/",
         {"folder": staff_root.id, "expected_updated_at": expected(document["id"])},
         content_type="application/json",
     )
-    employee_response = client.post(
+    staff_folder_response = client.post(
         f"/api/v1/documents/{document['id']}/move/",
-        {"folder": employee_folder.id, "expected_updated_at": expected(document["id"])},
+        {"folder": staff_folder.id, "expected_updated_at": expected(document["id"])},
         content_type="application/json",
     )
 
-    assert root_response.status_code == 400
-    assert employee_response.status_code == 200
-    assert employee_response.json()["folder"] == employee_folder.id
+    assert company_root_response.status_code == 400
+    assert staff_root_response.status_code == 400
+    assert staff_folder_response.status_code == 200
+    assert staff_folder_response.json()["folder"] == staff_folder.id
 
 
 @pytest.mark.django_db

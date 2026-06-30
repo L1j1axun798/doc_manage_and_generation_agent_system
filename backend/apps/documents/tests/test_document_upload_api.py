@@ -62,12 +62,13 @@ def test_upload_rejects_disallowed_extension(client, tmp_path, settings):
     settings.FILE_STORAGE_ROOT = tmp_path
     admin = make_user("admin", User.Role.SYSTEM_ADMIN)
     root = Folder.objects.create(name="公司资质", is_system_root=True, created_by=admin)
+    folder = Folder.objects.create(parent=root, name="示例公司", created_by=admin)
     client.force_login(admin)
 
     response = client.post(
         "/api/v1/documents/",
         {
-            "folder": root.id,
+            "folder": folder.id,
             "file": upload_file("malware.exe", b"bad", "application/octet-stream"),
         },
     )
@@ -83,12 +84,13 @@ def test_upload_rejects_oversized_file_with_413(client, tmp_path, settings):
     settings.MAX_UPLOAD_SIZE_BYTES = 2
     admin = make_user("admin", User.Role.SYSTEM_ADMIN)
     root = Folder.objects.create(name="公司资质", is_system_root=True, created_by=admin)
+    folder = Folder.objects.create(parent=root, name="示例公司", created_by=admin)
     client.force_login(admin)
 
     response = client.post(
         "/api/v1/documents/",
         {
-            "folder": root.id,
+            "folder": folder.id,
             "file": upload_file("report.pdf", b"123"),
         },
     )
@@ -99,37 +101,70 @@ def test_upload_rejects_oversized_file_with_413(client, tmp_path, settings):
 
 
 @pytest.mark.django_db
-def test_upload_rejects_staff_root_but_allows_employee_folder(client, tmp_path, settings):
+def test_upload_rejects_public_qualification_roots_but_allows_child_folders(
+    client,
+    tmp_path,
+    settings,
+):
     settings.FILE_STORAGE_ROOT = tmp_path
     admin = make_user("admin", User.Role.SYSTEM_ADMIN)
+    company_root = Folder.objects.create(
+        name="公司资质",
+        code="PUBLIC-COMPANY",
+        is_system_root=True,
+        created_by=admin,
+    )
+    company_folder = Folder.objects.create(
+        parent=company_root,
+        name="示例公司",
+        created_by=admin,
+    )
     staff_root = Folder.objects.create(
         name="人员资质",
         code="PUBLIC-STAFF",
         is_system_root=True,
         created_by=admin,
     )
-    employee_folder = Folder.objects.create(parent=staff_root, name="张三", created_by=admin)
+    staff_folder = Folder.objects.create(parent=staff_root, name="张三", created_by=admin)
     client.force_login(admin)
 
-    root_response = client.post(
+    company_root_response = client.post(
+        "/api/v1/documents/",
+        {
+            "folder": company_root.id,
+            "file": upload_file("certificate.pdf", b"root"),
+        },
+    )
+    staff_root_response = client.post(
         "/api/v1/documents/",
         {
             "folder": staff_root.id,
             "file": upload_file("certificate.pdf", b"root"),
         },
     )
-    employee_response = client.post(
+    company_folder_response = client.post(
         "/api/v1/documents/",
         {
-            "folder": employee_folder.id,
-            "file": upload_file("certificate.pdf", b"employee"),
+            "folder": company_folder.id,
+            "file": upload_file("certificate.pdf", b"company"),
+        },
+    )
+    staff_folder_response = client.post(
+        "/api/v1/documents/",
+        {
+            "folder": staff_folder.id,
+            "file": upload_file("certificate.pdf", b"staff"),
         },
     )
 
-    assert root_response.status_code == 400
-    assert employee_response.status_code == 201
-    assert Document.objects.count() == 1
-    assert Document.objects.get().folder == employee_folder
+    assert company_root_response.status_code == 400
+    assert staff_root_response.status_code == 400
+    assert company_folder_response.status_code == 201
+    assert staff_folder_response.status_code == 201
+    assert set(Document.objects.values_list("folder_id", flat=True)) == {
+        company_folder.id,
+        staff_folder.id,
+    }
 
 
 @pytest.mark.django_db
@@ -215,7 +250,8 @@ def test_create_document_version_locks_document_and_updates_current_version(
 ):
     settings.FILE_STORAGE_ROOT = tmp_path
     admin = make_user("admin", User.Role.SYSTEM_ADMIN)
-    folder = Folder.objects.create(name="公司资质", is_system_root=True, created_by=admin)
+    root = Folder.objects.create(name="公司资质", is_system_root=True, created_by=admin)
+    folder = Folder.objects.create(parent=root, name="示例公司", created_by=admin)
     client.force_login(admin)
     create_response = client.post(
         "/api/v1/documents/",
@@ -243,7 +279,8 @@ def test_create_document_version_locks_document_and_updates_current_version(
 def test_database_failure_cleans_saved_physical_file(client, tmp_path, settings, monkeypatch):
     settings.FILE_STORAGE_ROOT = tmp_path
     admin = make_user("admin", User.Role.SYSTEM_ADMIN)
-    folder = Folder.objects.create(name="公司资质", is_system_root=True, created_by=admin)
+    root = Folder.objects.create(name="公司资质", is_system_root=True, created_by=admin)
+    folder = Folder.objects.create(parent=root, name="示例公司", created_by=admin)
     client.force_login(admin)
 
     def fail_create(*args, **kwargs):
@@ -267,7 +304,8 @@ def test_database_failure_cleans_saved_physical_file(client, tmp_path, settings,
 def test_document_storage_consistency_reports_missing_file(client, tmp_path, settings):
     settings.FILE_STORAGE_ROOT = tmp_path
     admin = make_user("admin", User.Role.SYSTEM_ADMIN)
-    folder = Folder.objects.create(name="公司资质", is_system_root=True, created_by=admin)
+    root = Folder.objects.create(name="公司资质", is_system_root=True, created_by=admin)
+    folder = Folder.objects.create(parent=root, name="示例公司", created_by=admin)
     client.force_login(admin)
     response = client.post(
         "/api/v1/documents/",

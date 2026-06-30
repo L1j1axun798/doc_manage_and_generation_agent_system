@@ -109,6 +109,8 @@ def disable_folder(*, actor: Any, folder: Folder, request: Any = None) -> Folder
     _ensure_folder_write_allowed(actor, folder.project)
     if folder.children.filter(is_active=True).exists():
         raise ValidationError("文件夹下存在启用的子文件夹，不能停用")
+    if folder.documents.filter(deleted_at__isnull=True).exists():
+        raise ValidationError("文件夹下存在资料，不能停用")
     before_data = folder_snapshot(folder)
     folder.is_active = False
     folder.save(update_fields=["is_active", "updated_at"])

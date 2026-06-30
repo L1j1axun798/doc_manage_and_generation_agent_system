@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Close } from '@element-plus/icons-vue'
+import { Close, Delete } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
@@ -19,7 +19,7 @@ import {
   uploadDocument,
   uploadDocumentVersion,
 } from '../api/documents.api'
-import { createFolder, fetchFolderTree } from '../api/folders.api'
+import { createFolder, disableFolder, fetchFolderTree } from '../api/folders.api'
 import type {
   DocumentAccessLevel,
   DocumentItem,
@@ -117,22 +117,24 @@ const selectedPublicRootNode = computed<PublicRootFolderNode | undefined>(() => 
 })
 const subfolderPanelRoot = computed(() => {
   const root = selectedPublicRootNode.value
-  if (!root || !['staff', 'technicalSolution'].includes(root.publicRootKey)) {
+  if (!root || !['company', 'staff'].includes(root.publicRootKey)) {
     return undefined
   }
   return root
 })
 const subfolderItems = computed(() => subfolderPanelRoot.value?.children ?? [])
-const isStaffRootLanding = computed(
+const isCompanyRoot = computed(() => selectedPublicRootNode.value?.publicRootKey === 'company')
+const isStaffRoot = computed(() => selectedPublicRootNode.value?.publicRootKey === 'staff')
+const isSubfolderPanelRootLanding = computed(
   () =>
-    selectedPublicRootNode.value?.publicRootKey === 'staff' &&
-    selectedFolderId.value === selectedPublicRootNode.value.id,
+    Boolean(subfolderPanelRoot.value) &&
+    selectedFolderId.value === selectedPublicRootNode.value?.id,
 )
 const canCloseDocumentResults = computed(
   () =>
     Boolean(selectedFolderId.value) &&
-    ['staff', 'technicalSolution'].includes(selectedPublicRootNode.value?.publicRootKey ?? '') &&
-    !isStaffRootLanding.value,
+    ['company', 'staff'].includes(selectedPublicRootNode.value?.publicRootKey ?? '') &&
+    !isSubfolderPanelRootLanding.value,
 )
 const isDocumentResultsHidden = computed(
   () =>
@@ -140,25 +142,23 @@ const isDocumentResultsHidden = computed(
     selectedFolderId.value === hiddenDocumentResultsFolderId.value,
 )
 const shouldShowDocumentResults = computed(
-  () => !isStaffRootLanding.value && !isDocumentResultsHidden.value,
+  () => !isSubfolderPanelRootLanding.value && !isDocumentResultsHidden.value,
 )
-const subfolderPanelTitle = computed(() =>
-  subfolderPanelRoot.value?.publicRootKey === 'staff' ? '人员项' : '部件分类',
-)
+const subfolderPanelTitle = computed(() => (isStaffRoot.value ? '人员名单' : '公司名单'))
 const subfolderPanelCountText = computed(() =>
-  subfolderPanelRoot.value?.publicRootKey === 'staff'
-    ? `员工数：${subfolderItems.value.length}`
-    : `分类数：${subfolderItems.value.length}`,
+  isStaffRoot.value
+    ? `人员数：${subfolderItems.value.length}`
+    : `公司数：${subfolderItems.value.length}`,
 )
 const subfolderPanelEmptyText = computed(() =>
-  subfolderPanelRoot.value?.publicRootKey === 'staff'
-    ? '暂无人员项'
-    : '暂无部件分类，可在系统管理中创建技术方案子目录',
+  isStaffRoot.value ? '暂无人员' : '暂无公司',
 )
-const canUpload = computed(() => !isTrashMode.value && !isStaffRootLanding.value)
-const canCreateStaffFolder = computed(
-  () => authStore.isSystemAdmin && subfolderPanelRoot.value?.publicRootKey === 'staff',
+const canUpload = computed(() => !isTrashMode.value && !isSubfolderPanelRootLanding.value)
+const canCreateSubfolder = computed(
+  () => authStore.isSystemAdmin && (isCompanyRoot.value || isStaffRoot.value),
 )
+const canDeleteSubfolder = computed(() => canCreateSubfolder.value)
+const subfolderCreateButtonText = computed(() => (isStaffRoot.value ? '添加用户' : '添加公司'))
 
 onMounted(async () => {
   applyRouteSearch(false)
@@ -278,19 +278,25 @@ function closeDocumentResults(): void {
   hiddenDocumentResultsFolderId.value = selectedFolderId.value
 }
 
-async function createStaffFolder(): Promise<void> {
+async function createSubfolder(): Promise<void> {
   const root = selectedPublicRootNode.value
-  if (!root || root.publicRootKey !== 'staff') {
+  if (!root || !['company', 'staff'].includes(root.publicRootKey)) {
     return
   }
 
+  const isStaff = root.publicRootKey === 'staff'
+  const promptTitle = isStaff ? '添加用户' : '添加公司'
+  const promptMessage = isStaff ? '请输入人员姓名' : '请输入公司名称'
+  const inputPlaceholder = isStaff ? '例如：张三' : '例如：华能新能源有限公司'
+  const inputValidatorMessage = isStaff ? '请填写人员姓名' : '请填写公司名称'
+  const successMessage = isStaff ? '用户已添加' : '公司已添加'
   let result: { value?: string }
   try {
-    result = await ElMessageBox.prompt('请输入人员姓名', '添加用户', {
+    result = await ElMessageBox.prompt(promptMessage, promptTitle, {
       confirmButtonText: '添加',
       cancelButtonText: '取消',
-      inputPlaceholder: '例如：张三',
-      inputValidator: (value) => Boolean(value.trim()) || '请填写人员姓名',
+      inputPlaceholder,
+      inputValidator: (value) => Boolean(value.trim()) || inputValidatorMessage,
     })
   } catch {
     return
@@ -310,7 +316,44 @@ async function createStaffFolder(): Promise<void> {
       code: '',
       sort_order: subfolderItems.value.length + 1,
     })
-    ElMessage.success('用户已添加')
+    ElMessage.success(successMessage)
+    await loadFolderTree()
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error))
+  } finally {
+    mutationLoading.value = false
+  }
+}
+
+async function deleteSubfolder(item: FolderTreeNode): Promise<void> {
+  const root = selectedPublicRootNode.value
+  if (!root || !canDeleteSubfolder.value) {
+    return
+  }
+
+  const itemType = root.publicRootKey === 'staff' ? '人员' : '公司'
+  try {
+    await ElMessageBox.confirm(
+      `确认删除“${item.name}”？删除后该${itemType}将不再显示。`,
+      `删除${itemType}`,
+      {
+        confirmButtonText: '删除',
+        cancelButtonText: '取消',
+        type: 'warning',
+      },
+    )
+  } catch {
+    return
+  }
+
+  mutationLoading.value = true
+  try {
+    await disableFolder(item.id)
+    ElMessage.success(`${itemType}已删除`)
+    if (selectedFolderId.value === item.id || hasDescendant(item, selectedFolderId.value ?? -1)) {
+      hiddenDocumentResultsFolderId.value = undefined
+      selectedFolderId.value = root.id
+    }
     await loadFolderTree()
   } catch (error) {
     ElMessage.error(getErrorMessage(error))
@@ -320,7 +363,7 @@ async function createStaffFolder(): Promise<void> {
 }
 
 async function loadDocuments(): Promise<void> {
-  if (isStaffRootLanding.value) {
+  if (isSubfolderPanelRootLanding.value) {
     documents.value = []
     total.value = 0
     listLoading.value = false
@@ -546,7 +589,10 @@ async function handleRestore(document: DocumentItem): Promise<void> {
       <section
         v-if="subfolderPanelRoot"
         class="document-subfolder-panel"
-        :class="{ 'document-subfolder-panel--staff': subfolderPanelRoot?.publicRootKey === 'staff' }"
+        :class="{
+          'document-subfolder-panel--company': subfolderPanelRoot?.publicRootKey === 'company',
+          'document-subfolder-panel--staff': subfolderPanelRoot?.publicRootKey === 'staff',
+        }"
         :aria-label="subfolderPanelTitle"
       >
         <header class="document-subfolder-panel__header">
@@ -554,28 +600,42 @@ async function handleRestore(document: DocumentItem): Promise<void> {
           <div class="document-subfolder-panel__meta">
             <span>{{ subfolderPanelCountText }}</span>
             <el-button
-              v-if="canCreateStaffFolder"
+              v-if="canCreateSubfolder"
               :loading="mutationLoading"
               size="small"
               type="primary"
-              @click="createStaffFolder"
+              @click="createSubfolder"
             >
-              添加用户
+              {{ subfolderCreateButtonText }}
             </el-button>
           </div>
         </header>
 
         <div v-if="subfolderItems.length > 0" class="document-subfolder-panel__grid">
-          <button
+          <div
             v-for="item in subfolderItems"
             :key="item.id"
             class="document-subfolder-panel__item"
             :class="{ 'is-active': selectedFolderId === item.id }"
-            type="button"
-            @click="selectSubfolder(item.id)"
           >
-            {{ item.name }}
-          </button>
+            <button
+              class="document-subfolder-panel__select"
+              type="button"
+              @click="selectSubfolder(item.id)"
+            >
+              {{ item.name }}
+            </button>
+            <el-button
+              v-if="canDeleteSubfolder"
+              :icon="Delete"
+              aria-label="删除子项"
+              circle
+              class="document-subfolder-panel__delete"
+              text
+              title="删除"
+              @click="deleteSubfolder(item)"
+            />
+          </div>
         </div>
 
         <el-empty

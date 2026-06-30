@@ -173,7 +173,7 @@ export function getPublicRootFolderNodes(nodes: FolderTreeNode[]): PublicRootFol
   return [...fixedNodes, archiveRoot]
 }
 
-export function isStaffRootFolderNode(
+export function isQualificationRootFolderNode(
   node: Pick<FolderTreeNode, 'code' | 'name' | 'parent' | 'project'>,
 ): boolean {
   if (node.parent !== null || node.project !== null) {
@@ -181,7 +181,12 @@ export function isStaffRootFolderNode(
   }
 
   const definition = getPublicRootFolderDefinition(node.name)
-  return node.code === 'PUBLIC-STAFF' || definition?.key === 'staff'
+  return (
+    node.code === 'PUBLIC-COMPANY' ||
+    node.code === 'PUBLIC-STAFF' ||
+    definition?.key === 'company' ||
+    definition?.key === 'staff'
+  )
 }
 
 function isArchiveYearRoot(folderName: string): boolean {

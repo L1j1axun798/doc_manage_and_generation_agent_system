@@ -52,32 +52,47 @@ it('flattens nested folder tree nodes', () => {
   ])
 })
 
-it('excludes staff root as document target but keeps employee folders', () => {
+it('excludes public qualification roots as document targets but keeps child folders', () => {
   const options = flattenDocumentTargetFolderOptions([
     folder({
       id: 1,
-      name: '人员资质',
-      code: 'PUBLIC-STAFF',
+      name: '公司资质',
+      code: 'PUBLIC-COMPANY',
       children: [
         folder({
           id: 2,
           parent: 1,
+          name: '示例公司',
+          code: '',
+          is_system_root: false,
+        }),
+      ],
+    }),
+    folder({
+      id: 3,
+      name: '人员资质',
+      code: 'PUBLIC-STAFF',
+      children: [
+        folder({
+          id: 4,
+          parent: 3,
           name: '张三',
           code: '',
           is_system_root: false,
         }),
       ],
     }),
-    folder({ id: 3, name: '人员保险单', code: 'PUBLIC-STAFF-INSURANCE' }),
+    folder({ id: 5, name: '人员保险单', code: 'PUBLIC-STAFF-INSURANCE' }),
   ])
 
   expect(options).toEqual([
-    { id: 2, label: '　张三' },
-    { id: 3, label: '人员保险单' },
+    { id: 2, label: '　示例公司' },
+    { id: 4, label: '　张三' },
+    { id: 5, label: '人员保险单' },
   ])
 })
 
-it('keeps project staff root as document target', () => {
+it('keeps project qualification roots as document targets', () => {
   const options = flattenDocumentTargetFolderOptions([
     folder({
       id: 4,
@@ -86,7 +101,17 @@ it('keeps project staff root as document target', () => {
       code: 'PUBLIC-STAFF',
       is_system_root: false,
     }),
+    folder({
+      id: 5,
+      project: 1,
+      name: '公司资质',
+      code: 'PUBLIC-COMPANY',
+      is_system_root: false,
+    }),
   ])
 
-  expect(options).toEqual([{ id: 4, label: '人员资质' }])
+  expect(options).toEqual([
+    { id: 4, label: '人员资质' },
+    { id: 5, label: '公司资质' },
+  ])
 })

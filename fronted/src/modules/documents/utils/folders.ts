@@ -1,5 +1,5 @@
 import type { FolderTreeNode } from '../documents.types'
-import { isStaffRootFolderNode } from './public-root-folders'
+import { isQualificationRootFolderNode } from './public-root-folders'
 
 export interface FolderOption {
   id: number
@@ -30,5 +30,5 @@ export function flattenFolderOptions(
 }
 
 export function flattenDocumentTargetFolderOptions(nodes: FolderTreeNode[]): FolderOption[] {
-  return flattenFolderOptions(nodes, 0, { exclude: isStaffRootFolderNode })
+  return flattenFolderOptions(nodes, 0, { exclude: isQualificationRootFolderNode })
 }

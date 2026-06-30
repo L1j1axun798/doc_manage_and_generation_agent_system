@@ -556,25 +556,46 @@ body {
   gap: 10px;
 }
 
+.document-subfolder-panel--company .document-subfolder-panel__grid,
 .document-subfolder-panel--staff .document-subfolder-panel__grid {
   grid-template-columns: 1fr;
 }
 
 .document-subfolder-panel__item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
   min-height: 44px;
-  padding: 8px 12px;
+  padding: 4px 6px 4px 12px;
   border: 1px solid var(--color-border);
   border-radius: 6px;
   color: var(--color-text-primary);
   background: #fbfdff;
-  cursor: pointer;
   font-size: 14px;
   line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.document-subfolder-panel__select {
+  min-width: 0;
+  min-height: 34px;
+  padding: 0;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
   text-align: left;
   overflow-wrap: anywhere;
 }
 
+.document-subfolder-panel__delete {
+  flex: 0 0 auto;
+}
+
 .document-subfolder-panel__item:hover,
+.document-subfolder-panel__item:focus-within,
 .document-subfolder-panel__item.is-active {
   border-color: #c7dbff;
   color: #0f5cff;

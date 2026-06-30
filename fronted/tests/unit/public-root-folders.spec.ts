@@ -24,8 +24,16 @@ it('keeps only requested public root folders in fixed display order', () => {
     folder({ id: 1, name: '完工资料档案' }),
     folder({ id: 4, name: '工器具年检资质' }),
     folder({ id: 5, name: '劳动防护用品资料' }),
-    folder({ id: 2, name: '公司资质' }),
-    folder({ id: 3, name: '人员资质' }),
+    folder({
+      id: 2,
+      name: '公司资质',
+      children: [folder({ id: 21, parent: 2, name: '示例公司' })],
+    }),
+    folder({
+      id: 3,
+      name: '人员资质',
+      children: [folder({ id: 31, parent: 3, name: '张三' })],
+    }),
     folder({ id: 11, name: '人员保险单' }),
     folder({ id: 12, name: '技术方案' }),
     folder({ id: 13, name: '报告模板' }),
@@ -49,6 +57,8 @@ it('keeps only requested public root folders in fixed display order', () => {
     '已归档文件',
   ])
   expect(nodes.map((node) => node.id)).toEqual([1, 2, 12, 13, 4, 6, 7, 3, 11, 5, 9])
+  expect(nodes.find((node) => node.publicRootKey === 'company')?.children[0]?.name).toBe('示例公司')
+  expect(nodes.find((node) => node.publicRootKey === 'staff')?.children[0]?.name).toBe('张三')
   expect(nodes.at(-1)?.children.map((node) => node.name)).toEqual([
     '2026年归档资料',
     '2025年归档资料',
