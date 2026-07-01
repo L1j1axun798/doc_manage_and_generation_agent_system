@@ -15,10 +15,14 @@ const emit = defineEmits<{
   disable: [user: SystemUser]
   resetPassword: [user: SystemUser]
 }>()
+
+function getUserRowClassName({ row }: { row: SystemUser }): string {
+  return row.is_active ? '' : 'user-table-row--inactive'
+}
 </script>
 
 <template>
-  <el-table :data="users" :loading="loading" row-key="id">
+  <el-table :data="users" :loading="loading" :row-class-name="getUserRowClassName" row-key="id">
     <el-table-column label="用户" min-width="170">
       <template #default="{ row }: { row: SystemUser }">
         <button class="user-table__name" type="button" @click="emit('view', row)">

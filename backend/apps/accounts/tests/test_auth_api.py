@@ -104,6 +104,36 @@ def test_public_register_endpoint_does_not_exist(client):
     assert response.status_code == 404
 
 
+@pytest.mark.django_db
+def test_admin_user_list_can_order_active_users_first(client):
+    admin = User.objects.create_user(
+        username="admin",
+        password="AdminPass123!",
+        real_name="管理员",
+        role=User.Role.SYSTEM_ADMIN,
+    )
+    inactive_user = User.objects.create_user(
+        username="inactive",
+        password="InactivePass123!",
+        real_name="停用用户",
+        role=User.Role.DATA_OPERATOR,
+        is_active=False,
+    )
+    active_user = User.objects.create_user(
+        username="active",
+        password="ActivePass123!",
+        real_name="启用用户",
+        role=User.Role.DATA_OPERATOR,
+    )
+    client.force_login(admin)
+
+    response = client.get("/api/v1/users/", {"ordering": "-is_active,id"})
+
+    assert response.status_code == 200
+    usernames = [item["username"] for item in response.json()["results"]]
+    assert usernames.index(active_user.username) < usernames.index(inactive_user.username)
+
+
 def test_user_required_fields_include_real_name() -> None:
     assert "real_name" in User.REQUIRED_FIELDS
 

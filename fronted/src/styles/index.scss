@@ -938,6 +938,19 @@ body {
   overflow-wrap: anywhere;
 }
 
+.user-table-row--inactive td.el-table__cell {
+  background: #f8fafc;
+  color: var(--color-text-secondary);
+}
+
+.user-table-row--inactive .user-table__name {
+  color: var(--color-text-secondary);
+}
+
+.user-table-row--inactive .user-table__subtext {
+  color: var(--el-text-color-placeholder);
+}
+
 .notification-table__dot {
   width: 8px;
   height: 8px;

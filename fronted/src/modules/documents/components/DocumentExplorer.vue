@@ -100,6 +100,9 @@ const shouldShowFolderNavigation = computed(() => props.showFolders && props.sho
 const isTopPublicFolderMode = computed(
   () => shouldShowFolderNavigation.value && props.folderLayout === 'top' && props.scope === 'public',
 )
+const shouldMoveToPublicRootsOnly = computed(
+  () => props.folderLayout === 'top' && props.scope === 'public',
+)
 const publicRootNodes = computed(() =>
   isTopPublicFolderMode.value ? getPublicRootFolderNodes(folderTree.value) : [],
 )
@@ -756,6 +759,7 @@ async function handleRestore(document: DocumentItem): Promise<void> {
       :document="actionDocument"
       :folders="folderTree"
       :loading="mutationLoading"
+      :public-root-only="shouldMoveToPublicRootsOnly"
       @submit="handleMove"
     />
 

@@ -40,7 +40,7 @@ async function loadUsers(): Promise<void> {
     const response: ApiPage<SystemUser> = await fetchUsers({
       page: page.value,
       search: search.value,
-      ordering: 'id',
+      ordering: '-is_active,id',
     })
     users.value = response.results
     total.value = response.count

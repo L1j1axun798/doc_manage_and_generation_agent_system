@@ -1,6 +1,7 @@
 import {
   flattenDocumentTargetFolderOptions,
   flattenFolderOptions,
+  getPublicRootFolderOptions,
 } from '@/modules/documents/utils/folders'
 import type { FolderTreeNode } from '@/modules/documents/documents.types'
 
@@ -113,5 +114,45 @@ it('keeps project qualification roots as document targets', () => {
   expect(options).toEqual([
     { id: 4, label: '人员资质' },
     { id: 5, label: '公司资质' },
+  ])
+})
+
+it('builds public root folder options for document center move targets', () => {
+  const options = getPublicRootFolderOptions([
+    folder({
+      id: 1,
+      name: '公司资质',
+      code: 'PUBLIC-COMPANY',
+      children: [
+        folder({
+          id: 2,
+          parent: 1,
+          name: '示例公司',
+          code: '',
+          is_system_root: false,
+        }),
+      ],
+    }),
+    folder({
+      id: 3,
+      name: '人员资质',
+      code: 'PUBLIC-STAFF',
+      children: [
+        folder({
+          id: 4,
+          parent: 3,
+          name: '张三',
+          code: '',
+          is_system_root: false,
+        }),
+      ],
+    }),
+    folder({ id: 5, name: '人员保险单', code: 'PUBLIC-STAFF-INSURANCE' }),
+  ])
+
+  expect(options).toEqual([
+    { id: 1, label: '公司资质' },
+    { id: 3, label: '人员资质' },
+    { id: 5, label: '人员保险单' },
   ])
 })

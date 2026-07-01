@@ -2,12 +2,13 @@
 import { computed, ref, watch } from 'vue'
 
 import type { DocumentItem, DocumentMovePayload, FolderTreeNode } from '../documents.types'
-import { flattenDocumentTargetFolderOptions } from '../utils/folders'
+import { flattenDocumentTargetFolderOptions, getPublicRootFolderOptions } from '../utils/folders'
 
 const props = defineProps<{
   modelValue: boolean
   document: DocumentItem | null
   folders: FolderTreeNode[]
+  publicRootOnly?: boolean
   loading?: boolean
 }>()
 
@@ -20,7 +21,11 @@ const visible = computed({
   get: () => props.modelValue,
   set: (value: boolean) => emit('update:modelValue', value),
 })
-const folderOptions = computed(() => flattenDocumentTargetFolderOptions(props.folders))
+const folderOptions = computed(() =>
+  props.publicRootOnly
+    ? getPublicRootFolderOptions(props.folders)
+    : flattenDocumentTargetFolderOptions(props.folders),
+)
 const folder = ref<number>()
 
 watch(
