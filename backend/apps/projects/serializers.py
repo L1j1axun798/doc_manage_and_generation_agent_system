@@ -54,12 +54,9 @@ class ProjectMemberSerializer(serializers.ModelSerializer):
             "user_username",
             "user_real_name",
             "role",
-            "can_upload",
-            "can_download_restricted",
             "can_manage_folder",
             "can_delete",
             "can_restore",
-            "can_manage_permission",
             "joined_at",
         ]
         read_only_fields = [

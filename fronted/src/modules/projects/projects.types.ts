@@ -24,12 +24,9 @@ export interface ProjectMember {
   user_username: string
   user_real_name: string
   role: ProjectMemberRole
-  can_upload: boolean
-  can_download_restricted: boolean
   can_manage_folder: boolean
   can_delete: boolean
   can_restore: boolean
-  can_manage_permission: boolean
   joined_at: string
 }
 
@@ -49,10 +46,7 @@ export interface ProjectPayload {
 export interface ProjectMemberPayload {
   user?: number
   role: ProjectMemberRole
-  can_upload: boolean
-  can_download_restricted: boolean
   can_manage_folder: boolean
   can_delete: boolean
   can_restore: boolean
-  can_manage_permission: boolean
 }

@@ -7,7 +7,7 @@ from rest_framework.response import Response
 
 from .models import DocumentGrant
 from .selectors import grants_manageable_by_user
-from .serializers import DocumentGrantSerializer
+from .serializers import DocumentGrantSerializer, DocumentGrantUpdateSerializer
 from .services import create_document_grant, revoke_document_grant, update_document_grant
 
 
@@ -26,6 +26,11 @@ class DocumentGrantViewSet(viewsets.ModelViewSet):
 
     def get_object(self):
         return get_object_or_404(self.get_queryset(), pk=self.kwargs["pk"])
+
+    def get_serializer_class(self):
+        if self.action in {"update", "partial_update"}:
+            return DocumentGrantUpdateSerializer
+        return DocumentGrantSerializer
 
     def perform_create(self, serializer):
         serializer.instance = create_document_grant(

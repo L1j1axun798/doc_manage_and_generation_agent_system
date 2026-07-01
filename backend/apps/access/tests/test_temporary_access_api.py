@@ -36,7 +36,6 @@ def create_document(client, *, folder: Folder, content: bytes = b"v1"):
         {
             "folder": folder.id,
             "title": "检测报告",
-            "access_level": Document.AccessLevel.RESTRICTED,
             "file": upload_file("report.pdf", content),
         },
     )
@@ -197,7 +196,12 @@ def test_user_without_manage_permission_cannot_create_temporary_access(
     operator = make_user("operator", User.Role.DATA_OPERATOR)
     project = Project.objects.create(name="项目", code="P001", created_by=admin)
     folder = Folder.objects.create(project=project, name="过程资料", created_by=admin)
-    ProjectMember.objects.create(project=project, user=operator, can_upload=True)
+    ProjectMember.objects.create(
+        project=project,
+        user=operator,
+        can_upload=True,
+        can_manage_permission=True,
+    )
     client.force_login(admin)
     document = create_document(client, folder=folder)
     client.force_login(operator)
@@ -222,7 +226,6 @@ def test_concurrent_temporary_access_consumption_succeeds_once(tmp_path, setting
         project=project,
         folder=folder,
         title="检测报告",
-        access_level=Document.AccessLevel.RESTRICTED,
         created_by=admin,
     )
     version = DocumentVersion.objects.create(

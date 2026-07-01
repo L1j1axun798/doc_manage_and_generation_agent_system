@@ -21,12 +21,9 @@ const visible = computed({
 const form = reactive({
   user: undefined as number | undefined,
   role: 'viewer' as ProjectMemberRole,
-  can_upload: false,
-  can_download_restricted: false,
   can_manage_folder: false,
   can_delete: false,
   can_restore: false,
-  can_manage_permission: false,
 })
 
 watch(
@@ -37,12 +34,9 @@ watch(
     }
     form.user = member?.user
     form.role = member?.role || 'viewer'
-    form.can_upload = member?.can_upload || false
-    form.can_download_restricted = member?.can_download_restricted || false
     form.can_manage_folder = member?.can_manage_folder || false
     form.can_delete = member?.can_delete || false
     form.can_restore = member?.can_restore || false
-    form.can_manage_permission = member?.can_manage_permission || false
   },
   { immediate: true },
 )
@@ -51,12 +45,9 @@ function submit(): void {
   emit('submit', {
     user: form.user,
     role: form.role,
-    can_upload: form.can_upload,
-    can_download_restricted: form.can_download_restricted,
     can_manage_folder: form.can_manage_folder,
     can_delete: form.can_delete,
     can_restore: form.can_restore,
-    can_manage_permission: form.can_manage_permission,
   })
 }
 </script>
@@ -75,12 +66,9 @@ function submit(): void {
         </el-select>
       </el-form-item>
       <el-form-item label="项目权限">
-        <el-checkbox v-model="form.can_upload">上传</el-checkbox>
-        <el-checkbox v-model="form.can_download_restricted">下载受限文件</el-checkbox>
         <el-checkbox v-model="form.can_manage_folder">管理文件夹</el-checkbox>
         <el-checkbox v-model="form.can_delete">删除</el-checkbox>
         <el-checkbox v-model="form.can_restore">恢复</el-checkbox>
-        <el-checkbox v-model="form.can_manage_permission">管理授权</el-checkbox>
       </el-form-item>
     </el-form>
     <template #footer>

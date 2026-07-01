@@ -2,9 +2,9 @@
 import { computed, ref, watch } from 'vue'
 
 import DocumentAccessPanel from '@/modules/access/components/DocumentAccessPanel.vue'
+import { useAuthStore } from '@/modules/auth/stores/auth.store'
 import { formatDateTime, formatFileSize } from '@/shared/utils/format'
 import type { DocumentItem } from '../documents.types'
-import AccessLevelTag from './AccessLevelTag.vue'
 
 const props = defineProps<{
   modelValue: boolean
@@ -20,6 +20,7 @@ const drawerVisible = computed({
   get: () => props.modelValue,
   set: (value: boolean) => emit('update:modelValue', value),
 })
+const authStore = useAuthStore()
 
 const activeTab = ref('detail')
 
@@ -46,9 +47,6 @@ watch(
           <el-descriptions-item label="描述">{{ document.description || '-' }}</el-descriptions-item>
           <el-descriptions-item label="目录">{{ document.folder_name }}</el-descriptions-item>
           <el-descriptions-item label="项目">{{ document.project_name || '公共资料' }}</el-descriptions-item>
-          <el-descriptions-item label="访问级别">
-            <AccessLevelTag :value="document.access_level" />
-          </el-descriptions-item>
           <el-descriptions-item label="当前版本">
             v{{ document.current_version?.version_number || '-' }}
           </el-descriptions-item>
@@ -67,7 +65,7 @@ watch(
         </el-descriptions>
       </el-tab-pane>
 
-      <el-tab-pane label="授权管理" name="access">
+      <el-tab-pane v-if="authStore.isSystemAdmin" label="授权管理" name="access">
         <DocumentAccessPanel :document="document" />
       </el-tab-pane>
     </el-tabs>

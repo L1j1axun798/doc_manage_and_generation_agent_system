@@ -590,6 +590,10 @@ body {
   overflow-wrap: anywhere;
 }
 
+.document-subfolder-panel__select:disabled {
+  cursor: default;
+}
+
 .document-subfolder-panel__delete {
   flex: 0 0 auto;
 }
@@ -600,6 +604,14 @@ body {
   border-color: #c7dbff;
   color: #0f5cff;
   background: #eef5ff;
+}
+
+.document-subfolder-panel__item.is-disabled,
+.document-subfolder-panel__item.is-disabled:hover,
+.document-subfolder-panel__item.is-disabled:focus-within {
+  border-color: var(--color-border);
+  color: var(--color-text-secondary);
+  background: #fbfdff;
 }
 
 .document-explorer__actions {

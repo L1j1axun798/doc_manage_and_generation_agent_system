@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { formatDateTime, formatFileSize } from '@/shared/utils/format'
 import type { DocumentItem } from '../documents.types'
-import AccessLevelTag from './AccessLevelTag.vue'
 
 withDefaults(
   defineProps<{
@@ -25,6 +24,10 @@ const emit = defineEmits<{
   delete: [document: DocumentItem]
   restore: [document: DocumentItem]
 }>()
+
+function canDownloadDocument(document: DocumentItem): boolean {
+  return document.can_download
+}
 </script>
 
 <template>
@@ -45,12 +48,6 @@ const emit = defineEmits<{
     </el-table-column>
 
     <el-table-column label="目录" min-width="140" prop="folder_name" />
-
-    <el-table-column label="访问级别" width="110">
-      <template #default="{ row }: { row: DocumentItem }">
-        <AccessLevelTag :value="row.access_level" />
-      </template>
-    </el-table-column>
 
     <el-table-column label="大小" width="110">
       <template #default="{ row }: { row: DocumentItem }">
@@ -73,7 +70,14 @@ const emit = defineEmits<{
           <el-button link type="success" @click="emit('restore', row)">恢复</el-button>
         </template>
         <template v-else>
-          <el-button link type="primary" @click="emit('download', row)">下载</el-button>
+          <el-button
+            :disabled="!canDownloadDocument(row)"
+            link
+            type="primary"
+            @click="emit('download', row)"
+          >
+            下载
+          </el-button>
           <el-button link @click="emit('edit', row)">修改</el-button>
           <el-button link @click="emit('move', row)">移动</el-button>
           <el-button link @click="emit('version', row)">新版本</el-button>

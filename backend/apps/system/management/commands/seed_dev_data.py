@@ -132,7 +132,6 @@ class Command(BaseCommand):
                 title="营业执照示例",
                 filename="business-license-demo.pdf",
                 content=b"%PDF-1.4\nwind-doc-system public demo\n",
-                access_level=Document.AccessLevel.INTERNAL,
                 description="公共目录示例文件。",
             )
             internal_document = self._ensure_document(
@@ -141,21 +140,19 @@ class Command(BaseCommand):
                 title="机组叶片检测报告",
                 filename="blade-inspection-report.pdf",
                 content=b"%PDF-1.4\nwind turbine blade inspection report demo\n",
-                access_level=Document.AccessLevel.INTERNAL,
                 description="内部项目成员可见的示例检测报告。",
             )
-            restricted_document = self._ensure_document(
+            granted_document = self._ensure_document(
                 actor=manager,
                 folder=report_folder,
-                title="受限缺陷复核记录",
-                filename="restricted-defect-review.pdf",
-                content=b"%PDF-1.4\nrestricted defect review demo\n",
-                access_level=Document.AccessLevel.RESTRICTED,
-                description="用于验证 DocumentGrant 和受限文件权限。",
+                title="缺陷复核记录",
+                filename="defect-review.pdf",
+                content=b"%PDF-1.4\ndefect review demo\n",
+                description="用于验证 DocumentGrant 文件下载授权。",
             )
 
             DocumentGrant.objects.update_or_create(
-                document=restricted_document,
+                document=granted_document,
                 user=viewer,
                 revoked_at=None,
                 defaults={
@@ -164,9 +161,8 @@ class Command(BaseCommand):
                     "can_update": False,
                     "can_delete": False,
                     "can_restore": False,
-                    "can_manage": False,
                     "expires_at": timezone.now() + timedelta(days=30),
-                    "created_by": manager,
+                    "created_by": admin,
                 },
             )
             self._ensure_notification(
@@ -184,7 +180,7 @@ class Command(BaseCommand):
         self.stdout.write(
             "示例文档："
             f"public={public_document.pk}, internal={internal_document.pk}, "
-            f"restricted={restricted_document.pk}"
+            f"granted={granted_document.pk}"
         )
 
     def _upsert_user(
@@ -232,7 +228,6 @@ class Command(BaseCommand):
             user=operator,
             defaults={
                 "role": ProjectMember.Role.OPERATOR,
-                "can_upload": True,
                 "can_download_restricted": False,
                 "can_manage_folder": True,
                 "can_delete": True,
@@ -245,7 +240,6 @@ class Command(BaseCommand):
             user=viewer,
             defaults={
                 "role": ProjectMember.Role.VIEWER,
-                "can_upload": False,
                 "can_download_restricted": False,
                 "can_manage_folder": False,
                 "can_delete": False,
@@ -262,7 +256,6 @@ class Command(BaseCommand):
         title: str,
         filename: str,
         content: bytes,
-        access_level: str,
         description: str,
     ) -> Document:
         document = Document.objects.filter(
@@ -279,7 +272,6 @@ class Command(BaseCommand):
             uploaded_file=uploaded_file,
             title=title,
             description=description,
-            access_level=access_level,
         )
 
     def _ensure_notification(

@@ -130,7 +130,25 @@ def test_project_manager_can_update_only_authorized_project(client):
 
 
 @pytest.mark.django_db
-def test_project_member_permissions_control_member_management(client):
+def test_project_delete_endpoint_is_disabled(client):
+    admin = make_user("admin", User.Role.SYSTEM_ADMIN)
+    manager = make_user("manager", User.Role.PROJECT_MANAGER)
+    project = Project.objects.create(name="授权项目", code="P001", created_by=admin)
+    ProjectMember.objects.create(
+        project=project,
+        user=manager,
+        role=ProjectMember.Role.MANAGER,
+    )
+    client.force_login(manager)
+
+    response = client.delete(f"/api/v1/projects/{project.id}/")
+
+    assert response.status_code == 405
+    assert Project.objects.filter(pk=project.pk).exists()
+
+
+@pytest.mark.django_db
+def test_only_system_admin_can_manage_project_members(client):
     admin = make_user("admin", User.Role.SYSTEM_ADMIN)
     manager = make_user("manager", User.Role.PROJECT_MANAGER)
     operator = make_user("operator", User.Role.DATA_OPERATOR)
@@ -144,25 +162,31 @@ def test_project_member_permissions_control_member_management(client):
     )
     ProjectMember.objects.create(project=project, user=viewer, role=ProjectMember.Role.VIEWER)
     client.force_login(viewer)
-    denied_response = client.post(
+    viewer_denied_response = client.post(
         f"/api/v1/projects/{project.id}/members/",
         {"user": operator.id, "role": ProjectMember.Role.OPERATOR},
         content_type="application/json",
     )
     client.force_login(manager)
+    manager_denied_response = client.post(
+        f"/api/v1/projects/{project.id}/members/",
+        {"user": operator.id, "role": ProjectMember.Role.OPERATOR},
+        content_type="application/json",
+    )
+    client.force_login(admin)
     allowed_response = client.post(
         f"/api/v1/projects/{project.id}/members/",
         {
             "user": operator.id,
             "role": ProjectMember.Role.OPERATOR,
-            "can_upload": True,
         },
         content_type="application/json",
     )
 
-    assert denied_response.status_code == 403
+    assert viewer_denied_response.status_code == 403
+    assert manager_denied_response.status_code == 403
     assert allowed_response.status_code == 201
-    assert ProjectMember.objects.get(project=project, user=operator).can_upload is True
+    assert "can_upload" not in allowed_response.json()
     assert AuditLog.objects.filter(action="permission.denied", result="denied").exists()
 
 

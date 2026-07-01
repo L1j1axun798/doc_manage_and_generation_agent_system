@@ -4,6 +4,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { getErrorMessage } from '@/core/http/error-normalizer'
+import { useAuthStore } from '@/modules/auth/stores/auth.store'
 import DocumentExplorer from '@/modules/documents/components/DocumentExplorer.vue'
 import { formatDateTime } from '@/shared/utils/format'
 import {
@@ -21,6 +22,7 @@ import type { Project, ProjectMember, ProjectMemberPayload } from '../projects.t
 
 const route = useRoute()
 const router = useRouter()
+const authStore = useAuthStore()
 const projectId = computed(() => Number(route.params.projectId))
 const project = ref<Project | null>(null)
 const members = ref<ProjectMember[]>([])
@@ -181,11 +183,14 @@ async function unarchiveCurrentProject(): Promise<void> {
 
       <el-tab-pane label="项目成员" name="members">
         <div class="project-tab-toolbar">
-          <el-button type="primary" @click="openCreateMember">添加成员</el-button>
+          <el-button v-if="authStore.isSystemAdmin" type="primary" @click="openCreateMember">
+            添加成员
+          </el-button>
         </div>
         <ProjectMemberTable
           :loading="membersLoading"
           :members="members"
+          :show-actions="authStore.isSystemAdmin"
           @delete="removeMember"
           @edit="openEditMember"
         />

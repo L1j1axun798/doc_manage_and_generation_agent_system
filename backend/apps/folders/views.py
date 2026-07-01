@@ -20,6 +20,7 @@ class FolderViewSet(viewsets.ModelViewSet):
     queryset = Folder.objects.none()
     serializer_class = FolderSerializer
     permission_classes = [IsAuthenticated]
+    http_method_names = ["get", "post", "put", "patch", "head", "options"]
     search_fields = ["name", "code", "project__name", "parent__name"]
     ordering_fields = ["sort_order", "name", "created_at", "updated_at"]
     ordering = ["sort_order", "id"]

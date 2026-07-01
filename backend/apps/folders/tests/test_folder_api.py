@@ -84,6 +84,21 @@ def test_project_member_can_create_project_folder_with_permission(client):
 
 
 @pytest.mark.django_db
+def test_folder_delete_endpoint_is_disabled(client):
+    admin = make_user("admin", User.Role.SYSTEM_ADMIN)
+    operator = make_user("operator", User.Role.DATA_OPERATOR)
+    project = Project.objects.create(name="项目", code="P001", created_by=admin)
+    folder = Folder.objects.create(project=project, name="过程资料", created_by=admin)
+    ProjectMember.objects.create(project=project, user=operator, can_manage_folder=True)
+    client.force_login(operator)
+
+    response = client.delete(f"/api/v1/folders/{folder.id}/")
+
+    assert response.status_code == 405
+    assert Folder.objects.filter(pk=folder.pk).exists()
+
+
+@pytest.mark.django_db
 def test_project_member_without_folder_permission_is_denied(client):
     admin = make_user("admin", User.Role.SYSTEM_ADMIN)
     operator = make_user("operator", User.Role.DATA_OPERATOR)

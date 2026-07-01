@@ -145,6 +145,9 @@ class ChangePasswordView(APIView):
 class UserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.order_by("id")
     permission_classes = [IsSystemAdmin]
+    search_fields = ["username", "real_name", "phone", "employee_no"]
+    ordering_fields = ["id", "username", "real_name", "created_at"]
+    ordering = ["id"]
 
     def get_serializer_class(self):
         if self.action == "create":

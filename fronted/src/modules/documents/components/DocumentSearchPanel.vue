@@ -1,16 +1,12 @@
 <script setup lang="ts">
-import type { DocumentAccessLevel } from '../documents.types'
-
 defineProps<{
   search: string
-  accessLevel: DocumentAccessLevel | ''
   ordering: string
   loading?: boolean
 }>()
 
 const emit = defineEmits<{
   'update:search': [value: string]
-  'update:accessLevel': [value: DocumentAccessLevel | '']
   'update:ordering': [value: string]
   submit: []
   reset: []
@@ -27,16 +23,6 @@ const emit = defineEmits<{
       @keyup.enter="emit('submit')"
       @update:model-value="emit('update:search', String($event))"
     />
-
-    <el-select
-      clearable
-      :model-value="accessLevel"
-      placeholder="访问级别"
-      @update:model-value="emit('update:accessLevel', ($event || '') as DocumentAccessLevel | '')"
-    >
-      <el-option label="内部" value="internal" />
-      <el-option label="受限" value="restricted" />
-    </el-select>
 
     <el-select
       :model-value="ordering"

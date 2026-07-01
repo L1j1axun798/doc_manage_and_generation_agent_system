@@ -53,7 +53,7 @@ class DocumentViewSet(
     serializer_class = DocumentSerializer
     parser_classes = [MultiPartParser, FormParser, JSONParser]
     permission_classes = [IsAuthenticated]
-    filterset_fields = ["project", "access_level"]
+    filterset_fields = ["project"]
     search_fields = [
         "title",
         "description",
@@ -112,13 +112,12 @@ class DocumentViewSet(
             uploaded_file=serializer.validated_data["file"],
             title=serializer.validated_data.get("title", ""),
             description=serializer.validated_data.get("description", ""),
-            access_level=serializer.validated_data.get(
-                "access_level",
-                Document.AccessLevel.INTERNAL,
-            ),
             request=request,
         )
-        return Response(DocumentSerializer(document).data, status=201)
+        return Response(
+            DocumentSerializer(document, context=self.get_serializer_context()).data,
+            status=201,
+        )
 
     @extend_schema(request=DocumentVersionUploadSerializer, responses=DocumentVersionSerializer)
     @action(detail=True, methods=["post"], url_path="versions")
@@ -146,7 +145,7 @@ class DocumentViewSet(
             expected_updated_at=expected_updated_at,
             request=request,
         )
-        return Response(DocumentSerializer(document).data)
+        return Response(DocumentSerializer(document, context=self.get_serializer_context()).data)
 
     @extend_schema(request=DocumentUpdateSerializer, responses=DocumentSerializer)
     def partial_update(self, request, *args, **kwargs):
@@ -164,7 +163,7 @@ class DocumentViewSet(
             expected_updated_at=serializer.validated_data["expected_updated_at"],
             request=request,
         )
-        return Response(DocumentSerializer(document).data)
+        return Response(DocumentSerializer(document, context=self.get_serializer_context()).data)
 
     @extend_schema(request=DocumentMutationSerializer, responses={204: None})
     @action(detail=True, methods=["post"])
@@ -190,7 +189,7 @@ class DocumentViewSet(
             expected_updated_at=serializer.validated_data["expected_updated_at"],
             request=request,
         )
-        return Response(DocumentSerializer(document).data)
+        return Response(DocumentSerializer(document, context=self.get_serializer_context()).data)
 
     @extend_schema(request=DocumentMutationSerializer, responses={204: None})
     @action(detail=True, methods=["post"], url_path="permanent-delete")
@@ -211,9 +210,19 @@ class DocumentViewSet(
         queryset = self.filter_queryset(trashed_documents_for_user(request.user))
         page = self.paginate_queryset(queryset)
         if page is not None:
-            serializer = DocumentSerializer(page, many=True)
+            serializer = DocumentSerializer(
+                page,
+                many=True,
+                context=self.get_serializer_context(),
+            )
             return self.get_paginated_response(serializer.data)
-        return Response(DocumentSerializer(queryset, many=True).data)
+        return Response(
+            DocumentSerializer(
+                queryset,
+                many=True,
+                context=self.get_serializer_context(),
+            ).data
+        )
 
     @extend_schema(request=DocumentBatchDownloadSerializer, responses={200: bytes})
     @action(detail=False, methods=["post"], url_path="batch-download")

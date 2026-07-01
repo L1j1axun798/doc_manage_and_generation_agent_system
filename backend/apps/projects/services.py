@@ -175,7 +175,6 @@ def delete_project_member(*, actor: Any, member: ProjectMember, request: Any = N
 def manager_member_defaults() -> dict[str, Any]:
     return {
         "role": ProjectMember.Role.MANAGER,
-        "can_upload": True,
         "can_download_restricted": True,
         "can_manage_folder": True,
         "can_delete": True,
@@ -361,7 +360,6 @@ def member_snapshot(member: ProjectMember) -> dict[str, Any]:
         "project_id": member.project_id,
         "user_id": member.user_id,
         "role": member.role,
-        "can_upload": member.can_upload,
         "can_download_restricted": member.can_download_restricted,
         "can_manage_folder": member.can_manage_folder,
         "can_delete": member.can_delete,

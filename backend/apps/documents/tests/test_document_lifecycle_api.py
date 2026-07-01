@@ -35,7 +35,6 @@ def create_document(
         {
             "folder": folder.id,
             "title": title,
-            "access_level": Document.AccessLevel.INTERNAL,
             "file": upload_file(f"{title}.pdf", content),
         },
     )

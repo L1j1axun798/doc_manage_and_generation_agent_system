@@ -14,10 +14,7 @@ def can_manage_project(user: Any, project: Any) -> bool:
 
 
 def can_manage_project_members(user: Any, project: Any) -> bool:
-    if getattr(user, "is_system_admin", False):
-        return True
-    membership = get_project_membership(user, project)
-    return bool(membership and membership.can_manage_permission)
+    return bool(getattr(user, "is_system_admin", False))
 
 
 class IsSystemAdminOrProjectManager(BasePermission):

@@ -49,7 +49,7 @@
 
 项目成员权限字段：
 
-- `can_upload`：上传文档、新增版本。
+- 上传文档、新增版本不再依赖项目成员权限；登录用户在可见资料目录内均可上传。
 - `can_download_restricted`：下载项目内受限文档。
 - `can_manage_folder`：管理项目文件夹。
 - `can_delete`：软删除文档。

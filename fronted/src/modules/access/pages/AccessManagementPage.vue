@@ -127,7 +127,6 @@ function readableGrantPermissions(grant: DocumentGrant): string {
     grant.can_update ? '更新' : '',
     grant.can_delete ? '删除' : '',
     grant.can_restore ? '恢复' : '',
-    grant.can_manage ? '管理授权' : '',
   ].filter(Boolean).join('、') || '-'
 }
 </script>
@@ -161,7 +160,9 @@ function readableGrantPermissions(grant: DocumentGrant): string {
           <el-table-column label="用户" min-width="150">
             <template #default="{ row }: { row: DocumentGrant }">
               <strong>{{ row.user_real_name || row.user_username }}</strong>
-              <p class="access-table__subtext">{{ row.user_username || `ID ${row.user}` }}</p>
+              <p class="access-table__subtext">
+                {{ row.user_username }}{{ row.user_phone ? ` / ${row.user_phone}` : '' }}
+              </p>
             </template>
           </el-table-column>
           <el-table-column label="权限" min-width="180">

@@ -38,7 +38,7 @@ curl -b cookies.txt "http://127.0.0.1:8000/api/v1/projects/1/members/"
 
 ```bash
 curl -b cookies.txt -H "Content-Type: application/json" -H "X-CSRFToken: <csrfToken>" \
-  -d '{"user":3,"role":"operator","can_upload":true,"can_download_restricted":false,"can_manage_folder":true,"can_delete":true,"can_restore":true,"can_manage_permission":false}' \
+  -d '{"user":3,"role":"operator","can_manage_folder":true,"can_delete":true,"can_restore":true}' \
   http://127.0.0.1:8000/api/v1/projects/1/members/
 ```
 

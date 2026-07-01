@@ -37,7 +37,6 @@ const temporaryDialogVisible = ref(false)
 const editingGrant = ref<DocumentGrant | null>(null)
 const createdTemporaryAccess = ref<TemporaryAccessGrantCreated | null>(null)
 
-const isRestrictedDocument = computed(() => props.document.access_level === 'restricted')
 const hasCurrentVersion = computed(() => Boolean(props.document.current_version?.id))
 const frontendTemporaryUrl = computed(() => {
   if (!createdTemporaryAccess.value?.token) {
@@ -58,11 +57,6 @@ watch(
 )
 
 async function loadGrants(): Promise<void> {
-  if (!isRestrictedDocument.value) {
-    grants.value = []
-    return
-  }
-
   grantsLoading.value = true
   try {
     const response: ApiPage<DocumentGrant> = await fetchDocumentGrants({
@@ -118,7 +112,6 @@ async function submitGrant(payload: DocumentGrantPayload): Promise<void> {
         can_update: payload.can_update,
         can_delete: payload.can_delete,
         can_restore: payload.can_restore,
-        can_manage: payload.can_manage,
         expires_at: payload.expires_at,
       })
       ElMessage.success('授权已修改')
@@ -215,10 +208,9 @@ async function copyText(text: string): Promise<void> {
       <header class="document-access-panel__header">
         <div>
           <h3>用户级授权</h3>
-          <p>仅受限文档需要为内部用户单独授予查看、下载或管理权限。</p>
+          <p>为内部用户授予指定文档的查看、下载或管理权限。</p>
         </div>
         <el-button
-          :disabled="!isRestrictedDocument"
           type="primary"
           @click="openCreateGrantDialog"
         >
@@ -226,16 +218,7 @@ async function copyText(text: string): Promise<void> {
         </el-button>
       </header>
 
-      <el-alert
-        v-if="!isRestrictedDocument"
-        show-icon
-        title="当前文档为内部访问级别，不需要用户级授权。"
-        type="info"
-        :closable="false"
-      />
-
       <DocumentGrantTable
-        v-else
         :grants="grants"
         :loading="grantsLoading"
         @edit="openEditGrantDialog"

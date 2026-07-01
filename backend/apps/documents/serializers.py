@@ -4,6 +4,7 @@ from apps.folders.models import Folder
 from common.validators import validate_uploaded_file
 
 from .models import Document, DocumentVersion
+from .permissions import can_download_document
 
 
 class DocumentVersionSerializer(serializers.ModelSerializer):
@@ -32,6 +33,7 @@ class DocumentSerializer(serializers.ModelSerializer):
     created_by_name = serializers.CharField(source="created_by.real_name", read_only=True)
     deleted_by_name = serializers.CharField(source="deleted_by.real_name", read_only=True)
     current_version = DocumentVersionSerializer(read_only=True)
+    can_download = serializers.SerializerMethodField()
 
     class Meta:
         model = Document
@@ -43,8 +45,8 @@ class DocumentSerializer(serializers.ModelSerializer):
             "folder_name",
             "title",
             "description",
-            "access_level",
             "current_version",
+            "can_download",
             "lock_version",
             "deleted_at",
             "deleted_by",
@@ -56,11 +58,17 @@ class DocumentSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = fields
 
+    def get_can_download(self, document: Document) -> bool:
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if user is None or not getattr(user, "is_authenticated", False):
+            return False
+        return can_download_document(user, document)
+
 
 class DocumentUpdateSerializer(serializers.Serializer):
     title = serializers.CharField(max_length=255, required=False)
     description = serializers.CharField(required=False, allow_blank=True)
-    access_level = serializers.ChoiceField(choices=Document.AccessLevel.choices, required=False)
     expected_updated_at = serializers.DateTimeField()
 
 
@@ -86,10 +94,6 @@ class DocumentUploadSerializer(serializers.Serializer):
     file = serializers.FileField()
     title = serializers.CharField(max_length=255, required=False, allow_blank=True)
     description = serializers.CharField(required=False, allow_blank=True)
-    access_level = serializers.ChoiceField(
-        choices=Document.AccessLevel.choices,
-        default=Document.AccessLevel.INTERNAL,
-    )
 
     def validate_file(self, uploaded_file):
         validate_uploaded_file(uploaded_file)

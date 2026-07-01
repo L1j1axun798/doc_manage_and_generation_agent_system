@@ -20,7 +20,7 @@ class ProjectAdmin(admin.ModelAdmin):
 
 @admin.register(ProjectMember)
 class ProjectMemberAdmin(admin.ModelAdmin):
-    list_display = ("project", "user", "role", "can_upload", "can_manage_permission", "joined_at")
-    list_filter = ("role", "can_upload", "can_manage_permission", "joined_at")
+    list_display = ("project", "user", "role", "can_manage_permission", "joined_at")
+    list_filter = ("role", "can_manage_permission", "joined_at")
     search_fields = ("project__code", "project__name", "user__username", "user__real_name")
     autocomplete_fields = ("project", "user")

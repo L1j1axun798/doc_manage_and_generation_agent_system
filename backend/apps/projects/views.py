@@ -27,6 +27,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
     queryset = Project.objects.none()
     serializer_class = ProjectSerializer
     permission_classes = [IsAuthenticated]
+    http_method_names = ["get", "post", "put", "patch", "head", "options"]
 
     def get_queryset(self):
         if getattr(self, "swagger_fake_view", False):

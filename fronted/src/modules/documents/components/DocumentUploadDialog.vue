@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 
-import type { DocumentAccessLevel, DocumentUploadPayload, FolderTreeNode } from '../documents.types'
+import type { DocumentUploadPayload, FolderTreeNode } from '../documents.types'
 import { flattenDocumentTargetFolderOptions } from '../utils/folders'
 
 const props = defineProps<{
@@ -26,7 +26,6 @@ const form = reactive({
   folder: resolveInitialFolderId(),
   title: '',
   description: '',
-  access_level: 'internal' as DocumentAccessLevel,
 })
 
 watch(
@@ -63,7 +62,6 @@ function submit(): void {
     file: file.value,
     title: form.title,
     description: form.description,
-    access_level: form.access_level,
   })
 }
 </script>
@@ -89,12 +87,6 @@ function submit(): void {
       </el-form-item>
       <el-form-item label="描述">
         <el-input v-model="form.description" :rows="3" type="textarea" />
-      </el-form-item>
-      <el-form-item label="访问级别">
-        <el-radio-group v-model="form.access_level">
-          <el-radio-button value="internal">内部</el-radio-button>
-          <el-radio-button value="restricted">受限</el-radio-button>
-        </el-radio-group>
       </el-form-item>
     </el-form>
     <template #footer>

@@ -41,6 +41,8 @@ def update_document_grant(
     data: dict[str, Any],
     request: Any = None,
 ) -> DocumentGrant:
+    if "document" in data or "user" in data:
+        raise ValidationError("授权文档和授权用户不能修改")
     _ensure_manage_allowed(actor=actor, document=grant.document)
     if grant.revoked_at is not None:
         raise ValidationError("授权已撤销，不能修改")
@@ -50,7 +52,6 @@ def update_document_grant(
         "can_update": grant.can_update,
         "can_delete": grant.can_delete,
         "can_restore": grant.can_restore,
-        "can_manage": grant.can_manage,
         "expires_at": grant.expires_at,
         **data,
     }
@@ -109,7 +110,6 @@ def _validate_grant_payload(data: dict[str, Any]) -> None:
         "can_update",
         "can_delete",
         "can_restore",
-        "can_manage",
     ]
     if not any(data.get(field) for field in action_fields):
         raise ValidationError("至少需要授予一个权限动作")
@@ -128,7 +128,6 @@ def grant_snapshot(grant: DocumentGrant) -> dict[str, Any]:
         "can_update": grant.can_update,
         "can_delete": grant.can_delete,
         "can_restore": grant.can_restore,
-        "can_manage": grant.can_manage,
         "expires_at": grant.expires_at.isoformat() if grant.expires_at else None,
         "revoked_at": grant.revoked_at.isoformat() if grant.revoked_at else None,
         "revoked_by_id": grant.revoked_by_id,

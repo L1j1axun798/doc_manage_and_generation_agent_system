@@ -970,7 +970,6 @@ const projectMemberFixture = {
   user_username: 'manager',
   user_real_name: '项目负责人',
   role: 'manager',
-  can_upload: true,
   can_download_restricted: true,
   can_manage_folder: true,
   can_delete: true,

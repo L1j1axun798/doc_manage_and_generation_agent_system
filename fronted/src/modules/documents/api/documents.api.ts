@@ -36,7 +36,6 @@ export async function uploadDocument(payload: DocumentUploadPayload): Promise<Do
   formData.append('file', payload.file)
   formData.append('title', payload.title || '')
   formData.append('description', payload.description || '')
-  formData.append('access_level', payload.access_level)
 
   const response = await apiClient.post<DocumentItem>('/documents/', formData)
   return response.data

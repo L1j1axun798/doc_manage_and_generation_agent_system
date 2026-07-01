@@ -1,5 +1,3 @@
-export type DocumentAccessLevel = 'internal' | 'restricted'
-
 export interface FolderTreeNode {
   id: number
   project: number | null
@@ -33,8 +31,8 @@ export interface DocumentItem {
   folder_name: string
   title: string
   description: string
-  access_level: DocumentAccessLevel
   current_version: DocumentVersion | null
+  can_download: boolean
   lock_version: number
   deleted_at: string | null
   deleted_by: number | null
@@ -51,7 +49,6 @@ export interface DocumentListQuery {
   ordering?: string
   project?: number
   folder?: number
-  access_level?: DocumentAccessLevel
 }
 
 export interface DocumentUploadPayload {
@@ -59,13 +56,11 @@ export interface DocumentUploadPayload {
   file: File
   title?: string
   description?: string
-  access_level: DocumentAccessLevel
 }
 
 export interface DocumentUpdatePayload {
   title?: string
   description?: string
-  access_level?: DocumentAccessLevel
   expected_updated_at: string
 }
 

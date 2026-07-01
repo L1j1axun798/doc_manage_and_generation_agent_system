@@ -226,7 +226,7 @@ def update_document_metadata(
         raise PermissionDenied("无权更新该文档")
     before_data = document_snapshot(locked_document)
     changed_fields = []
-    for field in ["title", "description", "access_level"]:
+    for field in ["title", "description"]:
         if field in data:
             setattr(locked_document, field, data[field])
             changed_fields.append(field)

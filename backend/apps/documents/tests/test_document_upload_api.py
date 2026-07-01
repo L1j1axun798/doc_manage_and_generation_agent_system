@@ -194,13 +194,59 @@ def test_upload_allows_project_staff_root(client, tmp_path, settings):
 
 
 @pytest.mark.django_db
-def test_member_without_upload_permission_is_denied(client, tmp_path, settings):
+def test_authenticated_user_can_upload_to_public_child_folder(client, tmp_path, settings):
+    settings.FILE_STORAGE_ROOT = tmp_path
+    admin = make_user("admin", User.Role.SYSTEM_ADMIN)
+    operator = make_user("operator", User.Role.DATA_OPERATOR)
+    root = Folder.objects.create(name="公司资质", is_system_root=True, created_by=admin)
+    folder = Folder.objects.create(parent=root, name="示例公司", created_by=admin)
+    client.force_login(operator)
+
+    response = client.post(
+        "/api/v1/documents/",
+        {
+            "folder": folder.id,
+            "file": upload_file("report.pdf", b"content"),
+        },
+    )
+
+    assert response.status_code == 201
+    document = Document.objects.get()
+    assert document.folder == folder
+    assert document.created_by == operator
+
+
+@pytest.mark.django_db
+def test_project_member_without_upload_permission_can_upload(client, tmp_path, settings):
     settings.FILE_STORAGE_ROOT = tmp_path
     admin = make_user("admin", User.Role.SYSTEM_ADMIN)
     operator = make_user("operator", User.Role.DATA_OPERATOR)
     project = Project.objects.create(name="项目", code="P001", created_by=admin)
     folder = Folder.objects.create(project=project, name="过程资料", created_by=admin)
     ProjectMember.objects.create(project=project, user=operator, can_upload=False)
+    client.force_login(operator)
+
+    response = client.post(
+        "/api/v1/documents/",
+        {
+            "folder": folder.id,
+            "file": upload_file("report.pdf", b"content"),
+        },
+    )
+
+    assert response.status_code == 201
+    document = Document.objects.get()
+    assert document.folder == folder
+    assert document.created_by == operator
+
+
+@pytest.mark.django_db
+def test_user_outside_project_cannot_upload_to_project_folder(client, tmp_path, settings):
+    settings.FILE_STORAGE_ROOT = tmp_path
+    admin = make_user("admin", User.Role.SYSTEM_ADMIN)
+    operator = make_user("operator", User.Role.DATA_OPERATOR)
+    project = Project.objects.create(name="项目", code="P001", created_by=admin)
+    folder = Folder.objects.create(project=project, name="过程资料", created_by=admin)
     client.force_login(operator)
 
     response = client.post(

@@ -21,7 +21,6 @@ import {
 } from '../api/documents.api'
 import { createFolder, disableFolder, fetchFolderTree } from '../api/folders.api'
 import type {
-  DocumentAccessLevel,
   DocumentItem,
   DocumentMovePayload,
   DocumentUpdatePayload,
@@ -80,7 +79,6 @@ const documents = ref<DocumentItem[]>([])
 const total = ref(0)
 const page = ref(1)
 const search = ref('')
-const accessLevel = ref<DocumentAccessLevel | ''>('')
 const ordering = ref('-updated_at')
 const treeLoading = ref(false)
 const listLoading = ref(false)
@@ -265,9 +263,21 @@ function hasDescendant(node: FolderTreeNode, folderId: number): boolean {
   return node.children.some((child) => child.id === folderId || hasDescendant(child, folderId))
 }
 
-function selectSubfolder(folderId: number): void {
+function selectSubfolderItem(item: FolderTreeNode): void {
+  if (!canSelectSubfolder(item)) {
+    return
+  }
+
   hiddenDocumentResultsFolderId.value = undefined
-  selectedFolderId.value = folderId
+  selectedFolderId.value = item.id
+}
+
+function canSelectSubfolder(item: FolderTreeNode): boolean {
+  if (!isStaffRoot.value || authStore.isSystemAdmin) {
+    return true
+  }
+
+  return item.name.trim() === (authStore.user?.real_name ?? '').trim()
 }
 
 function closeDocumentResults(): void {
@@ -363,6 +373,13 @@ async function deleteSubfolder(item: FolderTreeNode): Promise<void> {
 }
 
 async function loadDocuments(): Promise<void> {
+  if (isTopPublicFolderMode.value && selectedFolderId.value === undefined && !search.value.trim()) {
+    documents.value = []
+    total.value = 0
+    listLoading.value = false
+    return
+  }
+
   if (isSubfolderPanelRootLanding.value) {
     documents.value = []
     total.value = 0
@@ -379,7 +396,6 @@ async function loadDocuments(): Promise<void> {
       ordering: ordering.value,
       project: props.scope === 'project' ? props.projectId : undefined,
       folder: shouldShowFolderNavigation.value ? selectedFolderId.value : undefined,
-      access_level: accessLevel.value || undefined,
     }
     const response: ApiPage<DocumentItem> = isTrashMode.value
       ? await fetchTrashDocuments(query)
@@ -400,7 +416,6 @@ function submitSearch(): void {
 
 function resetFilters(): void {
   search.value = ''
-  accessLevel.value = ''
   ordering.value = '-updated_at'
   page.value = 1
   void loadDocuments()
@@ -616,12 +631,16 @@ async function handleRestore(document: DocumentItem): Promise<void> {
             v-for="item in subfolderItems"
             :key="item.id"
             class="document-subfolder-panel__item"
-            :class="{ 'is-active': selectedFolderId === item.id }"
+            :class="{
+              'is-active': selectedFolderId === item.id,
+              'is-disabled': !canSelectSubfolder(item),
+            }"
           >
             <button
               class="document-subfolder-panel__select"
+              :disabled="!canSelectSubfolder(item)"
               type="button"
-              @click="selectSubfolder(item.id)"
+              @click="selectSubfolderItem(item)"
             >
               {{ item.name }}
             </button>
@@ -647,7 +666,6 @@ async function handleRestore(document: DocumentItem): Promise<void> {
 
       <div v-if="shouldShowDocumentResults" class="document-explorer__actions">
         <DocumentSearchPanel
-          v-model:access-level="accessLevel"
           v-model:ordering="ordering"
           v-model:search="search"
           :loading="listLoading"

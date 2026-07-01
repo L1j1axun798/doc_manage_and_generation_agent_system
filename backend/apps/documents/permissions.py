@@ -7,14 +7,17 @@ from .models import Document
 
 
 def can_upload_document(user: Any, project: Project | None) -> bool:
+    if not getattr(user, "is_authenticated", False):
+        return False
+    if not getattr(user, "is_active", True):
+        return False
     if getattr(user, "is_temporary_user", False):
         return False
     if getattr(user, "is_system_admin", False):
         return True
     if project is None:
-        return False
-    membership = get_project_membership(user, project)
-    return bool(membership and membership.can_upload)
+        return True
+    return get_project_membership(user, project) is not None
 
 
 def can_download_document(user: Any, document: Document) -> bool:
@@ -22,14 +25,7 @@ def can_download_document(user: Any, document: Document) -> bool:
         return False
     if getattr(user, "is_system_admin", False):
         return True
-    if _has_active_grant(user, document, "download"):
-        return True
-    if document.access_level == Document.AccessLevel.INTERNAL:
-        return _has_basic_scope(user, document)
-    if document.project is None:
-        return False
-    membership = get_project_membership(user, document.project)
-    return bool(membership and membership.can_download_restricted)
+    return _has_active_grant(user, document, "download")
 
 
 def can_view_document(user: Any, document: Document) -> bool:
@@ -39,12 +35,7 @@ def can_view_document(user: Any, document: Document) -> bool:
         return True
     if _has_active_grant(user, document, "view"):
         return True
-    if document.access_level == Document.AccessLevel.INTERNAL:
-        return _has_basic_scope(user, document)
-    if document.project is None:
-        return False
-    membership = get_project_membership(user, document.project)
-    return bool(membership and membership.can_download_restricted)
+    return _has_basic_scope(user, document)
 
 
 def can_update_document(user: Any, document: Document) -> bool:

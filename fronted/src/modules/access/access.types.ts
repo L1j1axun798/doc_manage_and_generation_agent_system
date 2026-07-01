@@ -5,12 +5,12 @@ export interface DocumentGrant {
   user: number
   user_username: string
   user_real_name: string
+  user_phone: string
   can_view: boolean
   can_download: boolean
   can_update: boolean
   can_delete: boolean
   can_restore: boolean
-  can_manage: boolean
   expires_at: string | null
   is_expired: boolean
   is_active: boolean
@@ -31,7 +31,6 @@ export interface DocumentGrantPayload {
   can_update: boolean
   can_delete: boolean
   can_restore: boolean
-  can_manage: boolean
   expires_at: string | null
 }
 

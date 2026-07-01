@@ -281,14 +281,13 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/DocumentGrant'
+              $ref: '#/components/schemas/DocumentGrantUpdate'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/DocumentGrant'
+              $ref: '#/components/schemas/DocumentGrantUpdate'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/DocumentGrant'
-        required: true
+              $ref: '#/components/schemas/DocumentGrantUpdate'
       security:
       - cookieAuth: []
       responses:
@@ -296,7 +295,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/DocumentGrant'
+                $ref: '#/components/schemas/DocumentGrantUpdate'
           description: ''
     patch:
       operationId: v1_document_grants_partial_update
@@ -313,13 +312,13 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PatchedDocumentGrant'
+              $ref: '#/components/schemas/PatchedDocumentGrantUpdate'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/PatchedDocumentGrant'
+              $ref: '#/components/schemas/PatchedDocumentGrantUpdate'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/PatchedDocumentGrant'
+              $ref: '#/components/schemas/PatchedDocumentGrantUpdate'
       security:
       - cookieAuth: []
       responses:
@@ -327,7 +326,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/DocumentGrant'
+                $ref: '#/components/schemas/DocumentGrantUpdate'
           description: ''
     delete:
       operationId: v1_document_grants_destroy
@@ -370,21 +369,6 @@ paths:
     get:
       operationId: v1_documents_list
       parameters:
-      - in: query
-        name: access_level
-        schema:
-          type: string
-          title: 访问级别
-          enum:
-          - internal
-          - restricted
-        description: |-
-          * `internal` - 内部
-          * `restricted` - 受限
-      - in: query
-        name: folder
-        schema:
-          type: integer
       - name: ordering
         required: false
         in: query
@@ -737,21 +721,6 @@ paths:
     get:
       operationId: v1_documents_trash_list
       parameters:
-      - in: query
-        name: access_level
-        schema:
-          type: string
-          title: 访问级别
-          enum:
-          - internal
-          - restricted
-        description: |-
-          * `internal` - 内部
-          * `restricted` - 受限
-      - in: query
-        name: folder
-        schema:
-          type: integer
       - name: ordering
         required: false
         in: query
@@ -927,22 +896,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/Folder'
           description: ''
-    delete:
-      operationId: v1_folders_destroy
-      parameters:
-      - in: path
-        name: id
-        schema:
-          type: integer
-        description: 标识此 文件夹 的 唯一整数值。
-        required: true
-      tags:
-      - v1
-      security:
-      - cookieAuth: []
-      responses:
-        '204':
-          description: No response body
   /api/v1/folders/{id}/disable/:
     post:
       operationId: v1_folders_disable_create
@@ -1277,22 +1230,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/Project'
           description: ''
-    delete:
-      operationId: v1_projects_destroy
-      parameters:
-      - in: path
-        name: id
-        schema:
-          type: integer
-        description: 标识此 项目 的 唯一整数值。
-        required: true
-      tags:
-      - v1
-      security:
-      - cookieAuth: []
-      responses:
-        '204':
-          description: No response body
   /api/v1/projects/{id}/archive/:
     post:
       operationId: v1_projects_archive_create
@@ -1877,14 +1814,6 @@ paths:
           description: ''
 components:
   schemas:
-    AccessLevelEnum:
-      enum:
-      - internal
-      - restricted
-      type: string
-      description: |-
-        * `internal` - 内部
-        * `restricted` - 受限
     AuditLog:
       type: object
       properties:
@@ -2013,14 +1942,12 @@ components:
           type: string
           readOnly: true
           title: 描述
-        access_level:
-          allOf:
-          - $ref: '#/components/schemas/AccessLevelEnum'
-          readOnly: true
-          title: 访问级别
         current_version:
           allOf:
           - $ref: '#/components/schemas/DocumentVersion'
+          readOnly: true
+        can_download:
+          type: boolean
           readOnly: true
         lock_version:
           type: integer
@@ -2059,7 +1986,7 @@ components:
           readOnly: true
           title: 更新时间
       required:
-      - access_level
+      - can_download
       - created_at
       - created_by
       - created_by_name
@@ -2109,6 +2036,9 @@ components:
         user_real_name:
           type: string
           readOnly: true
+        user_phone:
+          type: string
+          readOnly: true
         can_view:
           type: boolean
           title: 可查看
@@ -2124,9 +2054,6 @@ components:
         can_restore:
           type: boolean
           title: 可恢复
-        can_manage:
-          type: boolean
-          title: 可管理授权
         expires_at:
           type: string
           format: date-time
@@ -2184,6 +2111,108 @@ components:
       - revoked_by_name
       - updated_at
       - user
+      - user_phone
+      - user_real_name
+      - user_username
+    DocumentGrantUpdate:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        document:
+          type: integer
+          readOnly: true
+          title: 文档
+        document_title:
+          type: string
+          readOnly: true
+        user:
+          type: integer
+          readOnly: true
+          title: 被授权用户
+        user_username:
+          type: string
+          readOnly: true
+        user_real_name:
+          type: string
+          readOnly: true
+        user_phone:
+          type: string
+          readOnly: true
+        can_view:
+          type: boolean
+          title: 可查看
+        can_download:
+          type: boolean
+          title: 可下载
+        can_update:
+          type: boolean
+          title: 可更新
+        can_delete:
+          type: boolean
+          title: 可删除
+        can_restore:
+          type: boolean
+          title: 可恢复
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+          title: 过期时间
+        is_expired:
+          type: boolean
+          readOnly: true
+        is_active:
+          type: boolean
+          readOnly: true
+        created_by:
+          type: integer
+          readOnly: true
+          nullable: true
+          title: 授权人
+        created_by_name:
+          type: string
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+          title: 创建时间
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+          title: 更新时间
+        revoked_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          title: 撤销时间
+        revoked_by:
+          type: integer
+          readOnly: true
+          nullable: true
+          title: 撤销人
+        revoked_by_name:
+          type: string
+          readOnly: true
+      required:
+      - created_at
+      - created_by
+      - created_by_name
+      - document
+      - document_title
+      - id
+      - is_active
+      - is_expired
+      - revoked_at
+      - revoked_by
+      - revoked_by_name
+      - updated_at
+      - user
+      - user_phone
       - user_real_name
       - user_username
     DocumentMove:
@@ -2213,8 +2242,6 @@ components:
           maxLength: 255
         description:
           type: string
-        access_level:
-          $ref: '#/components/schemas/AccessLevelEnum'
         expected_updated_at:
           type: string
           format: date-time
@@ -2233,10 +2260,6 @@ components:
           maxLength: 255
         description:
           type: string
-        access_level:
-          allOf:
-          - $ref: '#/components/schemas/AccessLevelEnum'
-          default: internal
       required:
       - file
       - folder
@@ -2321,8 +2344,8 @@ components:
           title: 父文件夹
         parent_name:
           type: string
-          nullable: true
           readOnly: true
+          nullable: true
         name:
           type: string
           title: 文件夹名称
@@ -2652,7 +2675,7 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/User'
-    PatchedDocumentGrant:
+    PatchedDocumentGrantUpdate:
       type: object
       properties:
         id:
@@ -2660,17 +2683,22 @@ components:
           readOnly: true
         document:
           type: integer
+          readOnly: true
           title: 文档
         document_title:
           type: string
           readOnly: true
         user:
           type: integer
+          readOnly: true
           title: 被授权用户
         user_username:
           type: string
           readOnly: true
         user_real_name:
+          type: string
+          readOnly: true
+        user_phone:
           type: string
           readOnly: true
         can_view:
@@ -2688,9 +2716,6 @@ components:
         can_restore:
           type: boolean
           title: 可恢复
-        can_manage:
-          type: boolean
-          title: 可管理授权
         expires_at:
           type: string
           format: date-time
@@ -2742,8 +2767,6 @@ components:
           maxLength: 255
         description:
           type: string
-        access_level:
-          $ref: '#/components/schemas/AccessLevelEnum'
         expected_updated_at:
           type: string
           format: date-time
@@ -2766,8 +2789,8 @@ components:
           title: 父文件夹
         parent_name:
           type: string
-          nullable: true
           readOnly: true
+          nullable: true
         name:
           type: string
           title: 文件夹名称
@@ -2889,12 +2912,6 @@ components:
           allOf:
           - $ref: '#/components/schemas/ProjectMemberRoleEnum'
           title: 项目角色
-        can_upload:
-          type: boolean
-          title: 可上传
-        can_download_restricted:
-          type: boolean
-          title: 可下载受限文件
         can_manage_folder:
           type: boolean
           title: 可管理文件夹
@@ -2904,9 +2921,6 @@ components:
         can_restore:
           type: boolean
           title: 可恢复
-        can_manage_permission:
-          type: boolean
-          title: 可管理授权
         joined_at:
           type: string
           format: date-time
@@ -3051,12 +3065,6 @@ components:
           allOf:
           - $ref: '#/components/schemas/ProjectMemberRoleEnum'
           title: 项目角色
-        can_upload:
-          type: boolean
-          title: 可上传
-        can_download_restricted:
-          type: boolean
-          title: 可下载受限文件
         can_manage_folder:
           type: boolean
           title: 可管理文件夹
@@ -3066,9 +3074,6 @@ components:
         can_restore:
           type: boolean
           title: 可恢复
-        can_manage_permission:
-          type: boolean
-          title: 可管理授权
         joined_at:
           type: string
           format: date-time
@@ -3421,11 +3426,13 @@ components:
       - system_admin
       - project_manager
       - data_operator
+      - temporary_user
       type: string
       description: |-
         * `system_admin` - 系统管理员
         * `project_manager` - 项目负责人
         * `data_operator` - 资料整理员
+        * `temporary_user` - 临时用户
   securitySchemes:
     cookieAuth:
       type: apiKey

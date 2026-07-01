@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { ElMessage } from 'element-plus'
-import { computed, reactive, watch } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 
+import { fetchUsers } from '@/modules/users/api/users.api'
+import type { SystemUser } from '@/modules/users/users.types'
 import type { DocumentGrant, DocumentGrantPayload } from '../access.types'
 
 const props = defineProps<{
@@ -29,18 +31,18 @@ const form = reactive<DocumentGrantPayload>({
   can_update: false,
   can_delete: false,
   can_restore: false,
-  can_manage: false,
   expires_at: null,
 })
 
 const title = computed(() => (props.grant ? '修改授权' : '添加授权'))
+const userOptions = ref<SystemUser[]>([])
+const userLoading = ref(false)
 const actionFields = [
   'can_view',
   'can_download',
   'can_update',
   'can_delete',
   'can_restore',
-  'can_manage',
 ] as const
 
 watch(
@@ -57,15 +59,52 @@ watch(
     form.can_update = props.grant?.can_update ?? false
     form.can_delete = props.grant?.can_delete ?? false
     form.can_restore = props.grant?.can_restore ?? false
-    form.can_manage = props.grant?.can_manage ?? false
     form.expires_at = props.grant?.expires_at ?? null
+    if (props.grant) {
+      userOptions.value = [
+        {
+          id: props.grant.user,
+          username: props.grant.user_username,
+          real_name: props.grant.user_real_name,
+          employee_no: null,
+          role: 'data_operator',
+          phone: props.grant.user_phone,
+          email: '',
+          is_active: true,
+          must_change_password: false,
+          created_at: '',
+        },
+      ]
+    } else {
+      void searchUsers('')
+    }
   },
   { immediate: true },
 )
 
+async function searchUsers(keyword: string): Promise<void> {
+  userLoading.value = true
+  try {
+    const response = await fetchUsers({
+      search: keyword.trim() || undefined,
+      ordering: 'username',
+    })
+    userOptions.value = response.results
+  } catch {
+    ElMessage.error('用户搜索失败')
+  } finally {
+    userLoading.value = false
+  }
+}
+
+function userOptionLabel(user: SystemUser): string {
+  const phone = user.phone ? ` / ${user.phone}` : ''
+  return `${user.username}${phone} / ${user.real_name}`
+}
+
 function submit(): void {
   if (!form.user) {
-    ElMessage.warning('请输入被授权用户 ID')
+    ElMessage.warning('请选择被授权用户')
     return
   }
 
@@ -81,14 +120,24 @@ function submit(): void {
 <template>
   <el-dialog v-model="dialogVisible" :title="title" width="520px">
     <el-form class="access-dialog-form" label-width="104px">
-      <el-form-item label="用户 ID" required>
-        <el-input-number
+      <el-form-item label="用户名/手机号" required>
+        <el-select
           v-model="form.user"
           :disabled="Boolean(grant)"
-          :min="1"
-          :step="1"
-          controls-position="right"
-        />
+          filterable
+          :loading="userLoading"
+          placeholder="输入用户名、姓名或手机号"
+          remote
+          reserve-keyword
+          :remote-method="searchUsers"
+        >
+          <el-option
+            v-for="user in userOptions"
+            :key="user.id"
+            :label="userOptionLabel(user)"
+            :value="user.id"
+          />
+        </el-select>
       </el-form-item>
 
       <el-form-item label="权限动作" required>
@@ -98,7 +147,6 @@ function submit(): void {
           <el-checkbox v-model="form.can_update" label="可更新" />
           <el-checkbox v-model="form.can_delete" label="可删除" />
           <el-checkbox v-model="form.can_restore" label="可恢复" />
-          <el-checkbox v-model="form.can_manage" label="可管理授权" />
         </div>
       </el-form-item>
 

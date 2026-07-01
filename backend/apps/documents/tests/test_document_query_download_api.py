@@ -1,5 +1,3 @@
-from hashlib import sha256
-
 import pytest
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -21,6 +19,15 @@ def make_user(username: str, role: str):
     )
 
 
+def make_user_with_real_name(username: str, real_name: str, role: str):
+    return User.objects.create_user(
+        username=username,
+        password="Password123!",
+        real_name=real_name,
+        role=role,
+    )
+
+
 def upload_file(name: str, content: bytes, content_type: str = "application/pdf"):
     return SimpleUploadedFile(name, content, content_type=content_type)
 
@@ -31,14 +38,12 @@ def create_document_via_api(
     folder: Folder,
     title: str,
     content: bytes,
-    access_level: str = Document.AccessLevel.INTERNAL,
 ):
     response = client.post(
         "/api/v1/documents/",
         {
             "folder": folder.id,
             "title": title,
-            "access_level": access_level,
             "file": upload_file(f"{title}.pdf", content),
         },
     )
@@ -102,7 +107,7 @@ def test_temporary_user_cannot_search_or_download_regular_documents(client, tmp_
 
 
 @pytest.mark.django_db
-def test_internal_document_current_version_downloads_and_writes_audit(
+def test_non_admin_cannot_download_without_document_grant(
     client,
     tmp_path,
     settings,
@@ -124,15 +129,12 @@ def test_internal_document_current_version_downloads_and_writes_audit(
 
     response = client.get(f"/api/v1/documents/{document['id']}/download/")
 
-    assert response.status_code == 200
-    assert b"".join(response.streaming_content) == content
-    assert response["Content-Length"] == str(len(content))
-    assert "filename*=UTF-8" in response["Content-Disposition"]
-    assert AuditLog.objects.filter(action="document.download", result="success").exists()
+    assert response.status_code == 403
+    assert AuditLog.objects.filter(action="document.download", result="denied").exists()
 
 
 @pytest.mark.django_db
-def test_restricted_document_is_hidden_and_download_denied_without_permission(
+def test_project_document_is_visible_but_download_denied_without_grant(
     client,
     tmp_path,
     settings,
@@ -147,37 +149,8 @@ def test_restricted_document_is_hidden_and_download_denied_without_permission(
     document = create_document_via_api(
         client,
         folder=folder,
-        title="受限报告",
-        content=b"restricted",
-        access_level=Document.AccessLevel.RESTRICTED,
-    )
-    client.force_login(operator)
-
-    list_response = client.get("/api/v1/documents/")
-    download_response = client.get(f"/api/v1/documents/{document['id']}/download/")
-
-    assert list_response.status_code == 200
-    assert list_response.json()["count"] == 0
-    assert download_response.status_code == 403
-    assert AuditLog.objects.filter(action="document.download", result="denied").exists()
-
-
-@pytest.mark.django_db
-def test_restricted_document_download_allowed_with_member_flag(client, tmp_path, settings):
-    settings.FILE_STORAGE_ROOT = tmp_path
-    admin = make_user("admin", User.Role.SYSTEM_ADMIN)
-    operator = make_user("operator", User.Role.DATA_OPERATOR)
-    project = Project.objects.create(name="项目", code="P001", created_by=admin)
-    folder = Folder.objects.create(project=project, name="过程资料", created_by=admin)
-    ProjectMember.objects.create(project=project, user=operator, can_download_restricted=True)
-    content = b"restricted content"
-    client.force_login(admin)
-    document = create_document_via_api(
-        client,
-        folder=folder,
-        title="受限报告",
-        content=content,
-        access_level=Document.AccessLevel.RESTRICTED,
+        title="项目报告",
+        content=b"project",
     )
     client.force_login(operator)
 
@@ -186,6 +159,67 @@ def test_restricted_document_download_allowed_with_member_flag(client, tmp_path,
 
     assert list_response.status_code == 200
     assert list_response.json()["count"] == 1
+    assert download_response.status_code == 403
+    assert AuditLog.objects.filter(action="document.download", result="denied").exists()
+
+
+@pytest.mark.django_db
+def test_admin_can_download_any_document(
+    client,
+    tmp_path,
+    settings,
+):
+    settings.FILE_STORAGE_ROOT = tmp_path
+    admin = make_user("admin", User.Role.SYSTEM_ADMIN)
+    project = Project.objects.create(name="项目", code="P001", created_by=admin)
+    folder = Folder.objects.create(project=project, name="过程资料", created_by=admin)
+    content = b"admin content"
+    client.force_login(admin)
+    document = create_document_via_api(
+        client,
+        folder=folder,
+        title="报告",
+        content=content,
+    )
+
+    download_response = client.get(f"/api/v1/documents/{document['id']}/download/")
+
+    assert download_response.status_code == 200
+    assert b"".join(download_response.streaming_content) == content
+
+
+@pytest.mark.django_db
+def test_document_download_allowed_with_document_grant(
+    client,
+    tmp_path,
+    settings,
+):
+    settings.FILE_STORAGE_ROOT = tmp_path
+    admin = make_user("admin", User.Role.SYSTEM_ADMIN)
+    operator = make_user("operator", User.Role.DATA_OPERATOR)
+    project = Project.objects.create(name="项目", code="P001", created_by=admin)
+    folder = Folder.objects.create(project=project, name="过程资料", created_by=admin)
+    content = b"granted content"
+    client.force_login(admin)
+    document = create_document_via_api(
+        client,
+        folder=folder,
+        title="授权报告",
+        content=content,
+    )
+    client.post(
+        "/api/v1/document-grants/",
+        {
+            "document": document["id"],
+            "user": operator.id,
+            "can_download": True,
+        },
+        content_type="application/json",
+    )
+    client.force_login(operator)
+
+    download_response = client.get(f"/api/v1/documents/{document['id']}/download/")
+
     assert download_response.status_code == 200
     assert b"".join(download_response.streaming_content) == content
 
@@ -222,7 +256,7 @@ def test_guessing_document_id_outside_project_scope_returns_404(client, tmp_path
 
 
 @pytest.mark.django_db
-def test_document_list_filter_by_folder_and_access_level(client, tmp_path, settings):
+def test_document_list_filter_by_folder(client, tmp_path, settings):
     settings.FILE_STORAGE_ROOT = tmp_path
     admin = make_user("admin", User.Role.SYSTEM_ADMIN)
     project = Project.objects.create(name="项目", code="P001", created_by=admin)
@@ -238,20 +272,16 @@ def test_document_list_filter_by_folder_and_access_level(client, tmp_path, setti
     create_document_via_api(
         client,
         folder=folder_b,
-        title="受限报告",
-        content=b"restricted",
-        access_level=Document.AccessLevel.RESTRICTED,
+        title="B 报告",
+        content=b"folder b",
     )
 
-    response = client.get(
-        f"/api/v1/documents/?folder={folder_b.id}&access_level={Document.AccessLevel.RESTRICTED}"
-    )
+    response = client.get(f"/api/v1/documents/?folder={folder_b.id}")
 
     assert response.status_code == 200
     payload = response.json()
     assert payload["count"] == 1
-    assert payload["results"][0]["title"] == "受限报告"
-    assert payload["results"][0]["current_version"]["sha256"] == sha256(b"restricted").hexdigest()
+    assert payload["results"][0]["title"] == "B 报告"
 
 
 @pytest.mark.django_db
@@ -291,3 +321,50 @@ def test_public_root_folder_filter_includes_matching_project_folders(client, tmp
     assert response.status_code == 200
     titles = {item["title"] for item in response.json()["results"]}
     assert {"标准目录报告", "历史目录报告"} <= titles
+
+
+@pytest.mark.django_db
+def test_public_staff_root_only_lists_current_users_documents_for_non_admin(
+    client,
+    tmp_path,
+    settings,
+):
+    settings.FILE_STORAGE_ROOT = tmp_path
+    admin = make_user("admin", User.Role.SYSTEM_ADMIN)
+    zhang = make_user_with_real_name("zhang", "张三", User.Role.DATA_OPERATOR)
+    staff_root = Folder.objects.create(
+        name="人员资质",
+        code="PUBLIC-STAFF",
+        is_system_root=True,
+        created_by=admin,
+    )
+    zhang_folder = Folder.objects.create(parent=staff_root, name="张三", created_by=admin)
+    li_folder = Folder.objects.create(parent=staff_root, name="李四", created_by=admin)
+    client.force_login(admin)
+    zhang_document = create_document_via_api(
+        client,
+        folder=zhang_folder,
+        title="张三资格证",
+        content=b"zhang",
+    )
+    li_document = create_document_via_api(
+        client,
+        folder=li_folder,
+        title="李四资格证",
+        content=b"li",
+    )
+
+    admin_response = client.get(f"/api/v1/documents/?folder={staff_root.id}")
+    client.force_login(zhang)
+    root_response = client.get(f"/api/v1/documents/?folder={staff_root.id}")
+    other_folder_response = client.get(f"/api/v1/documents/?folder={li_folder.id}")
+    other_detail_response = client.get(f"/api/v1/documents/{li_document['id']}/")
+
+    assert admin_response.status_code == 200
+    assert admin_response.json()["count"] == 2
+    assert root_response.status_code == 200
+    assert root_response.json()["count"] == 1
+    assert root_response.json()["results"][0]["id"] == zhang_document["id"]
+    assert other_folder_response.status_code == 200
+    assert other_folder_response.json()["count"] == 0
+    assert other_detail_response.status_code == 404

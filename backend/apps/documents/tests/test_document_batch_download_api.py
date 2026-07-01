@@ -5,6 +5,7 @@ import pytest
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
 
+from apps.access.models import DocumentGrant
 from apps.audit.models import AuditLog
 from apps.documents.models import Document
 from apps.documents.services import BATCH_DOWNLOAD_MAX_BYTES
@@ -33,7 +34,6 @@ def create_document(client, *, folder: Folder, title: str, filename: str, conten
         {
             "folder": folder.id,
             "title": title,
-            "access_level": Document.AccessLevel.INTERNAL,
             "file": upload_file(filename, content),
         },
     )
@@ -118,6 +118,68 @@ def test_batch_download_rejects_any_unauthorized_document(client, tmp_path, sett
     )
 
     assert response.status_code == 403
+
+
+@pytest.mark.django_db
+def test_batch_download_rejects_document_without_download_grant(client, tmp_path, settings):
+    settings.FILE_STORAGE_ROOT = tmp_path
+    admin = make_user("admin", User.Role.SYSTEM_ADMIN)
+    operator = make_user("operator", User.Role.DATA_OPERATOR)
+    project = Project.objects.create(name="项目", code="P001", created_by=admin)
+    folder = Folder.objects.create(project=project, name="资料", created_by=admin)
+    ProjectMember.objects.create(project=project, user=operator)
+    client.force_login(admin)
+    document = create_document(
+        client,
+        folder=folder,
+        title="A",
+        filename="a.pdf",
+        content=b"a",
+    )
+    client.force_login(operator)
+
+    response = client.post(
+        "/api/v1/documents/batch-download/",
+        {"document_ids": [document["id"]]},
+        content_type="application/json",
+    )
+
+    assert response.status_code == 403
+    assert AuditLog.objects.filter(action="document.batch_download", result="denied").exists()
+
+
+@pytest.mark.django_db
+def test_batch_download_allows_document_with_download_grant(client, tmp_path, settings):
+    settings.FILE_STORAGE_ROOT = tmp_path
+    admin = make_user("admin", User.Role.SYSTEM_ADMIN)
+    operator = make_user("operator", User.Role.DATA_OPERATOR)
+    project = Project.objects.create(name="项目", code="P001", created_by=admin)
+    folder = Folder.objects.create(project=project, name="资料", created_by=admin)
+    client.force_login(admin)
+    document = create_document(
+        client,
+        folder=folder,
+        title="A",
+        filename="a.pdf",
+        content=b"a",
+    )
+    DocumentGrant.objects.create(
+        document_id=document["id"],
+        user=operator,
+        can_download=True,
+        created_by=admin,
+    )
+    client.force_login(operator)
+
+    response = client.post(
+        "/api/v1/documents/batch-download/",
+        {"document_ids": [document["id"]]},
+        content_type="application/json",
+    )
+
+    assert response.status_code == 200
+    with ZipFile(BytesIO(response_body(response))) as archive:
+        assert archive.read("a.pdf") == b"a"
 
 
 @pytest.mark.django_db
