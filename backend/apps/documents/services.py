@@ -6,7 +6,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 from django.core.files.base import File
 from django.db import transaction
-from django.db.models import Max
+from django.db.models import Max, Q
 from django.utils import timezone
 from rest_framework.exceptions import APIException, PermissionDenied, ValidationError
 
@@ -67,6 +67,12 @@ def create_document(
     backend = storage or LocalDocumentStorage()
     stored_file = backend.save_uploaded_file(uploaded_file)
     try:
+        _ensure_folder_accepts_document(
+            folder=folder,
+            title=document_title,
+            original_filename=PurePath(uploaded_file.name).name,
+            sha256=stored_file.sha256,
+        )
         with transaction.atomic():
             document = Document.objects.create(
                 project=folder.project,
@@ -230,6 +236,12 @@ def update_document_metadata(
         if field in data:
             setattr(locked_document, field, data[field])
             changed_fields.append(field)
+    if "title" in changed_fields:
+        _ensure_folder_accepts_document(
+            folder=locked_document.folder,
+            title=locked_document.title,
+            exclude_document_id=locked_document.pk,
+        )
     _touch_document(locked_document, extra_fields=changed_fields)
     audit_log(
         user=actor,
@@ -259,6 +271,14 @@ def move_document(
     if not can_update_document(actor, locked_document):
         raise PermissionDenied("无权移动该文档")
     _validate_target_folder(document=locked_document, folder=folder)
+    current_version = locked_document.current_version
+    _ensure_folder_accepts_document(
+        folder=folder,
+        title=locked_document.title,
+        original_filename=current_version.original_filename if current_version else None,
+        sha256=current_version.sha256 if current_version else None,
+        exclude_document_id=locked_document.pk,
+    )
     before_data = document_snapshot(locked_document)
     locked_document.folder = folder
     _touch_document(locked_document, extra_fields=["folder"])
@@ -321,6 +341,14 @@ def restore_document(
         raise PermissionDenied("无权恢复该文档")
     if not locked_document.folder.is_active:
         raise ValidationError("所在文件夹已停用，不能恢复")
+    current_version = locked_document.current_version
+    _ensure_folder_accepts_document(
+        folder=locked_document.folder,
+        title=locked_document.title,
+        original_filename=current_version.original_filename if current_version else None,
+        sha256=current_version.sha256 if current_version else None,
+        exclude_document_id=locked_document.pk,
+    )
     before_data = document_snapshot(locked_document)
     locked_document.deleted_at = None
     locked_document.deleted_by = None
@@ -475,6 +503,32 @@ def _validate_target_folder(*, document: Document, folder: Folder) -> None:
     _ensure_not_qualification_root_folder(folder=folder)
     if folder.project_id != document.project_id:
         raise ValidationError("目标文件夹和文档项目不一致")
+
+
+def _ensure_folder_accepts_document(
+    *,
+    folder: Folder,
+    title: str | None = None,
+    original_filename: str | None = None,
+    sha256: str | None = None,
+    exclude_document_id: int | None = None,
+) -> None:
+    documents = Document.objects.filter(folder=folder, deleted_at__isnull=True)
+    if exclude_document_id is not None:
+        documents = documents.exclude(pk=exclude_document_id)
+
+    name_filters = Q()
+    clean_title = title.strip() if title else ""
+    clean_filename = PurePath(original_filename).name if original_filename else ""
+    if clean_title:
+        name_filters |= Q(title=clean_title)
+    if clean_filename:
+        name_filters |= Q(current_version__original_filename=clean_filename)
+    if name_filters and documents.filter(name_filters).exists():
+        raise ValidationError("同一目录下已存在同名文件")
+
+    if sha256 and documents.filter(current_version__sha256=sha256).exists():
+        raise ValidationError("同一目录下已存在内容相同的重复文件")
 
 
 def _ensure_not_qualification_root_folder(*, folder: Folder) -> None:

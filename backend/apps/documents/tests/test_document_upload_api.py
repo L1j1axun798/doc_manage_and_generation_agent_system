@@ -217,6 +217,55 @@ def test_authenticated_user_can_upload_to_public_child_folder(client, tmp_path, 
 
 
 @pytest.mark.django_db
+def test_upload_rejects_same_name_and_duplicate_content_in_same_folder(
+    client,
+    tmp_path,
+    settings,
+):
+    settings.FILE_STORAGE_ROOT = tmp_path
+    admin = make_user("admin", User.Role.SYSTEM_ADMIN)
+    root = Folder.objects.create(name="公司资质", is_system_root=True, created_by=admin)
+    folder = Folder.objects.create(parent=root, name="示例公司", created_by=admin)
+    other_folder = Folder.objects.create(parent=root, name="其他公司", created_by=admin)
+    client.force_login(admin)
+    first = client.post(
+        "/api/v1/documents/",
+        {
+            "folder": folder.id,
+            "file": upload_file("report.pdf", b"content-a"),
+        },
+    )
+
+    same_name = client.post(
+        "/api/v1/documents/",
+        {
+            "folder": folder.id,
+            "file": upload_file("report.pdf", b"content-b"),
+        },
+    )
+    same_content = client.post(
+        "/api/v1/documents/",
+        {
+            "folder": folder.id,
+            "file": upload_file("copy.pdf", b"content-a"),
+        },
+    )
+    other_folder_same_name = client.post(
+        "/api/v1/documents/",
+        {
+            "folder": other_folder.id,
+            "file": upload_file("report.pdf", b"content-c"),
+        },
+    )
+
+    assert first.status_code == 201
+    assert same_name.status_code == 400
+    assert same_content.status_code == 400
+    assert other_folder_same_name.status_code == 201
+    assert Document.objects.count() == 2
+
+
+@pytest.mark.django_db
 def test_project_member_without_upload_permission_can_upload(client, tmp_path, settings):
     settings.FILE_STORAGE_ROOT = tmp_path
     admin = make_user("admin", User.Role.SYSTEM_ADMIN)

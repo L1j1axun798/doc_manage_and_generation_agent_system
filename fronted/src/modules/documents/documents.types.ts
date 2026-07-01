@@ -53,6 +53,13 @@ export interface DocumentListQuery {
 
 export interface DocumentUploadPayload {
   folder: number
+  files: File[]
+  title?: string
+  description?: string
+}
+
+export interface SingleDocumentUploadPayload {
+  folder: number
   file: File
   title?: string
   description?: string

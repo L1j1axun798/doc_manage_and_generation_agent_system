@@ -16,6 +16,7 @@ from .services import (
     archive_project,
     create_project,
     create_project_member,
+    delete_project,
     delete_project_member,
     unarchive_project,
     update_project,
@@ -27,7 +28,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
     queryset = Project.objects.none()
     serializer_class = ProjectSerializer
     permission_classes = [IsAuthenticated]
-    http_method_names = ["get", "post", "put", "patch", "head", "options"]
+    http_method_names = ["get", "post", "put", "patch", "delete", "head", "options"]
 
     def get_queryset(self):
         if getattr(self, "swagger_fake_view", False):
@@ -56,6 +57,13 @@ class ProjectViewSet(viewsets.ModelViewSet):
             data=dict(serializer.validated_data),
             request=self.request,
         )
+
+    def destroy(self, request, *args, **kwargs):
+        project = self.get_object()
+        if not getattr(request.user, "is_system_admin", False):
+            raise PermissionDenied("只有系统管理员可以删除项目")
+        delete_project(actor=request.user, project=project, request=request)
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     @extend_schema(request=None, responses=ProjectSerializer)
     @action(detail=True, methods=["post"])

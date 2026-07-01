@@ -114,6 +114,22 @@ def unarchive_project(*, actor: Any, project: Project, request: Any = None) -> P
 
 
 @transaction.atomic
+def delete_project(*, actor: Any, project: Project, request: Any = None) -> None:
+    before_data = project_snapshot(project)
+    project_id = project.pk
+    project.delete()
+    audit_log(
+        user=actor,
+        action="project.delete",
+        result="success",
+        request=request,
+        resource_type="Project",
+        resource_id=str(project_id),
+        before_data=before_data,
+    )
+
+
+@transaction.atomic
 def create_project_member(
     *,
     actor: Any,

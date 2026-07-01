@@ -1,16 +1,18 @@
 <script setup lang="ts">
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { getErrorMessage } from '@/core/http/error-normalizer'
+import { useAuthStore } from '@/modules/auth/stores/auth.store'
 import type { ApiPage } from '@/shared/types/api.types'
-import { createProject, fetchProjects, updateProject } from '../api/projects.api'
+import { createProject, deleteProject, fetchProjects, updateProject } from '../api/projects.api'
 import ProjectFormDialog from '../components/ProjectFormDialog.vue'
 import ProjectTable from '../components/ProjectTable.vue'
 import type { Project, ProjectPayload } from '../projects.types'
 
 const router = useRouter()
+const authStore = useAuthStore()
 const projects = ref<Project[]>([])
 const total = ref(0)
 const page = ref(1)
@@ -72,6 +74,33 @@ async function submitProject(payload: ProjectPayload): Promise<void> {
     formLoading.value = false
   }
 }
+
+async function removeProject(project: Project): Promise<void> {
+  try {
+    await ElMessageBox.confirm(
+      `确认删除项目“${project.name}”？删除后项目资料和成员将一并移除。`,
+      '删除项目',
+      {
+        confirmButtonText: '删除',
+        cancelButtonText: '取消',
+        type: 'warning',
+      },
+    )
+  } catch {
+    return
+  }
+
+  loading.value = true
+  try {
+    await deleteProject(project.id)
+    ElMessage.success('项目已删除')
+    await loadProjects()
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error))
+  } finally {
+    loading.value = false
+  }
+}
 </script>
 
 <template>
@@ -92,6 +121,8 @@ async function submitProject(payload: ProjectPayload): Promise<void> {
     <ProjectTable
       :loading="loading"
       :projects="projects"
+      :show-delete="authStore.isSystemAdmin"
+      @delete="removeProject"
       @edit="openEdit"
       @view="router.push(`/projects/${$event.id}`)"
     />

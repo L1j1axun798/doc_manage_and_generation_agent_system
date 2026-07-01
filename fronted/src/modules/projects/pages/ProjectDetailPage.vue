@@ -13,7 +13,7 @@ import {
   fetchProjectMembers,
   updateProjectMember,
 } from '../api/project-members.api'
-import { archiveProject, fetchProject, unarchiveProject } from '../api/projects.api'
+import { archiveProject, deleteProject, fetchProject, unarchiveProject } from '../api/projects.api'
 import ProjectArchivePanel from '../components/ProjectArchivePanel.vue'
 import ProjectMemberDialog from '../components/ProjectMemberDialog.vue'
 import ProjectMemberTable from '../components/ProjectMemberTable.vue'
@@ -155,6 +155,37 @@ async function unarchiveCurrentProject(): Promise<void> {
     mutationLoading.value = false
   }
 }
+
+async function deleteCurrentProject(): Promise<void> {
+  if (!project.value) {
+    return
+  }
+
+  try {
+    await ElMessageBox.confirm(
+      `确认删除项目“${project.value.name}”？删除后项目资料和成员将一并移除。`,
+      '删除项目',
+      {
+        confirmButtonText: '删除',
+        cancelButtonText: '取消',
+        type: 'warning',
+      },
+    )
+  } catch {
+    return
+  }
+
+  mutationLoading.value = true
+  try {
+    await deleteProject(project.value.id)
+    ElMessage.success('项目已删除')
+    await router.push('/projects')
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error))
+  } finally {
+    mutationLoading.value = false
+  }
+}
 </script>
 
 <template>
@@ -164,7 +195,18 @@ async function unarchiveCurrentProject(): Promise<void> {
         <h1>{{ project?.name || '项目详情' }}</h1>
         <p>{{ project?.code || '-' }}</p>
       </div>
-      <ProjectStatusTag v-if="project" :status="project.status" />
+      <div class="project-page__header-actions">
+        <el-button @click="router.push('/projects')">返回</el-button>
+        <el-button
+          v-if="authStore.isSystemAdmin && project"
+          :loading="mutationLoading"
+          type="danger"
+          @click="deleteCurrentProject"
+        >
+          删除项目
+        </el-button>
+        <ProjectStatusTag v-if="project" :status="project.status" />
+      </div>
     </header>
 
     <el-skeleton v-if="loading" :rows="6" animated />

@@ -34,6 +34,10 @@ export async function unarchiveProject(projectId: number): Promise<Project> {
   return response.data
 }
 
+export async function deleteProject(projectId: number): Promise<void> {
+  await apiClient.delete(`/projects/${projectId}/`)
+}
+
 function cleanQuery(query: ProjectListQuery): ProjectListQuery {
   return Object.fromEntries(
     Object.entries(query).filter(([, value]) => value !== undefined && value !== ''),

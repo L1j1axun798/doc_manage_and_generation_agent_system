@@ -130,7 +130,7 @@ def test_project_manager_can_update_only_authorized_project(client):
 
 
 @pytest.mark.django_db
-def test_project_delete_endpoint_is_disabled(client):
+def test_only_system_admin_can_delete_project(client):
     admin = make_user("admin", User.Role.SYSTEM_ADMIN)
     manager = make_user("manager", User.Role.PROJECT_MANAGER)
     project = Project.objects.create(name="授权项目", code="P001", created_by=admin)
@@ -141,10 +141,14 @@ def test_project_delete_endpoint_is_disabled(client):
     )
     client.force_login(manager)
 
-    response = client.delete(f"/api/v1/projects/{project.id}/")
+    denied_response = client.delete(f"/api/v1/projects/{project.id}/")
+    client.force_login(admin)
+    deleted_response = client.delete(f"/api/v1/projects/{project.id}/")
 
-    assert response.status_code == 405
-    assert Project.objects.filter(pk=project.pk).exists()
+    assert denied_response.status_code == 403
+    assert deleted_response.status_code == 204
+    assert not Project.objects.filter(pk=project.pk).exists()
+    assert AuditLog.objects.filter(action="project.delete", result="success").exists()
 
 
 @pytest.mark.django_db

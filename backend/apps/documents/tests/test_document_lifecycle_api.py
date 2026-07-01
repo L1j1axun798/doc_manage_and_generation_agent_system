@@ -77,6 +77,60 @@ def test_document_move_requires_same_project_and_updates_lock(client, tmp_path, 
 
 
 @pytest.mark.django_db
+def test_document_move_rejects_same_name_and_duplicate_content_in_target_folder(
+    client,
+    tmp_path,
+    settings,
+):
+    settings.FILE_STORAGE_ROOT = tmp_path
+    admin = make_user("admin", User.Role.SYSTEM_ADMIN)
+    project = Project.objects.create(name="项目", code="P001", created_by=admin)
+    source = Folder.objects.create(project=project, name="源目录", created_by=admin)
+    target = Folder.objects.create(project=project, name="目标目录", created_by=admin)
+    other_source = Folder.objects.create(project=project, name="其他源目录", created_by=admin)
+    client.force_login(admin)
+    same_name_source_document = create_document(
+        client,
+        folder=source,
+        title="同名报告",
+        content=b"source-content",
+    )
+    target_document = create_document(
+        client,
+        folder=target,
+        title="同名报告",
+        content=b"target-content",
+    )
+    duplicate_content_source_document = create_document(
+        client,
+        folder=other_source,
+        title="重复内容",
+        content=b"target-content",
+    )
+
+    same_name_response = client.post(
+        f"/api/v1/documents/{same_name_source_document['id']}/move/",
+        {
+            "folder": target.id,
+            "expected_updated_at": expected(same_name_source_document["id"]),
+        },
+        content_type="application/json",
+    )
+    duplicate_content_response = client.post(
+        f"/api/v1/documents/{duplicate_content_source_document['id']}/move/",
+        {
+            "folder": target.id,
+            "expected_updated_at": expected(duplicate_content_source_document["id"]),
+        },
+        content_type="application/json",
+    )
+
+    assert target_document["folder"] == target.id
+    assert same_name_response.status_code == 400
+    assert duplicate_content_response.status_code == 400
+
+
+@pytest.mark.django_db
 def test_document_move_rejects_public_qualification_roots_but_allows_child_folder(
     client,
     tmp_path,

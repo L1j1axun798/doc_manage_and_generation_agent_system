@@ -6,8 +6,8 @@ import type {
   DocumentListQuery,
   DocumentMovePayload,
   DocumentMutationPayload,
+  SingleDocumentUploadPayload,
   DocumentUpdatePayload,
-  DocumentUploadPayload,
   DocumentVersion,
 } from '../documents.types'
 
@@ -30,7 +30,7 @@ export async function fetchTrashDocuments(query: DocumentListQuery): Promise<Api
   return response.data
 }
 
-export async function uploadDocument(payload: DocumentUploadPayload): Promise<DocumentItem> {
+export async function uploadDocument(payload: SingleDocumentUploadPayload): Promise<DocumentItem> {
   const formData = new FormData()
   formData.append('folder', String(payload.folder))
   formData.append('file', payload.file)

@@ -3,14 +3,21 @@ import { formatDateTime } from '@/shared/utils/format'
 import type { Project } from '../projects.types'
 import ProjectStatusTag from './ProjectStatusTag.vue'
 
-defineProps<{
-  projects: Project[]
-  loading?: boolean
-}>()
+withDefaults(
+  defineProps<{
+    projects: Project[]
+    loading?: boolean
+    showDelete?: boolean
+  }>(),
+  {
+    showDelete: false,
+  },
+)
 
 const emit = defineEmits<{
   view: [project: Project]
   edit: [project: Project]
+  delete: [project: Project]
 }>()
 </script>
 
@@ -33,10 +40,11 @@ const emit = defineEmits<{
     <el-table-column label="更新时间" width="180">
       <template #default="{ row }: { row: Project }">{{ formatDateTime(row.updated_at) }}</template>
     </el-table-column>
-    <el-table-column label="操作" width="130" fixed="right">
+    <el-table-column label="操作" width="180" fixed="right">
       <template #default="{ row }: { row: Project }">
         <el-button link type="primary" @click="emit('view', row)">详情</el-button>
         <el-button link @click="emit('edit', row)">修改</el-button>
+        <el-button v-if="showDelete" link type="danger" @click="emit('delete', row)">删除</el-button>
       </template>
     </el-table-column>
   </el-table>

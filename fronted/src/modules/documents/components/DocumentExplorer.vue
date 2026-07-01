@@ -124,6 +124,18 @@ const subfolderPanelRoot = computed(() => {
   return root
 })
 const subfolderItems = computed(() => subfolderPanelRoot.value?.children ?? [])
+const selectedSubfolderItem = computed(() => {
+  const folderId = selectedFolderId.value
+  if (!subfolderPanelRoot.value || folderId === undefined || isSubfolderPanelRootLanding.value) {
+    return undefined
+  }
+
+  return subfolderItems.value.find((item) => item.id === folderId || hasDescendant(item, folderId))
+})
+const isSubfolderDetailMode = computed(() => selectedSubfolderItem.value !== undefined)
+const visibleSubfolderItems = computed(() =>
+  selectedSubfolderItem.value ? [selectedSubfolderItem.value] : subfolderItems.value,
+)
 const isCompanyRoot = computed(() => selectedPublicRootNode.value?.publicRootKey === 'company')
 const isStaffRoot = computed(() => selectedPublicRootNode.value?.publicRootKey === 'staff')
 const isSubfolderPanelRootLanding = computed(
@@ -145,7 +157,9 @@ const isDocumentResultsHidden = computed(
 const shouldShowDocumentResults = computed(
   () => !isSubfolderPanelRootLanding.value && !isDocumentResultsHidden.value,
 )
-const subfolderPanelTitle = computed(() => (isStaffRoot.value ? '人员名单' : '公司名单'))
+const subfolderPanelTitle = computed(() =>
+  selectedSubfolderItem.value?.name ?? (isStaffRoot.value ? '人员名单' : '公司名单'),
+)
 const subfolderPanelCountText = computed(() =>
   isStaffRoot.value
     ? `人员数：${subfolderItems.value.length}`
@@ -273,6 +287,16 @@ function selectSubfolderItem(item: FolderTreeNode): void {
 
   hiddenDocumentResultsFolderId.value = undefined
   selectedFolderId.value = item.id
+}
+
+function returnToSubfolderList(): void {
+  const root = subfolderPanelRoot.value
+  if (!root) {
+    return
+  }
+
+  hiddenDocumentResultsFolderId.value = undefined
+  selectedFolderId.value = root.id
 }
 
 function canSelectSubfolder(item: FolderTreeNode): boolean {
@@ -446,13 +470,38 @@ function handlePageChange(nextPage: number): void {
 async function handleUpload(payload: DocumentUploadPayload): Promise<void> {
   mutationLoading.value = true
 
+  let successCount = 0
+  let firstError: unknown
   try {
-    await uploadDocument(payload)
-    uploadVisible.value = false
-    ElMessage.success('上传成功')
-    await loadDocuments()
-  } catch (error) {
-    ElMessage.error(getErrorMessage(error))
+    for (const file of payload.files) {
+      try {
+        await uploadDocument({
+          folder: payload.folder,
+          file,
+          title: payload.files.length === 1 ? payload.title : '',
+          description: payload.description,
+        })
+        successCount += 1
+      } catch (error) {
+        firstError ??= error
+      }
+    }
+
+    if (successCount > 0) {
+      await loadDocuments()
+    }
+
+    const failedCount = payload.files.length - successCount
+    if (failedCount === 0) {
+      uploadVisible.value = false
+      ElMessage.success(successCount > 1 ? `已上传 ${successCount} 个文件` : '上传成功')
+    } else {
+      ElMessage.error(
+        successCount > 0
+          ? `已上传 ${successCount} 个，${failedCount} 个失败：${getErrorMessage(firstError)}`
+          : getErrorMessage(firstError),
+      )
+    }
   } finally {
     mutationLoading.value = false
   }
@@ -523,20 +572,40 @@ function openVersionDialog(document: DocumentItem): void {
   versionVisible.value = true
 }
 
-async function handleVersionUpload(file: File): Promise<void> {
+async function handleVersionUpload(files: File[]): Promise<void> {
   if (!actionDocument.value) {
     return
   }
 
   mutationLoading.value = true
 
+  let successCount = 0
+  let firstError: unknown
   try {
-    await uploadDocumentVersion(actionDocument.value.id, file)
-    versionVisible.value = false
-    ElMessage.success('新版本已上传')
-    await loadDocuments()
-  } catch (error) {
-    ElMessage.error(getErrorMessage(error))
+    for (const file of files) {
+      try {
+        await uploadDocumentVersion(actionDocument.value.id, file)
+        successCount += 1
+      } catch (error) {
+        firstError ??= error
+      }
+    }
+
+    if (successCount > 0) {
+      await loadDocuments()
+    }
+
+    const failedCount = files.length - successCount
+    if (failedCount === 0) {
+      versionVisible.value = false
+      ElMessage.success(successCount > 1 ? `已上传 ${successCount} 个新版本` : '新版本已上传')
+    } else {
+      ElMessage.error(
+        successCount > 0
+          ? `已上传 ${successCount} 个，${failedCount} 个失败：${getErrorMessage(firstError)}`
+          : getErrorMessage(firstError),
+      )
+    }
   } finally {
     mutationLoading.value = false
   }
@@ -616,9 +685,10 @@ async function handleRestore(document: DocumentItem): Promise<void> {
         <header class="document-subfolder-panel__header">
           <h2>{{ subfolderPanelTitle }}</h2>
           <div class="document-subfolder-panel__meta">
-            <span>{{ subfolderPanelCountText }}</span>
+            <span v-if="!isSubfolderDetailMode">{{ subfolderPanelCountText }}</span>
+            <el-button v-else size="small" @click="returnToSubfolderList">返回名单</el-button>
             <el-button
-              v-if="canCreateSubfolder"
+              v-if="canCreateSubfolder && !isSubfolderDetailMode"
               :loading="mutationLoading"
               size="small"
               type="primary"
@@ -629,9 +699,13 @@ async function handleRestore(document: DocumentItem): Promise<void> {
           </div>
         </header>
 
-        <div v-if="subfolderItems.length > 0" class="document-subfolder-panel__grid">
+        <div
+          v-if="visibleSubfolderItems.length > 0"
+          class="document-subfolder-panel__grid"
+          :class="{ 'document-subfolder-panel__grid--detail': isSubfolderDetailMode }"
+        >
           <div
-            v-for="item in subfolderItems"
+            v-for="item in visibleSubfolderItems"
             :key="item.id"
             class="document-subfolder-panel__item"
             :class="{
