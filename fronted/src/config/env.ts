@@ -9,4 +9,6 @@ export function normalizeApiBaseUrl(value: string): string {
 export const env = {
   appTitle: import.meta.env.VITE_APP_TITLE || DEFAULT_APP_TITLE,
   apiBaseUrl: normalizeApiBaseUrl(import.meta.env.VITE_API_BASE_URL || DEFAULT_API_BASE_URL),
+  amapKey: import.meta.env.VITE_AMAP_KEY || '',
+  amapSecurityJsCode: import.meta.env.VITE_AMAP_SECURITY_JS_CODE || '',
 }

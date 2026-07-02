@@ -975,6 +975,61 @@ paths:
                 type: object
                 additionalProperties: {}
           description: ''
+  /api/v1/locations/admin/latest/:
+    get:
+      operationId: v1_locations_admin_latest_list
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/LocationSnapshot'
+          description: ''
+  /api/v1/locations/me/latest/:
+    get:
+      operationId: v1_locations_me_latest_retrieve
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LocationSnapshot'
+          description: ''
+  /api/v1/locations/report/:
+    post:
+      operationId: v1_locations_report_create
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LocationReportRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/LocationReportRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/LocationReportRequest'
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LocationReport'
+          description: ''
   /api/v1/notifications/:
     get:
       operationId: v1_notifications_list
@@ -1230,6 +1285,22 @@ paths:
               schema:
                 $ref: '#/components/schemas/Project'
           description: ''
+    delete:
+      operationId: v1_projects_destroy
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: 标识此 项目 的 唯一整数值。
+        required: true
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '204':
+          description: No response body
   /api/v1/projects/{id}/archive/:
     post:
       operationId: v1_projects_archive_create
@@ -2406,6 +2477,138 @@ components:
         sort_order:
           type: integer
           minimum: 0
+    LocationReport:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        longitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+          nullable: true
+          title: 经度
+        latitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,2}(?:\.\d{0,6})?$
+          nullable: true
+          title: 纬度
+        accuracy:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,6}(?:\.\d{0,2})?$
+          nullable: true
+          title: 定位精度
+        address:
+          type: string
+          title: 地址
+          maxLength: 255
+        report_status:
+          allOf:
+          - $ref: '#/components/schemas/LocationReportStatusEnum'
+          title: 上报结果
+        failure_reason:
+          type: string
+          title: 失败原因
+          maxLength: 255
+        reported_at:
+          type: string
+          format: date-time
+          readOnly: true
+          title: 上报时间
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+          title: 创建时间
+      required:
+      - created_at
+      - id
+      - reported_at
+    LocationReportRequest:
+      type: object
+      properties:
+        longitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+          nullable: true
+          title: 经度
+        latitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,2}(?:\.\d{0,6})?$
+          nullable: true
+          title: 纬度
+        accuracy:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,6}(?:\.\d{0,2})?$
+          nullable: true
+          title: 定位精度
+        address:
+          type: string
+          title: 地址
+          maxLength: 255
+        report_status:
+          allOf:
+          - $ref: '#/components/schemas/LocationReportStatusEnum'
+          default: success
+        failure_reason:
+          type: string
+          title: 失败原因
+          maxLength: 255
+    LocationReportStatusEnum:
+      enum:
+      - success
+      - locate_failed
+      type: string
+      description: |-
+        * `success` - 定位成功
+        * `locate_failed` - 定位失败
+    LocationSnapshot:
+      type: object
+      properties:
+        user:
+          $ref: '#/components/schemas/LocationUser'
+        latest_report:
+          allOf:
+          - $ref: '#/components/schemas/LocationReport'
+          nullable: true
+        location_status:
+          type: string
+        should_report:
+          type: boolean
+      required:
+      - latest_report
+      - location_status
+      - should_report
+      - user
+    LocationUser:
+      type: object
+      properties:
+        id:
+          type: integer
+        username:
+          type: string
+        real_name:
+          type: string
+        employee_no:
+          type: string
+          nullable: true
+        role:
+          type: string
+        phone:
+          type: string
+      required:
+      - employee_no
+      - id
+      - phone
+      - real_name
+      - role
+      - username
     Login:
       type: object
       properties:

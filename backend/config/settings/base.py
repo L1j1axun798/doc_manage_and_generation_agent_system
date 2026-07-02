@@ -38,6 +38,7 @@ INSTALLED_APPS = [
     "apps.audit",
     "apps.documents",
     "apps.folders",
+    "apps.locations",
     "apps.notifications",
     "apps.projects",
     "apps.system",
@@ -156,6 +157,10 @@ SPECTACULAR_SETTINGS = {
             ("manager", "负责人"),
             ("operator", "资料整理员"),
             ("viewer", "查看者"),
+        ],
+        "LocationReportStatusEnum": [
+            ("success", "定位成功"),
+            ("locate_failed", "定位失败"),
         ],
     },
 }

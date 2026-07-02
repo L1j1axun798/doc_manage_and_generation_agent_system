@@ -3,6 +3,7 @@ import {
   Files,
   FolderOpened,
   House,
+  Location,
   Lock,
   Management,
   Setting,
@@ -39,6 +40,7 @@ const MENU_ITEMS: AppMenuItem[] = [
   },
   { index: '/users', title: '用户管理', icon: User, roles: ['system_admin'] },
   { index: '/audit', title: '审计中心', icon: Management, roles: ['system_admin'] },
+  { index: '/locations/admin', title: '人员位置', icon: Location, roles: ['system_admin'] },
   { index: '/system/status', title: '系统管理', icon: Setting, roles: ['system_admin'] },
   { index: '/notifications', title: '通知中心', icon: Bell, roles: ALL_ROLES },
 ]

@@ -110,6 +110,17 @@ export const routes: RouteRecordRaw[] = [
         },
       },
       {
+        path: 'locations/admin',
+        name: 'admin-locations',
+        component: () => import('@/modules/locations/pages/AdminLocationPage.vue'),
+        meta: {
+          title: '人员位置',
+          requiresAuth: true,
+          layout: 'main',
+          roles: ['system_admin'],
+        },
+      },
+      {
         path: 'notifications',
         name: 'notifications',
         component: () => import('@/modules/notifications/pages/NotificationCenterPage.vue'),

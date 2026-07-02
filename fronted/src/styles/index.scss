@@ -1252,6 +1252,228 @@ body {
   line-height: 1;
 }
 
+.dashboard-location-panel {
+  display: grid;
+  max-width: 760px;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-bg-surface);
+}
+
+.dashboard-location-panel header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.dashboard-location-panel h2 {
+  margin: 0;
+  color: var(--color-text-primary);
+  font-size: 18px;
+}
+
+.dashboard-location-panel p {
+  margin: 4px 0 0;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}
+
+.location-page {
+  display: grid;
+  gap: 16px;
+}
+
+.location-page__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.location-page__header h1 {
+  margin: 0;
+  color: var(--color-text-primary);
+  font-size: 24px;
+}
+
+.location-page__header p {
+  margin: 4px 0 0;
+  color: var(--color-text-secondary);
+  font-size: 14px;
+}
+
+.location-page__metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.location-page__metric {
+  display: grid;
+  min-height: 82px;
+  align-content: space-between;
+  padding: 14px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-bg-surface);
+}
+
+.location-page__metric span {
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}
+
+.location-page__metric strong {
+  color: var(--color-text-primary);
+  font-size: 24px;
+  line-height: 1;
+}
+
+.location-page__workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 16px;
+  align-items: stretch;
+}
+
+.location-map-panel,
+.location-attention,
+.location-table-panel {
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-bg-surface);
+}
+
+.location-map-panel {
+  min-height: 520px;
+  overflow: hidden;
+}
+
+.location-map-panel__canvas {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  min-height: 520px;
+  place-items: stretch;
+}
+
+.location-map-panel__canvas .el-empty {
+  align-self: center;
+}
+
+.location-map-info {
+  display: grid;
+  min-width: 220px;
+  gap: 4px;
+  color: #1f2933;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.location-map-info strong {
+  font-size: 15px;
+}
+
+.location-map-info span {
+  color: #185f4a;
+  font-weight: 700;
+}
+
+.location-map-info p {
+  margin: 0;
+}
+
+.location-attention {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  min-height: 520px;
+  padding: 14px;
+}
+
+.location-attention header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.location-attention h2 {
+  margin: 0;
+  color: var(--color-text-primary);
+  font-size: 16px;
+}
+
+.location-attention__item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 58px;
+  padding: 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  color: var(--color-text-primary);
+  background: #fbfdff;
+  cursor: pointer;
+  text-align: left;
+}
+
+.location-attention__item:hover,
+.location-attention__item:focus {
+  border-color: #c7dbff;
+  background: #f4f8ff;
+}
+
+.location-attention__item span {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.location-attention__item strong,
+.location-attention__item small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.location-attention__item small {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.location-table-panel {
+  overflow: hidden;
+}
+
+.location-table-panel__subtext {
+  margin: 4px 0 0;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.location-detail {
+  display: grid;
+  gap: 16px;
+}
+
+.location-detail header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.location-detail h2 {
+  margin: 0;
+  color: var(--color-text-primary);
+  font-size: 20px;
+}
+
 .error-page,
 .not-found-page,
 .public-layout {
@@ -1301,6 +1523,15 @@ body {
 
   .dashboard-page__metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .location-page__metrics,
+  .location-page__workspace {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .location-page__workspace {
+    grid-template-columns: 1fr;
   }
 
   .document-explorer {
@@ -1377,6 +1608,16 @@ body {
   }
 
   .dashboard-page__metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboard-location-panel header,
+  .location-page__header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .location-page__metrics {
     grid-template-columns: 1fr;
   }
 
