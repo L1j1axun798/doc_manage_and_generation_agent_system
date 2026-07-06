@@ -9,6 +9,9 @@ python -m pip install -r requirements/dev.txt
 python manage.py migrate
 python manage.py seed_dev_data
 python manage.py runserver 127.0.0.1:8000
+
+局域网内测试：
+python manage.py runserver 0.0.0.0:8000
 ```
 
 ## 前端
@@ -17,12 +20,15 @@ python manage.py runserver 127.0.0.1:8000
 cd D:\vscode程序夹\wind-doc-system\fronted
 npm install
 npm run dev -- --host 127.0.0.1 --port 5174
+
+局域网内测试：
+npm run dev -- --host 0.0.0.0
 ```
 
 访问：
 
 ```text
-http://localhost:5174
+http://localhost:5173
 ```
 
 ## 检查

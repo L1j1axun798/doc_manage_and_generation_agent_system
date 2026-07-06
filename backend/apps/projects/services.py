@@ -6,8 +6,10 @@ from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
 from apps.audit.services import audit_log
+from apps.documents.models import Document
 from apps.folders.defaults import ARCHIVE_ROOT, STANDARD_PUBLIC_ROOTS
 from apps.folders.models import Folder
+from common.storage import LocalDocumentStorage
 
 from .models import Project, ProjectMember
 
@@ -117,6 +119,14 @@ def unarchive_project(*, actor: Any, project: Project, request: Any = None) -> P
 def delete_project(*, actor: Any, project: Project, request: Any = None) -> None:
     before_data = project_snapshot(project)
     project_id = project.pk
+    if project_has_active_documents(project=project):
+        message = "项目中仍有资料，不能删除。请先归档项目，或清空项目资料后再删除项目。"
+        raise ValidationError(message)
+    if project_has_foreign_folder_documents(project=project):
+        message = "项目目录中存在归属异常的资料，不能删除。请先清理项目资料后再删除项目。"
+        raise ValidationError(message)
+    storage_paths = permanently_delete_removed_project_documents(project=project)
+    delete_project_folders(project=project)
     project.delete()
     audit_log(
         user=actor,
@@ -127,6 +137,53 @@ def delete_project(*, actor: Any, project: Project, request: Any = None) -> None
         resource_id=str(project_id),
         before_data=before_data,
     )
+    transaction.on_commit(lambda: delete_stored_files(storage_paths))
+
+
+def project_has_active_documents(*, project: Project) -> bool:
+    if project.documents.filter(deleted_at__isnull=True).exists():
+        return True
+    return Document.objects.filter(folder__project=project, deleted_at__isnull=True).exists()
+
+
+def project_has_foreign_folder_documents(*, project: Project) -> bool:
+    return Document.objects.filter(folder__project=project).exclude(project=project).exists()
+
+
+def permanently_delete_removed_project_documents(*, project: Project) -> list[str]:
+    storage_paths: list[str] = []
+    documents = project.documents.filter(deleted_at__isnull=False).prefetch_related("versions")
+    for document in documents:
+        storage_paths.extend(document.versions.values_list("storage_path", flat=True))
+        document.current_version = None
+        document.save(update_fields=["current_version", "updated_at"])
+        document.delete()
+    return storage_paths
+
+
+def delete_stored_files(storage_paths: list[str]) -> None:
+    backend = LocalDocumentStorage()
+    for storage_path in storage_paths:
+        backend.delete(storage_path)
+
+
+def delete_project_folders(*, project: Project) -> None:
+    folders = list(project.folders.only("id", "parent_id"))
+    depths: dict[int, int] = {}
+    parent_by_id = {folder.id: folder.parent_id for folder in folders}
+
+    def folder_depth(folder_id: int) -> int:
+        if folder_id in depths:
+            return depths[folder_id]
+        parent_id = parent_by_id.get(folder_id)
+        if parent_id is None or parent_id not in parent_by_id:
+            depths[folder_id] = 0
+            return 0
+        depths[folder_id] = folder_depth(parent_id) + 1
+        return depths[folder_id]
+
+    for folder in sorted(folders, key=lambda item: folder_depth(item.id), reverse=True):
+        Folder.objects.filter(pk=folder.id).delete()
 
 
 @transaction.atomic

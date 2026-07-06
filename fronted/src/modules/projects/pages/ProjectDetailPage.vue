@@ -163,7 +163,7 @@ async function deleteCurrentProject(): Promise<void> {
 
   try {
     await ElMessageBox.confirm(
-      `确认删除项目“${project.value.name}”？删除后项目资料和成员将一并移除。`,
+      `确认删除项目“${project.value.name}”？仅项目资料为空时可以删除；如有资料，请先归档或清空项目资料。`,
       '删除项目',
       {
         confirmButtonText: '删除',

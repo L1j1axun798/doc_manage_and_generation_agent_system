@@ -1,10 +1,12 @@
 import pytest
 from django.contrib.auth import get_user_model
+from django.utils import timezone
 
 from apps.audit.models import AuditLog
-from apps.documents.models import Document
+from apps.documents.models import Document, DocumentVersion
 from apps.folders.models import Folder
 from apps.projects.models import Project, ProjectMember
+from apps.projects.services import create_project
 
 User = get_user_model()
 
@@ -133,7 +135,7 @@ def test_project_manager_can_update_only_authorized_project(client):
 def test_only_system_admin_can_delete_project(client):
     admin = make_user("admin", User.Role.SYSTEM_ADMIN)
     manager = make_user("manager", User.Role.PROJECT_MANAGER)
-    project = Project.objects.create(name="授权项目", code="P001", created_by=admin)
+    project = create_project(actor=admin, data={"name": "授权项目", "code": "P001"})
     ProjectMember.objects.create(
         project=project,
         user=manager,
@@ -149,6 +151,94 @@ def test_only_system_admin_can_delete_project(client):
     assert deleted_response.status_code == 204
     assert not Project.objects.filter(pk=project.pk).exists()
     assert AuditLog.objects.filter(action="project.delete", result="success").exists()
+
+
+@pytest.mark.django_db
+def test_system_admin_can_delete_empty_project_with_nested_folders(client):
+    admin = make_user("admin", User.Role.SYSTEM_ADMIN)
+    project = create_project(actor=admin, data={"name": "空项目", "code": "P001"})
+    root_folder = Folder.objects.filter(project=project, parent__isnull=True).first()
+    child_folder = Folder.objects.create(project=project, parent=root_folder, name="空子目录")
+    Folder.objects.create(project=project, parent=child_folder, name="空孙目录")
+    client.force_login(admin)
+
+    response = client.delete(f"/api/v1/projects/{project.id}/")
+
+    assert response.status_code == 204
+    assert not Project.objects.filter(pk=project.pk).exists()
+    assert not Folder.objects.filter(project=project).exists()
+
+
+@pytest.mark.django_db
+def test_system_admin_cannot_delete_project_with_documents(client):
+    admin = make_user("admin", User.Role.SYSTEM_ADMIN)
+    project = create_project(actor=admin, data={"name": "含资料项目", "code": "P001"})
+    folder = Folder.objects.filter(project=project, parent__isnull=True).first()
+    Document.objects.create(project=project, folder=folder, title="检测报告", created_by=admin)
+    client.force_login(admin)
+
+    response = client.delete(f"/api/v1/projects/{project.id}/")
+
+    assert response.status_code == 400
+    assert "请先归档项目" in response.json()["message"]
+    assert Project.objects.filter(pk=project.pk).exists()
+    assert Document.objects.filter(project=project).exists()
+
+
+@pytest.mark.django_db
+def test_system_admin_cannot_delete_project_when_folder_contains_document(client):
+    admin = make_user("admin", User.Role.SYSTEM_ADMIN)
+    project = create_project(actor=admin, data={"name": "目录含资料项目", "code": "P001"})
+    other_project = create_project(actor=admin, data={"name": "其他项目", "code": "P002"})
+    folder = Folder.objects.filter(project=project, parent__isnull=True).first()
+    Document.objects.create(
+        project=other_project,
+        folder=folder,
+        title="错挂资料",
+        created_by=admin,
+    )
+    client.force_login(admin)
+
+    response = client.delete(f"/api/v1/projects/{project.id}/")
+
+    assert response.status_code == 400
+    assert "项目中仍有资料" in response.json()["message"]
+    assert Project.objects.filter(pk=project.pk).exists()
+
+
+@pytest.mark.django_db
+def test_system_admin_can_delete_project_with_only_removed_documents(client):
+    admin = make_user("admin", User.Role.SYSTEM_ADMIN)
+    project = create_project(actor=admin, data={"name": "已清空项目", "code": "P001"})
+    folder = Folder.objects.filter(project=project, parent__isnull=True).first()
+    document = Document.objects.create(
+        project=project,
+        folder=folder,
+        title="已删除资料",
+        created_by=admin,
+        deleted_at=timezone.now(),
+        deleted_by=admin,
+    )
+    version = DocumentVersion.objects.create(
+        document=document,
+        version_number=1,
+        original_filename="removed.pdf",
+        content_type="application/pdf",
+        file_size=1,
+        sha256="0" * 64,
+        storage_path="removed.pdf",
+        uploaded_by=admin,
+    )
+    document.current_version = version
+    document.save(update_fields=["current_version", "updated_at"])
+    client.force_login(admin)
+
+    response = client.delete(f"/api/v1/projects/{project.id}/")
+
+    assert response.status_code == 204
+    assert not Project.objects.filter(pk=project.pk).exists()
+    assert not Document.objects.filter(pk=document.pk).exists()
+    assert not DocumentVersion.objects.filter(pk=version.pk).exists()
 
 
 @pytest.mark.django_db
