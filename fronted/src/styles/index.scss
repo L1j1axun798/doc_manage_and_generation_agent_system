@@ -1353,15 +1353,107 @@ body {
 }
 
 .location-map-panel__canvas {
-  display: grid;
+  position: relative;
+  display: block;
   width: 100%;
   height: 100%;
   min-height: 520px;
-  place-items: stretch;
+  overflow: hidden;
+  touch-action: none;
 }
 
 .location-map-panel__canvas .el-empty {
+  display: grid;
+  height: 100%;
   align-self: center;
+  place-items: center;
+}
+
+.location-map-marker {
+  position: relative;
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-width: 116px;
+  max-width: 180px;
+  padding: 6px 10px 8px 7px;
+  border: 1px solid rgba(20, 83, 45, 0.2);
+  border-radius: 999px;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.18);
+  color: #172026;
+  background: rgba(255, 255, 255, 0.96);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  touch-action: none;
+  user-select: none;
+}
+
+.location-map-marker * {
+  pointer-events: none;
+}
+
+.location-map-marker:hover,
+.location-map-marker:focus-visible {
+  border-color: #2f8f6b;
+  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.24);
+}
+
+.location-map-marker__avatar {
+  display: inline-grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border-radius: 50%;
+  color: #ffffff;
+  background: #23745a;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.location-map-marker__body {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.location-map-marker__body strong,
+.location-map-marker__body small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.location-map-marker__body strong {
+  font-size: 13px;
+  line-height: 1.2;
+}
+
+.location-map-marker__body small {
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.location-map-marker__pin {
+  position: absolute;
+  bottom: -7px;
+  left: 50%;
+  width: 12px;
+  height: 12px;
+  border-right: 1px solid rgba(20, 83, 45, 0.2);
+  border-bottom: 1px solid rgba(20, 83, 45, 0.2);
+  background: rgba(255, 255, 255, 0.96);
+  transform: translateX(-50%) rotate(45deg);
+}
+
+.location-map-marker--expired .location-map-marker__avatar {
+  background: #b7791f;
+}
+
+.location-map-marker--locate_failed .location-map-marker__avatar {
+  background: #c2410c;
 }
 
 .location-map-info {
@@ -1454,24 +1546,6 @@ body {
   margin: 4px 0 0;
   color: var(--color-text-secondary);
   font-size: 12px;
-}
-
-.location-detail {
-  display: grid;
-  gap: 16px;
-}
-
-.location-detail header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.location-detail h2 {
-  margin: 0;
-  color: var(--color-text-primary);
-  font-size: 20px;
 }
 
 .error-page,

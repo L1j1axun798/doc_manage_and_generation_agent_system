@@ -41,6 +41,14 @@ interface AMapMap {
     avoid?: number[],
     maxZoom?: number,
   ): void
+  setStatus(status: {
+    doubleClickZoom: boolean
+    dragEnable: boolean
+    keyboardEnable: boolean
+    scrollWheel: boolean
+    touchZoom: boolean
+    zoomEnable: boolean
+  }): void
   setZoomAndCenter(zoom: number, position: MapPosition): void
 }
 
@@ -49,18 +57,30 @@ interface AMapNamespace {
     container: HTMLElement,
     options: {
       center: MapPosition
+      doubleClickZoom: boolean
       dragEnable: boolean
       jogEnable: boolean
       keyboardEnable: boolean
       resizeEnable: boolean
       rotateEnable: boolean
       scrollWheel: boolean
+      touchZoom: boolean
       zoom: number
       zoomEnable: boolean
       zooms: [number, number]
     },
   ) => AMapMap
-  Marker: new (options: { position: MapPosition; title: string }) => AMapMarker
+  Marker: new (options: {
+    anchor: 'bottom-center'
+    bubble: boolean
+    clickable: boolean
+    content: string
+    cursor: string
+    draggable: boolean
+    position: MapPosition
+    title: string
+    topWhenClick: boolean
+  }) => AMapMarker
   InfoWindow: new (options: { offset: unknown }) => AMapInfoWindow
   Pixel: new (x: number, y: number) => unknown
   Scale: new () => unknown
@@ -69,26 +89,17 @@ interface AMapNamespace {
 
 const CHINA_CENTER: MapPosition = [104.195397, 35.86166]
 const CHINA_OVERVIEW_ZOOM = 4
-const MAX_FIT_VIEW_ZOOM = 6
-const SELECTED_EMPLOYEE_ZOOM = 8
+const MAX_FIT_VIEW_ZOOM = 14
+const SELECTED_EMPLOYEE_ZOOM = 15
 const MAP_ZOOM_RANGE: [number, number] = [3, 18]
 
 const snapshots = ref<LocationSnapshot[]>([])
 const loading = ref(false)
-const selectedSnapshot = ref<LocationSnapshot | null>(null)
 const mapContainer = ref<HTMLElement | null>(null)
 const mapMessage = ref('')
 const amapReady = computed(() => hasAmapConfig(env.amapKey))
 const attentionLocations = computed(() => getAttentionLocations(snapshots.value))
 const markerSnapshots = computed(() => snapshots.value.filter(hasUsableCoordinates))
-const detailVisible = computed({
-  get: () => Boolean(selectedSnapshot.value),
-  set: (value: boolean) => {
-    if (!value) {
-      selectedSnapshot.value = null
-    }
-  },
-})
 
 const statusCounts = computed<Record<LocationStatus | 'total', number>>(() => {
   const counts: Record<LocationStatus | 'total', number> = {
@@ -165,18 +176,21 @@ async function renderMap(): Promise<void> {
     if (!map) {
       map = new amap.Map(mapContainer.value, {
         center: CHINA_CENTER,
+        doubleClickZoom: true,
         dragEnable: true,
         jogEnable: true,
         keyboardEnable: true,
         resizeEnable: true,
         rotateEnable: false,
         scrollWheel: true,
+        touchZoom: true,
         zoom: CHINA_OVERVIEW_ZOOM,
         zoomEnable: true,
         zooms: MAP_ZOOM_RANGE,
       })
+      enableMapInteraction()
       installMapControls()
-      infoWindow = new amap.InfoWindow({ offset: new amap.Pixel(0, -28) })
+      infoWindow = new amap.InfoWindow({ offset: new amap.Pixel(0, -58) })
     }
 
     if (!map || !infoWindow) {
@@ -187,7 +201,7 @@ async function renderMap(): Promise<void> {
     markers = markerSnapshots.value.map((snapshot) => createMarker(snapshot))
     if (markers.length > 0) {
       map.add(markers)
-      map.setFitView(markers, false, [70, 70, 70, 70], MAX_FIT_VIEW_ZOOM)
+      map.setFitView(markers, false, [90, 90, 90, 90], MAX_FIT_VIEW_ZOOM)
     }
     mapMessage.value = ''
   } catch (error) {
@@ -205,6 +219,21 @@ function installMapControls(): void {
   mapControlsInstalled = true
 }
 
+function enableMapInteraction(): void {
+  if (!map) {
+    return
+  }
+
+  map.setStatus({
+    doubleClickZoom: true,
+    dragEnable: true,
+    keyboardEnable: true,
+    scrollWheel: true,
+    touchZoom: true,
+    zoomEnable: true,
+  })
+}
+
 function createMarker(snapshot: LocationSnapshot): AMapMarker {
   if (!amap || !map || !infoWindow) {
     throw new Error('地图尚未初始化')
@@ -213,23 +242,49 @@ function createMarker(snapshot: LocationSnapshot): AMapMarker {
   const currentMap = map
   const currentInfoWindow = infoWindow
   const marker = new amap.Marker({
+    anchor: 'bottom-center',
+    bubble: true,
+    clickable: true,
+    content: buildMarkerContent(snapshot),
+    cursor: 'pointer',
+    draggable: false,
     position: [Number(report?.longitude), Number(report?.latitude)],
-    title: snapshot.user.real_name,
+    title: getUserDisplayName(snapshot),
+    topWhenClick: true,
   })
   marker.on('click', () => {
-    selectedSnapshot.value = snapshot
     currentInfoWindow.setContent(buildInfoWindowContent(snapshot))
     currentInfoWindow.open(currentMap, marker.getPosition())
   })
   return marker
 }
 
+function buildMarkerContent(snapshot: LocationSnapshot): string {
+  const displayName = getUserDisplayName(snapshot)
+  return `
+    <div
+      class="location-map-marker location-map-marker--${snapshot.location_status}"
+      aria-label="${escapeHtml(displayName)} 的位置标记"
+    >
+      <span class="location-map-marker__avatar">${escapeHtml(getUserInitial(displayName))}</span>
+      <span class="location-map-marker__body">
+        <strong>${escapeHtml(displayName)}</strong>
+        <small>${escapeHtml(getLocationStatusLabel(snapshot.location_status))}</small>
+      </span>
+      <span class="location-map-marker__pin" aria-hidden="true"></span>
+    </div>
+  `
+}
+
 function buildInfoWindowContent(snapshot: LocationSnapshot): string {
   const report = snapshot.latest_report
+  const displayName = getUserDisplayName(snapshot)
   return `
     <div class="location-map-info">
-      <strong>${escapeHtml(snapshot.user.real_name)}</strong>
+      <strong>${escapeHtml(displayName)}</strong>
       <span>${escapeHtml(getLocationStatusLabel(snapshot.location_status))}</span>
+      <p>用户名：${escapeHtml(snapshot.user.username)}</p>
+      <p>手机号：${escapeHtml(snapshot.user.phone || '-')}</p>
       <p>${escapeHtml(getLocationDisplayAddress(snapshot))}</p>
       <p>上报时间：${escapeHtml(formatDateTime(report?.reported_at))}</p>
       <p>定位精度：${escapeHtml(formatAccuracy(report?.accuracy))}</p>
@@ -237,8 +292,7 @@ function buildInfoWindowContent(snapshot: LocationSnapshot): string {
   `
 }
 
-function selectSnapshot(snapshot: LocationSnapshot): void {
-  selectedSnapshot.value = snapshot
+function focusSnapshot(snapshot: LocationSnapshot): void {
   if (!map || !hasUsableCoordinates(snapshot)) {
     return
   }
@@ -249,6 +303,14 @@ function selectSnapshot(snapshot: LocationSnapshot): void {
 
 function formatAccuracy(value: string | null | undefined): string {
   return value ? `${value} 米` : '-'
+}
+
+function getUserDisplayName(snapshot: LocationSnapshot): string {
+  return snapshot.user.real_name || snapshot.user.username || '未知人员'
+}
+
+function getUserInitial(displayName: string): string {
+  return displayName.trim().slice(0, 1).toUpperCase() || '?'
 }
 
 function escapeHtml(value: string | undefined | null): string {
@@ -317,7 +379,7 @@ function escapeHtml(value: string | undefined | null): string {
           :key="snapshot.user.id"
           class="location-attention__item"
           type="button"
-          @click="selectSnapshot(snapshot)"
+          @click="focusSnapshot(snapshot)"
         >
           <span>
             <strong>{{ snapshot.user.real_name }}</strong>
@@ -335,7 +397,7 @@ function escapeHtml(value: string | undefined | null): string {
         v-loading="loading"
         :data="snapshots"
         row-key="user.id"
-        @row-click="selectSnapshot"
+        @row-click="focusSnapshot"
       >
         <el-table-column label="员工" min-width="150">
           <template #default="{ row }: { row: LocationSnapshot }">
@@ -367,43 +429,5 @@ function escapeHtml(value: string | undefined | null): string {
         </el-table-column>
       </el-table>
     </section>
-
-    <el-drawer
-      v-model="detailVisible"
-      destroy-on-close
-      size="360px"
-      title="位置详情"
-    >
-      <section v-if="selectedSnapshot" class="location-detail">
-        <header>
-          <h2>{{ selectedSnapshot.user.real_name }}</h2>
-          <el-tag :type="getLocationStatusTagType(selectedSnapshot.location_status)">
-            {{ getLocationStatusLabel(selectedSnapshot.location_status) }}
-          </el-tag>
-        </header>
-        <el-descriptions border :column="1">
-          <el-descriptions-item label="用户名">{{ selectedSnapshot.user.username }}</el-descriptions-item>
-          <el-descriptions-item label="手机号">{{ selectedSnapshot.user.phone || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="最近上报位置">
-            {{ getLocationDisplayAddress(selectedSnapshot) }}
-          </el-descriptions-item>
-          <el-descriptions-item label="上报时间">
-            {{ formatDateTime(selectedSnapshot.latest_report?.reported_at) }}
-          </el-descriptions-item>
-          <el-descriptions-item label="定位精度">
-            {{ formatAccuracy(selectedSnapshot.latest_report?.accuracy) }}
-          </el-descriptions-item>
-          <el-descriptions-item label="失败原因">
-            {{ selectedSnapshot.latest_report?.failure_reason || '-' }}
-          </el-descriptions-item>
-        </el-descriptions>
-        <el-alert
-          show-icon
-          title="该功能仅展示员工主动上报的最近一次位置"
-          type="info"
-          :closable="false"
-        />
-      </section>
-    </el-drawer>
   </section>
 </template>
