@@ -5,6 +5,7 @@ import { onMounted, ref } from 'vue'
 import { getErrorMessage } from '@/core/http/error-normalizer'
 import { fetchMyLatestLocation, reportLocation } from '@/modules/locations/api/locations.api'
 import type { LocationSnapshot } from '@/modules/locations/locations.types'
+import { locateCurrentUser } from '@/modules/locations/services/location-provider'
 import {
   getLocationDisplayAddress,
   getLocationStatusLabel,
@@ -86,29 +87,23 @@ async function promptLocationReport(): Promise<void> {
 async function reportCurrentLocation(): Promise<void> {
   reportLoading.value = true
   try {
-    if (!navigator.geolocation) {
-      await reportLocation({
-        report_status: 'locate_failed',
-        failure_reason: '当前浏览器不支持定位',
-      })
-      ElMessage.warning('当前浏览器不支持定位，已记录定位失败')
-      await loadMyLocation(false)
+    const result = await locateCurrentUser()
+    if (!result.ok) {
+      if (result.shouldReportFailure) {
+        await submitLocationFailure(result.message)
+      } else {
+        ElMessage.warning(result.message)
+      }
       return
     }
 
-    const position = await getCurrentPosition().catch(async (error: unknown) => {
-      await submitLocationFailure(getGeolocationErrorMessage(error))
-      return null
-    })
-    if (!position) {
-      return
-    }
     await reportLocation({
-      longitude: position.coords.longitude,
-      latitude: position.coords.latitude,
-      accuracy: position.coords.accuracy,
+      longitude: result.longitude,
+      latitude: result.latitude,
+      accuracy: result.accuracy,
+      address: result.address,
     })
-    ElMessage.success('当前位置已上报')
+    ElMessage.success('当前位置已上报！')
     await loadMyLocation(false)
   } catch (error) {
     ElMessage.error(getErrorMessage(error))
@@ -117,37 +112,17 @@ async function reportCurrentLocation(): Promise<void> {
   }
 }
 
-function getCurrentPosition(): Promise<GeolocationPosition> {
-  return new Promise((resolve, reject) => {
-    navigator.geolocation.getCurrentPosition(resolve, reject, {
-      enableHighAccuracy: true,
-      maximumAge: 0,
-      timeout: 10000,
-    })
-  })
-}
-
 async function submitLocationFailure(reason: string): Promise<void> {
   try {
     await reportLocation({
       report_status: 'locate_failed',
       failure_reason: reason,
     })
-    ElMessage.warning('定位失败，已记录本次上报结果')
+    ElMessage.warning('定位失败，已记录本次上报结果，联系管理员或重新定位！')
     await loadMyLocation(false)
   } catch (error) {
     ElMessage.error(getErrorMessage(error))
   }
-}
-
-function getGeolocationErrorMessage(error: unknown): string {
-  if (error && typeof error === 'object' && 'message' in error) {
-    const message = String((error as { message?: unknown }).message || '').trim()
-    if (message) {
-      return message
-    }
-  }
-  return '浏览器定位失败'
 }
 
 function formatAccuracy(value: string | null | undefined): string {
