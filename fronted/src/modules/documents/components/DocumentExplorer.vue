@@ -143,6 +143,16 @@ const isSubfolderPanelRootLanding = computed(
     Boolean(subfolderPanelRoot.value) &&
     selectedFolderId.value === selectedPublicRootNode.value?.id,
 )
+const isArchiveSelection = computed(() => selectedPublicRootNode.value?.publicRootKey === 'archive')
+const isArchiveRootLanding = computed(
+  () => isArchiveSelection.value && selectedFolderId.value === selectedPublicRootNode.value?.id,
+)
+const isArchiveYearSelected = computed(
+  () =>
+    isArchiveSelection.value &&
+    selectedFolderId.value !== undefined &&
+    selectedFolderId.value !== selectedPublicRootNode.value?.id,
+)
 const canCloseDocumentResults = computed(
   () =>
     Boolean(selectedFolderId.value) &&
@@ -155,7 +165,10 @@ const isDocumentResultsHidden = computed(
     selectedFolderId.value === hiddenDocumentResultsFolderId.value,
 )
 const shouldShowDocumentResults = computed(
-  () => !isSubfolderPanelRootLanding.value && !isDocumentResultsHidden.value,
+  () =>
+    !isSubfolderPanelRootLanding.value &&
+    !isDocumentResultsHidden.value &&
+    !isArchiveRootLanding.value,
 )
 const subfolderPanelTitle = computed(() =>
   selectedSubfolderItem.value?.name ?? (isStaffRoot.value ? '人员名单' : '公司名单'),
@@ -168,7 +181,9 @@ const subfolderPanelCountText = computed(() =>
 const subfolderPanelEmptyText = computed(() =>
   isStaffRoot.value ? '暂无人员' : '暂无公司',
 )
-const canUpload = computed(() => !isTrashMode.value && !isSubfolderPanelRootLanding.value)
+const canUpload = computed(
+  () => !isTrashMode.value && !isSubfolderPanelRootLanding.value && !isArchiveSelection.value,
+)
 const canCreateSubfolder = computed(
   () => authStore.isSystemAdmin && (isCompanyRoot.value || isStaffRoot.value),
 )
@@ -407,7 +422,7 @@ async function loadDocuments(): Promise<void> {
     return
   }
 
-  if (isSubfolderPanelRootLanding.value) {
+  if (isSubfolderPanelRootLanding.value || isArchiveRootLanding.value) {
     documents.value = []
     total.value = 0
     listLoading.value = false
@@ -780,6 +795,8 @@ async function handleRestore(document: DocumentItem): Promise<void> {
         :height="folderLayout === 'top' ? 480 : undefined"
         :loading="listLoading"
         :mode="props.mode"
+        :read-only="isArchiveYearSelected"
+        :show-project="isArchiveYearSelected"
         @delete="handleDelete"
         @download="handleDownload"
         @edit="openEditDialog"

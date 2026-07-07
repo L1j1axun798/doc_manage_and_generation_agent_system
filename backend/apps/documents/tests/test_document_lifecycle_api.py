@@ -178,6 +178,42 @@ def test_document_move_rejects_public_qualification_roots_but_allows_child_folde
 
 
 @pytest.mark.django_db
+def test_document_move_rejects_archive_root_and_year(client, tmp_path, settings):
+    settings.FILE_STORAGE_ROOT = tmp_path
+    admin = make_user("admin", User.Role.SYSTEM_ADMIN)
+    source = Folder.objects.create(name="公共资料", created_by=admin)
+    archive_root = Folder.objects.create(
+        name="已归档文件",
+        code="PUBLIC-ARCHIVE",
+        is_system_root=True,
+        created_by=admin,
+    )
+    archive_year = Folder.objects.create(
+        parent=archive_root,
+        name="2026年归档资料",
+        code="PUBLIC-ARCHIVE-2026",
+        created_by=admin,
+    )
+    client.force_login(admin)
+    document = create_document(client, folder=source)
+
+    root_response = client.post(
+        f"/api/v1/documents/{document['id']}/move/",
+        {"folder": archive_root.id, "expected_updated_at": expected(document["id"])},
+        content_type="application/json",
+    )
+    year_response = client.post(
+        f"/api/v1/documents/{document['id']}/move/",
+        {"folder": archive_year.id, "expected_updated_at": expected(document["id"])},
+        content_type="application/json",
+    )
+
+    assert root_response.status_code == 400
+    assert year_response.status_code == 400
+    assert Document.objects.get(pk=document["id"]).folder_id == source.id
+
+
+@pytest.mark.django_db
 def test_document_move_allows_project_staff_root(client, tmp_path, settings):
     settings.FILE_STORAGE_ROOT = tmp_path
     admin = make_user("admin", User.Role.SYSTEM_ADMIN)

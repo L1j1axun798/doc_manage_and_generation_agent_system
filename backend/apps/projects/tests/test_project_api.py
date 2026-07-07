@@ -363,6 +363,7 @@ def test_archive_project_groups_folders_by_archive_year(client):
     child_folder.refresh_from_db()
     document.refresh_from_db()
     document_list_response = client.get(f"/api/v1/documents/?folder={archive_root.id}")
+    year_document_list_response = client.get(f"/api/v1/documents/?folder={archive_year.id}")
 
     assert response.status_code == 200
     assert archive_root.is_system_root is True
@@ -374,6 +375,9 @@ def test_archive_project_groups_folders_by_archive_year(client):
     assert document_list_response.status_code == 200
     assert document_list_response.json()["count"] == 1
     assert document_list_response.json()["results"][0]["id"] == document.id
+    assert year_document_list_response.status_code == 200
+    assert year_document_list_response.json()["count"] == 1
+    assert year_document_list_response.json()["results"][0]["id"] == document.id
 
 
 @pytest.mark.django_db

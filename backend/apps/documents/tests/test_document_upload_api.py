@@ -338,6 +338,45 @@ def test_archived_project_rejects_document_upload(client, tmp_path, settings):
 
 
 @pytest.mark.django_db
+def test_archive_root_and_year_reject_document_upload(client, tmp_path, settings):
+    settings.FILE_STORAGE_ROOT = tmp_path
+    admin = make_user("admin", User.Role.SYSTEM_ADMIN)
+    archive_root = Folder.objects.create(
+        name="已归档文件",
+        code="PUBLIC-ARCHIVE",
+        is_system_root=True,
+        created_by=admin,
+    )
+    archive_year = Folder.objects.create(
+        parent=archive_root,
+        name="2026年归档资料",
+        code="PUBLIC-ARCHIVE-2026",
+        created_by=admin,
+    )
+    client.force_login(admin)
+
+    root_response = client.post(
+        "/api/v1/documents/",
+        {
+            "folder": archive_root.id,
+            "file": upload_file("root.pdf", b"root"),
+        },
+    )
+    year_response = client.post(
+        "/api/v1/documents/",
+        {
+            "folder": archive_year.id,
+            "file": upload_file("year.pdf", b"year"),
+        },
+    )
+
+    assert root_response.status_code == 400
+    assert year_response.status_code == 400
+    assert Document.objects.count() == 0
+    assert list(tmp_path.rglob("*")) == []
+
+
+@pytest.mark.django_db
 def test_create_document_version_locks_document_and_updates_current_version(
     client,
     tmp_path,

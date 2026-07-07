@@ -336,6 +336,70 @@ def test_project_folder_tree_ensures_missing_standard_roots(client):
 
 
 @pytest.mark.django_db
+def test_public_folder_tree_exposes_archive_years_without_project_containers(client):
+    admin = make_user("admin", User.Role.SYSTEM_ADMIN)
+    active_project = Project.objects.create(name="进行中项目", code="P001", created_by=admin)
+    archived_project = Project.objects.create(name="归档项目", code="P002", created_by=admin)
+    active_root = Folder.objects.create(
+        project=active_project,
+        name="竣工资料档案",
+        code="PUBLIC-COMPLETION",
+        created_by=admin,
+    )
+    archive_root = Folder.objects.create(
+        project=None,
+        parent=None,
+        name="已归档文件",
+        code="PUBLIC-ARCHIVE",
+        is_system_root=True,
+        sort_order=99,
+        created_by=admin,
+    )
+    archive_year = Folder.objects.create(
+        project=None,
+        parent=archive_root,
+        name="2026年归档资料",
+        code="PUBLIC-ARCHIVE-2026",
+        created_by=admin,
+    )
+    project_container = Folder.objects.create(
+        project=archived_project,
+        parent=archive_year,
+        name="P002 归档项目",
+        code=f"PROJECT-ARCHIVE-{archived_project.id}",
+        created_by=admin,
+    )
+    archived_root = Folder.objects.create(
+        project=archived_project,
+        parent=project_container,
+        name="竣工资料档案",
+        code="PUBLIC-COMPLETION",
+        created_by=admin,
+    )
+    client.force_login(admin)
+
+    response = client.get("/api/v1/folders/tree/?project_id=public")
+
+    assert response.status_code == 200
+    payload = response.json()
+    archive_payload = next(node for node in payload if node["id"] == archive_root.id)
+    year_payload = archive_payload["children"][0]
+    assert year_payload["id"] == archive_year.id
+    assert year_payload["children"] == []
+    assert project_container.id not in _tree_ids(payload)
+    assert archived_root.id not in _tree_ids(payload)
+    assert all(node["id"] != active_root.id for node in payload)
+
+
+def _tree_ids(nodes):
+    ids = []
+    for node in nodes:
+        ids.append(node["id"])
+        ids.extend(_tree_ids(node["children"]))
+    return ids
+
+
+@pytest.mark.django_db
 def test_system_root_folder_cannot_move_or_disable(client):
     admin = make_user("admin", User.Role.SYSTEM_ADMIN)
     root = Folder.objects.create(name="公司资质", is_system_root=True, created_by=admin)

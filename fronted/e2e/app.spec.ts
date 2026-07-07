@@ -312,6 +312,89 @@ test('shows document center with folder tree and document detail', async ({ page
   await expect(page.getByRole('heading', { name: '上传资料' })).toBeVisible()
 })
 
+test('shows archived year documents as read-only table', async ({ page }) => {
+  await mockAuthenticatedSession(page)
+  await page.route('**/api/v1/folders/tree/**', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify([
+        {
+          id: 90,
+          project: null,
+          parent: null,
+          name: '已归档文件',
+          code: 'PUBLIC-ARCHIVE',
+          sort_order: 99,
+          is_active: true,
+          is_system_root: true,
+          children: [
+            {
+              id: 91,
+              project: null,
+              parent: 90,
+              name: '2026年归档资料',
+              code: 'PUBLIC-ARCHIVE-2026',
+              sort_order: 2026,
+              is_active: true,
+              is_system_root: false,
+              children: [],
+            },
+          ],
+        },
+      ]),
+    })
+  })
+  const requestedFolders: Array<string | null> = []
+  await page.route('**/api/v1/documents/?**', async (route) => {
+    const folder = new URL(route.request().url()).searchParams.get('folder')
+    requestedFolders.push(folder)
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        count: folder === '91' ? 1 : 0,
+        next: null,
+        previous: null,
+        results:
+          folder === '91'
+            ? [
+                {
+                  ...documentFixture,
+                  id: 91,
+                  project: 2,
+                  project_name: 'P002 归档项目',
+                  folder: 93,
+                  folder_name: '竣工资料档案',
+                  title: '归档检测报告',
+                },
+              ]
+            : [],
+      }),
+    })
+  })
+  await mockAccessEndpoints(page)
+
+  await page.goto('/documents')
+
+  await expect(page.getByRole('button', { name: '2026年归档资料' })).toBeVisible()
+  expect(requestedFolders).not.toContain('90')
+  await expect(page.getByText('归档检测报告')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '上传资料' })).toHaveCount(0)
+
+  await page.getByRole('button', { name: '已归档文件' }).click()
+  await expect(page.getByRole('button', { name: '2026年归档资料' })).toBeVisible()
+  await page.getByRole('button', { name: '2026年归档资料' }).click()
+
+  await expect(page.locator('tbody').getByRole('button', { name: '归档检测报告' })).toBeVisible()
+  await expect(page.getByRole('cell', { name: 'P002 归档项目' })).toBeVisible()
+  await expect(page.getByRole('cell', { name: '竣工资料档案' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '上传资料' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '下载' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '修改' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '移动' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '新版本' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '删除' })).toHaveCount(0)
+})
+
 test('manages document grants and temporary access from document detail', async ({ page }) => {
   await mockAuthenticatedSession(page)
   await page.route('**/api/v1/folders/tree/**', async (route) => {

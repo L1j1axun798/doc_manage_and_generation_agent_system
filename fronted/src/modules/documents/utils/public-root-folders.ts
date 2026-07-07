@@ -189,6 +189,21 @@ export function isQualificationRootFolderNode(
   )
 }
 
+export function isArchiveFolderNode(
+  node: Pick<FolderTreeNode, 'code' | 'name' | 'parent' | 'project'>,
+): boolean {
+  if (node.project !== null) {
+    return node.code.startsWith('PROJECT-ARCHIVE')
+  }
+
+  return (
+    node.code === 'PUBLIC-ARCHIVE' ||
+    node.code.startsWith('PUBLIC-ARCHIVE-') ||
+    ARCHIVE_ROOT_DEFINITION.matches.includes(node.name) ||
+    isArchiveYearRoot(node.name)
+  )
+}
+
 function isArchiveYearRoot(folderName: string): boolean {
   return /^\d{4}年归档资料$/.test(folderName)
 }

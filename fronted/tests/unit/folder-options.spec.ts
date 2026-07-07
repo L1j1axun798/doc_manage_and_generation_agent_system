@@ -93,6 +93,29 @@ it('excludes public qualification roots as document targets but keeps child fold
   ])
 })
 
+it('excludes archive folders from document targets', () => {
+  const options = flattenDocumentTargetFolderOptions([
+    folder({
+      id: 10,
+      name: '已归档文件',
+      code: 'PUBLIC-ARCHIVE',
+      children: [
+        folder({
+          id: 11,
+          parent: 10,
+          name: '2026年归档资料',
+          code: 'PUBLIC-ARCHIVE-2026',
+          is_system_root: false,
+        }),
+      ],
+    }),
+    folder({ id: 12, project: 2, name: 'P002 归档项目', code: 'PROJECT-ARCHIVE-2' }),
+    folder({ id: 13, name: '报告模板', code: 'PUBLIC-REPORT-TEMPLATE' }),
+  ])
+
+  expect(options).toEqual([{ id: 13, label: '报告模板' }])
+})
+
 it('keeps project qualification roots as document targets', () => {
   const options = flattenDocumentTargetFolderOptions([
     folder({
@@ -148,6 +171,7 @@ it('builds public root folder options for document center move targets', () => {
       ],
     }),
     folder({ id: 5, name: '人员保险单', code: 'PUBLIC-STAFF-INSURANCE' }),
+    folder({ id: 6, name: '已归档文件', code: 'PUBLIC-ARCHIVE' }),
   ])
 
   expect(options).toEqual([

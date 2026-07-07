@@ -61,13 +61,7 @@ const archiveNode = computed(() =>
 )
 const archiveYearNodes = computed<FlatFolderNode[]>(() =>
   archiveNode.value
-    ? archiveNode.value.children.map((node) => ({
-        ...node,
-        depth: 1,
-        displayName: node.name,
-        icon: FolderChecked,
-        publicRootKey: 'archive',
-      }))
+    ? archiveNode.value.children.map((node) => archiveFolderNode(node, 1))
     : [],
 )
 const showArchiveYears = computed(
@@ -91,11 +85,15 @@ function isNodeActive(node: FlatFolderNode): boolean {
     return true
   }
 
-  if (isTopPresentation.value && node.children.some((child) => child.id === props.modelValue)) {
+  if (
+    isTopPresentation.value &&
+    props.modelValue !== undefined &&
+    hasDescendant(node, props.modelValue)
+  ) {
     return true
   }
 
-  return node.publicRootKey === 'archive' && node.children.some((child) => child.id === props.modelValue)
+  return false
 }
 
 function flattenFolders(nodes: FolderTreeNode[], depth = 0): FlatFolderNode[] {
@@ -103,6 +101,20 @@ function flattenFolders(nodes: FolderTreeNode[], depth = 0): FlatFolderNode[] {
     { ...node, depth, displayName: node.name, icon: getFolderIcon(node.name) },
     ...flattenFolders(node.children, depth + 1),
   ])
+}
+
+function archiveFolderNode(node: FolderTreeNode, depth: number): FlatFolderNode {
+  return {
+    ...node,
+    depth,
+    displayName: node.name,
+    icon: FolderChecked,
+    publicRootKey: 'archive',
+  }
+}
+
+function hasDescendant(node: FolderTreeNode, folderId: number): boolean {
+  return node.children.some((child) => child.id === folderId || hasDescendant(child, folderId))
 }
 
 function getFolderIcon(name: string): Component {
@@ -200,19 +212,23 @@ function getFolderIcon(name: string): Component {
         </div>
 
         <div v-if="showArchiveYears" class="folder-tree__archive-list">
-          <button
+          <div
             v-for="yearNode in archiveYearNodes"
             :key="yearNode.id"
-            class="folder-tree__archive-node"
-            :class="{ 'is-active': modelValue === yearNode.id }"
-            type="button"
-            @click="selectFolder(yearNode.id)"
+            class="folder-tree__archive-group"
           >
-            <el-icon class="folder-tree__archive-icon">
-              <component :is="yearNode.icon" />
-            </el-icon>
-            <span>{{ yearNode.displayName }}</span>
-          </button>
+            <button
+              class="folder-tree__archive-node"
+              :class="{ 'is-active': isNodeActive(yearNode) }"
+              type="button"
+              @click="selectFolder(yearNode.id)"
+            >
+              <el-icon class="folder-tree__archive-icon">
+                <component :is="yearNode.icon" />
+              </el-icon>
+              <span>{{ yearNode.displayName }}</span>
+            </button>
+          </div>
         </div>
       </template>
 

@@ -469,15 +469,23 @@ body {
 .folder-tree__archive-list {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  align-items: flex-start;
+  gap: 12px;
   padding-top: 12px;
   border-top: 1px dashed var(--color-border);
+}
+
+.folder-tree__archive-group {
+  display: grid;
+  gap: 8px;
+  min-width: 200px;
 }
 
 .folder-tree__archive-node {
   display: inline-grid;
   grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
+  justify-items: start;
   min-height: 40px;
   gap: 6px;
   padding: 8px 12px;
@@ -489,7 +497,7 @@ body {
   font-size: 13px;
   font-weight: 600;
   line-height: 1.35;
-  text-align: center;
+  text-align: left;
 }
 
 .folder-tree__archive-icon {

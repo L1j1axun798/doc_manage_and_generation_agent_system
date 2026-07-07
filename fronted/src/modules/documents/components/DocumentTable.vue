@@ -9,9 +9,13 @@ withDefaults(
     height?: number | string
     loading?: boolean
     mode?: 'active' | 'trash'
+    readOnly?: boolean
+    showProject?: boolean
   }>(),
   {
     fixedActions: true,
+    readOnly: false,
+    showProject: false,
   },
 )
 
@@ -47,6 +51,8 @@ function canDownloadDocument(document: DocumentItem): boolean {
       </template>
     </el-table-column>
 
+    <el-table-column v-if="showProject" label="项目" min-width="160" prop="project_name" />
+
     <el-table-column label="目录" min-width="140" prop="folder_name" />
 
     <el-table-column label="大小" width="110">
@@ -63,7 +69,11 @@ function canDownloadDocument(document: DocumentItem): boolean {
       </template>
     </el-table-column>
 
-    <el-table-column label="操作" :fixed="fixedActions ? 'right' : false" width="260">
+    <el-table-column
+      label="操作"
+      :fixed="fixedActions ? 'right' : false"
+      :width="readOnly || mode === 'trash' ? 160 : 260"
+    >
       <template #default="{ row }: { row: DocumentItem }">
         <el-button link type="primary" @click="emit('view', row)">详情</el-button>
         <template v-if="mode === 'trash'">
@@ -78,10 +88,12 @@ function canDownloadDocument(document: DocumentItem): boolean {
           >
             下载
           </el-button>
-          <el-button link @click="emit('edit', row)">修改</el-button>
-          <el-button link @click="emit('move', row)">移动</el-button>
-          <el-button link @click="emit('version', row)">新版本</el-button>
-          <el-button link type="danger" @click="emit('delete', row)">删除</el-button>
+          <template v-if="!readOnly">
+            <el-button link @click="emit('edit', row)">修改</el-button>
+            <el-button link @click="emit('move', row)">移动</el-button>
+            <el-button link @click="emit('version', row)">新版本</el-button>
+            <el-button link type="danger" @click="emit('delete', row)">删除</el-button>
+          </template>
         </template>
       </template>
     </el-table-column>
