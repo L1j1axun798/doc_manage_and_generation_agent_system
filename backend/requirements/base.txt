@@ -8,3 +8,4 @@ mysqlclient>=2.2,<3.0
 Pillow>=10.4,<12.0
 django-axes>=6.5,<7.0
 argon2-cffi>=23.1,<26.0
+webauthn>=2.7,<3.0

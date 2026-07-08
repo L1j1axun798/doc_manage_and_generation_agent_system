@@ -1,4 +1,7 @@
+import hashlib
+import json
 from decimal import ROUND_HALF_UP, Decimal
+from typing import Any
 
 from django.utils import timezone
 from rest_framework import serializers
@@ -28,6 +31,7 @@ class LocationReportRequestSerializer(serializers.ModelSerializer):
     longitude = serializers.FloatField(required=False, allow_null=True)
     latitude = serializers.FloatField(required=False, allow_null=True)
     accuracy = serializers.FloatField(required=False, allow_null=True)
+    webauthn = serializers.DictField(write_only=True, required=True)
     report_status = serializers.ChoiceField(
         choices=LocationReport.ReportStatus.choices,
         default=LocationReport.ReportStatus.SUCCESS,
@@ -42,7 +46,12 @@ class LocationReportRequestSerializer(serializers.ModelSerializer):
             "address",
             "report_status",
             "failure_reason",
+            "webauthn",
         ]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["webauthn"].required = bool(self.context.get("require_webauthn", True))
 
     def validate_longitude(self, value):
         if value is not None and not (Decimal("-180") <= Decimal(str(value)) <= Decimal("180")):
@@ -84,6 +93,7 @@ class LocationReportRequestSerializer(serializers.ModelSerializer):
         return attrs
 
     def create(self, validated_data):
+        validated_data.pop("webauthn", None)
         return LocationReport.objects.create(
             user=self.context["request"].user,
             reported_at=timezone.now(),
@@ -93,6 +103,28 @@ class LocationReportRequestSerializer(serializers.ModelSerializer):
 
 def quantize_decimal(value: float, precision: str) -> Decimal:
     return Decimal(str(value)).quantize(Decimal(precision), rounding=ROUND_HALF_UP)
+
+
+def location_payload_hash(validated_data: dict[str, Any]) -> str:
+    payload = {
+        "longitude": normalize_payload_value(validated_data.get("longitude")),
+        "latitude": normalize_payload_value(validated_data.get("latitude")),
+        "accuracy": normalize_payload_value(validated_data.get("accuracy")),
+        "address": validated_data.get("address", ""),
+        "report_status": validated_data.get(
+            "report_status",
+            LocationReport.ReportStatus.SUCCESS,
+        ),
+        "failure_reason": validated_data.get("failure_reason", ""),
+    }
+    encoded = json.dumps(payload, ensure_ascii=True, separators=(",", ":"), sort_keys=True)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def normalize_payload_value(value: Any) -> str | None:
+    if value is None:
+        return None
+    return str(value)
 
 
 class LocationUserSerializer(serializers.Serializer):

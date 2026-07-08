@@ -19,7 +19,7 @@ python manage.py runserver 0.0.0.0:8000
 ```powershell
 cd D:\vscode程序夹\wind-doc-system\fronted
 npm install
-npm run dev -- --host 127.0.0.1 --port 5174
+npm run dev -- --host localhost --port 5174
 
 局域网内测试：
 npm run dev -- --host 0.0.0.0
@@ -28,8 +28,10 @@ npm run dev -- --host 0.0.0.0
 访问：
 
 ```text
-http://localhost:5173
+http://localhost:5174
 ```
+
+WebAuthn 本人验证要求访问域名与 `WEBAUTHN_RP_ID` 匹配；默认本地配置使用 `localhost`。
 
 ## 检查
 

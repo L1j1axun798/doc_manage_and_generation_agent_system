@@ -7,7 +7,9 @@ import {
   fetchCurrentUser,
   login,
   logout,
+  verifyWebAuthnLogin,
 } from '../api/auth.api'
+import { authenticateWithWebAuthn } from '../services/webauthn'
 import type { AuthUser, ChangePasswordPayload, LoginPayload } from '../auth.types'
 
 type AuthStatus = 'idle' | 'loading' | 'authenticated' | 'anonymous'
@@ -59,7 +61,12 @@ export const useAuthStore = defineStore('auth', {
     async login(payload: LoginPayload): Promise<AuthUser> {
       this.status = 'loading'
       await fetchCsrfToken()
-      const user = await login(payload)
+      const challenge = await login(payload)
+      const credential = await authenticateWithWebAuthn(challenge.options)
+      const user = await verifyWebAuthnLogin({
+        pending_token: challenge.pending_token,
+        credential,
+      })
       this.user = user
       this.status = 'authenticated'
       this.initialized = true

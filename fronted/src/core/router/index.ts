@@ -15,6 +15,15 @@ export const routes: RouteRecordRaw[] = [
     },
   },
   {
+    path: '/webauthn/register',
+    name: 'webauthn-register',
+    component: () => import('@/modules/auth/pages/WebAuthnRegisterPage.vue'),
+    meta: {
+      title: '绑定本人验证设备',
+      layout: 'blank',
+    },
+  },
+  {
     path: '/',
     component: MainLayout,
     redirect: '/dashboard',

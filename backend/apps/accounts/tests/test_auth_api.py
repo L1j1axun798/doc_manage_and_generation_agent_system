@@ -2,9 +2,22 @@ import pytest
 from django.contrib.auth import get_user_model
 from django.urls import reverse
 
+from apps.accounts.models import WebAuthnCredential
 from apps.audit.models import AuditLog
 
 User = get_user_model()
+
+
+def create_webauthn_credential(user, credential_id: str = "credential-001") -> WebAuthnCredential:
+    return WebAuthnCredential.objects.create(
+        user=user,
+        name="本人手机",
+        credential_id=credential_id,
+        public_key=b"public-key",
+        sign_count=0,
+        transports=["internal"],
+        device_type="single_device",
+    )
 
 
 @pytest.mark.django_db
@@ -159,28 +172,111 @@ def test_inactive_user_cannot_login(client):
 
 
 @pytest.mark.django_db
-def test_login_logout_and_me(client):
+def test_login_requires_webauthn_before_session(client, monkeypatch):
     user = User.objects.create_user(
         username="operator",
         password="OperatorPass123!",
         real_name="资料员",
         role=User.Role.DATA_OPERATOR,
     )
+    create_webauthn_credential(user)
 
     login_response = client.post(
         reverse("auth-login"),
         {"username": "operator", "password": "OperatorPass123!"},
         content_type="application/json",
     )
+
+    assert login_response.status_code == 200
+    assert login_response.json()["status"] == "webauthn_required"
+    assert login_response.json()["pending_token"]
+    assert client.get(reverse("auth-me")).status_code in {401, 403}
+
+    monkeypatch.setattr("apps.accounts.views.finish_login", lambda **kwargs: user)
+    verify_response = client.post(
+        reverse("auth-webauthn-login-verify"),
+        {
+            "pending_token": login_response.json()["pending_token"],
+            "credential": {"id": "credential-001"},
+        },
+        content_type="application/json",
+    )
     me_response = client.get(reverse("auth-me"))
     logout_response = client.post(reverse("auth-logout"))
 
-    assert login_response.status_code == 200
+    assert verify_response.status_code == 200
     assert me_response.status_code == 200
     assert me_response.json()["id"] == user.id
     assert logout_response.status_code == 204
+    assert AuditLog.objects.filter(action="auth.password_verified", result="success").exists()
     assert AuditLog.objects.filter(action="auth.login", result="success").exists()
     assert AuditLog.objects.filter(action="auth.logout", result="success").exists()
+
+
+@pytest.mark.django_db
+def test_legacy_session_without_webauthn_marker_is_rejected_on_me(client):
+    user = User.objects.create_user(
+        username="operator",
+        password="OperatorPass123!",
+        real_name="资料员",
+        role=User.Role.DATA_OPERATOR,
+    )
+    client.force_login(user)
+
+    response = client.get(reverse("auth-me"))
+
+    assert response.status_code in {401, 403}
+    assert "重新登录" in str(response.json())
+
+
+@pytest.mark.django_db
+def test_login_without_bound_webauthn_device_is_denied(client):
+    User.objects.create_user(
+        username="operator",
+        password="OperatorPass123!",
+        real_name="资料员",
+        role=User.Role.DATA_OPERATOR,
+    )
+
+    response = client.post(
+        reverse("auth-login"),
+        {"username": "operator", "password": "OperatorPass123!"},
+        content_type="application/json",
+    )
+
+    assert response.status_code == 403
+    assert "本人验证设备" in str(response.json())
+
+
+@pytest.mark.django_db
+def test_admin_can_create_and_reset_webauthn_ticket(client):
+    admin = User.objects.create_user(
+        username="admin",
+        password="AdminPass123!",
+        real_name="管理员",
+        role=User.Role.SYSTEM_ADMIN,
+    )
+    user = User.objects.create_user(
+        username="operator",
+        password="OperatorPass123!",
+        real_name="资料员",
+        role=User.Role.DATA_OPERATOR,
+    )
+    create_webauthn_credential(user)
+    client.force_login(admin)
+
+    ticket_response = client.post(
+        reverse("auth-webauthn-enrollment-ticket"),
+        {"user": user.id},
+        content_type="application/json",
+    )
+    reset_response = client.post(f"/api/v1/users/{user.id}/webauthn-reset/")
+
+    assert ticket_response.status_code == 201
+    assert ticket_response.json()["token"]
+    assert reset_response.status_code == 200
+    assert reset_response.json()["revoked_credentials"] == 1
+    assert user.webauthn_credentials.filter(is_active=True).count() == 0
 
 
 @pytest.mark.django_db

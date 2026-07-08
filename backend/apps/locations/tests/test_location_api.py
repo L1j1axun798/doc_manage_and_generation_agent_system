@@ -5,6 +5,7 @@ import pytest
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 
+from apps.accounts.models import WebAuthnCredential
 from apps.audit.models import AuditLog
 from apps.locations.models import LocationReport
 
@@ -21,6 +22,40 @@ def make_user(username: str, role: str = User.Role.DATA_OPERATOR, **kwargs):
     )
 
 
+class VerifiedCredential:
+    id = 1
+
+
+@pytest.fixture(autouse=True)
+def mock_location_webauthn(monkeypatch):
+    monkeypatch.setattr(
+        "apps.locations.views.verify_location_challenge",
+        lambda **kwargs: VerifiedCredential(),
+    )
+
+
+def with_webauthn(payload: dict) -> dict:
+    return {
+        **payload,
+        "webauthn": {
+            "challenge_token": "challenge-token",
+            "credential": {"id": "credential-001"},
+        },
+    }
+
+
+def create_webauthn_credential(user) -> WebAuthnCredential:
+    return WebAuthnCredential.objects.create(
+        user=user,
+        name="本人手机",
+        credential_id="credential-001",
+        public_key=b"public-key",
+        sign_count=0,
+        transports=["internal"],
+        device_type="single_device",
+    )
+
+
 @pytest.mark.django_db
 def test_authenticated_user_can_report_success_location(client):
     user = make_user("operator")
@@ -28,12 +63,12 @@ def test_authenticated_user_can_report_success_location(client):
 
     response = client.post(
         "/api/v1/locations/report/",
-        {
+        with_webauthn({
             "longitude": "116.397128",
             "latitude": "39.916527",
             "accuracy": "25.50",
             "address": "北京市东城区",
-        },
+        }),
         content_type="application/json",
     )
 
@@ -54,11 +89,11 @@ def test_report_accepts_browser_precision_coordinates(client):
 
     response = client.post(
         "/api/v1/locations/report/",
-        {
+        with_webauthn({
             "longitude": 116.397128456789,
             "latitude": 39.916527987654,
             "accuracy": 25.507,
-        },
+        }),
         content_type="application/json",
     )
 
@@ -76,10 +111,10 @@ def test_report_accepts_locate_failed_without_coordinates(client):
 
     response = client.post(
         "/api/v1/locations/report/",
-        {
+        with_webauthn({
             "report_status": "locate_failed",
             "failure_reason": "用户拒绝定位授权",
-        },
+        }),
         content_type="application/json",
     )
 
@@ -99,17 +134,17 @@ def test_report_validates_success_coordinates_and_accuracy(client):
 
     missing_coordinate = client.post(
         "/api/v1/locations/report/",
-        {"longitude": "116.397128"},
+        with_webauthn({"longitude": "116.397128"}),
         content_type="application/json",
     )
     invalid_longitude = client.post(
         "/api/v1/locations/report/",
-        {"longitude": "181", "latitude": "39.916527"},
+        with_webauthn({"longitude": "181", "latitude": "39.916527"}),
         content_type="application/json",
     )
     invalid_accuracy = client.post(
         "/api/v1/locations/report/",
-        {"longitude": "116.397128", "latitude": "39.916527", "accuracy": "-1"},
+        with_webauthn({"longitude": "116.397128", "latitude": "39.916527", "accuracy": "-1"}),
         content_type="application/json",
     )
 
@@ -123,12 +158,44 @@ def test_report_validates_success_coordinates_and_accuracy(client):
 def test_report_requires_login(client):
     response = client.post(
         "/api/v1/locations/report/",
-        {"longitude": "116.397128", "latitude": "39.916527"},
+        with_webauthn({"longitude": "116.397128", "latitude": "39.916527"}),
         content_type="application/json",
     )
 
     assert response.status_code in {403, 401}
     assert LocationReport.objects.count() == 0
+
+
+@pytest.mark.django_db
+def test_report_requires_webauthn_assertion(client):
+    user = make_user("operator")
+    client.force_login(user)
+
+    response = client.post(
+        "/api/v1/locations/report/",
+        {"longitude": "116.397128", "latitude": "39.916527"},
+        content_type="application/json",
+    )
+
+    assert response.status_code == 400
+    assert LocationReport.objects.count() == 0
+
+
+@pytest.mark.django_db
+def test_report_challenge_returns_webauthn_options_for_bound_user(client):
+    user = make_user("operator")
+    create_webauthn_credential(user)
+    client.force_login(user)
+
+    response = client.post(
+        "/api/v1/locations/report/challenge/",
+        {"longitude": "116.397128", "latitude": "39.916527"},
+        content_type="application/json",
+    )
+
+    assert response.status_code == 200
+    assert response.json()["token"]
+    assert response.json()["options"]["challenge"]
 
 
 @pytest.mark.django_db

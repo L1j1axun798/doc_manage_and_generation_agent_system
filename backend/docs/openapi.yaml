@@ -148,7 +148,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/User'
+                $ref: '#/components/schemas/LoginChallengeResponse'
           description: ''
   /api/v1/auth/logout/:
     post:
@@ -173,6 +173,142 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/User'
+          description: ''
+  /api/v1/auth/webauthn/credentials/:
+    get:
+      operationId: v1_auth_webauthn_credentials_list
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/WebAuthnCredential'
+          description: ''
+  /api/v1/auth/webauthn/credentials/{id}/:
+    delete:
+      operationId: v1_auth_webauthn_credentials_destroy
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '204':
+          description: 已撤销
+  /api/v1/auth/webauthn/enrollment-tickets/:
+    post:
+      operationId: v1_auth_webauthn_enrollment_tickets_create
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WebAuthnEnrollmentTicketCreate'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/WebAuthnEnrollmentTicketCreate'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/WebAuthnEnrollmentTicketCreate'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebAuthnEnrollmentTicket'
+          description: ''
+  /api/v1/auth/webauthn/login/verify/:
+    post:
+      operationId: v1_auth_webauthn_login_verify_create
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WebAuthnLoginVerify'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/WebAuthnLoginVerify'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/WebAuthnLoginVerify'
+        required: true
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+          description: ''
+  /api/v1/auth/webauthn/register/options/:
+    post:
+      operationId: v1_auth_webauthn_register_options_create
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WebAuthnRegisterOptions'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/WebAuthnRegisterOptions'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/WebAuthnRegisterOptions'
+        required: true
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebAuthnRegisterOptionsResponse'
+          description: ''
+  /api/v1/auth/webauthn/register/verify/:
+    post:
+      operationId: v1_auth_webauthn_register_verify_create
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WebAuthnRegisterVerify'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/WebAuthnRegisterVerify'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/WebAuthnRegisterVerify'
+        required: true
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebAuthnCredential'
           description: ''
   /api/v1/document-grants/:
     get:
@@ -1021,6 +1157,7 @@ paths:
           multipart/form-data:
             schema:
               $ref: '#/components/schemas/LocationReportRequest'
+        required: true
       security:
       - cookieAuth: []
       responses:
@@ -1029,6 +1166,32 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/LocationReport'
+          description: ''
+  /api/v1/locations/report/challenge/:
+    post:
+      operationId: v1_locations_report_challenge_create
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LocationReportRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/LocationReportRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/LocationReportRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebAuthnOptionsResponse'
           description: ''
   /api/v1/notifications/:
     get:
@@ -1883,6 +2046,39 @@ paths:
               schema:
                 $ref: '#/components/schemas/User'
           description: ''
+  /api/v1/users/{id}/webauthn-reset/:
+    post:
+      operationId: v1_users_webauthn_reset_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: 标识此 用户 的 唯一整数值。
+        required: true
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/User'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/User'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/User'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+          description: ''
 components:
   schemas:
     AuditLog:
@@ -2531,23 +2727,17 @@ components:
       type: object
       properties:
         longitude:
-          type: string
-          format: decimal
-          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+          type: number
+          format: double
           nullable: true
-          title: 经度
         latitude:
-          type: string
-          format: decimal
-          pattern: ^-?\d{0,2}(?:\.\d{0,6})?$
+          type: number
+          format: double
           nullable: true
-          title: 纬度
         accuracy:
-          type: string
-          format: decimal
-          pattern: ^-?\d{0,6}(?:\.\d{0,2})?$
+          type: number
+          format: double
           nullable: true
-          title: 定位精度
         address:
           type: string
           title: 地址
@@ -2560,6 +2750,12 @@ components:
           type: string
           title: 失败原因
           maxLength: 255
+        webauthn:
+          type: object
+          additionalProperties: {}
+          writeOnly: true
+      required:
+      - webauthn
     LocationReportStatusEnum:
       enum:
       - success
@@ -2619,6 +2815,20 @@ components:
       required:
       - password
       - username
+    LoginChallengeResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        pending_token:
+          type: string
+        options:
+          type: object
+          additionalProperties: {}
+      required:
+      - options
+      - pending_token
+      - status
     Notification:
       type: object
       properties:
@@ -3170,6 +3380,12 @@ components:
         must_change_password:
           type: boolean
           title: 首次登录需修改密码
+        webauthn_enabled:
+          type: boolean
+          readOnly: true
+        webauthn_credentials_count:
+          type: integer
+          readOnly: true
         created_at:
           type: string
           format: date-time
@@ -3564,6 +3780,12 @@ components:
         must_change_password:
           type: boolean
           title: 首次登录需修改密码
+        webauthn_enabled:
+          type: boolean
+          readOnly: true
+        webauthn_credentials_count:
+          type: integer
+          readOnly: true
         created_at:
           type: string
           format: date-time
@@ -3574,6 +3796,8 @@ components:
       - id
       - real_name
       - username
+      - webauthn_credentials_count
+      - webauthn_enabled
     UserCreate:
       type: object
       properties:
@@ -3636,6 +3860,129 @@ components:
         * `project_manager` - 项目负责人
         * `data_operator` - 资料整理员
         * `temporary_user` - 临时用户
+    WebAuthnCredential:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          readOnly: true
+          title: 设备名称
+        credential_id:
+          type: string
+          readOnly: true
+          title: 凭据 ID
+        transports:
+          readOnly: true
+          title: 传输方式
+        device_type:
+          type: string
+          readOnly: true
+          title: 设备类型
+        backed_up:
+          type: boolean
+          readOnly: true
+          title: 是否已备份
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+          title: 创建时间
+        last_used_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          title: 最近使用时间
+      required:
+      - backed_up
+      - created_at
+      - credential_id
+      - device_type
+      - id
+      - last_used_at
+      - name
+      - transports
+    WebAuthnEnrollmentTicket:
+      type: object
+      properties:
+        token:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+        user:
+          $ref: '#/components/schemas/User'
+      required:
+      - expires_at
+      - token
+      - user
+    WebAuthnEnrollmentTicketCreate:
+      type: object
+      properties:
+        user:
+          type: integer
+      required:
+      - user
+    WebAuthnLoginVerify:
+      type: object
+      properties:
+        pending_token:
+          type: string
+        credential:
+          type: object
+          additionalProperties: {}
+      required:
+      - credential
+      - pending_token
+    WebAuthnOptionsResponse:
+      type: object
+      properties:
+        token:
+          type: string
+        options:
+          type: object
+          additionalProperties: {}
+      required:
+      - options
+      - token
+    WebAuthnRegisterOptions:
+      type: object
+      properties:
+        ticket:
+          type: string
+        device_name:
+          type: string
+          maxLength: 120
+      required:
+      - ticket
+    WebAuthnRegisterOptionsResponse:
+      type: object
+      properties:
+        challenge_token:
+          type: string
+        options:
+          type: object
+          additionalProperties: {}
+      required:
+      - challenge_token
+      - options
+    WebAuthnRegisterVerify:
+      type: object
+      properties:
+        ticket:
+          type: string
+        challenge_token:
+          type: string
+        credential:
+          type: object
+          additionalProperties: {}
+      required:
+      - challenge_token
+      - credential
+      - ticket
   securitySchemes:
     cookieAuth:
       type: apiKey

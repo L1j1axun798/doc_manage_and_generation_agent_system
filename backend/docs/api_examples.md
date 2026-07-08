@@ -16,6 +16,16 @@ curl -i -b cookies.txt -c cookies.txt \
   http://127.0.0.1:8000/api/v1/auth/login/
 ```
 
+响应中的 `pending_token` 和 `options` 传给浏览器 WebAuthn。浏览器返回 assertion 后再创建登录态：
+
+```bash
+curl -i -b cookies.txt -c cookies.txt \
+  -H "Content-Type: application/json" \
+  -H "X-CSRFToken: <csrfToken>" \
+  -d '{"pending_token":"<pending_token>","credential":{}}' \
+  http://127.0.0.1:8000/api/v1/auth/webauthn/login/verify/
+```
+
 ```bash
 curl -b cookies.txt http://127.0.0.1:8000/api/v1/auth/me/
 ```

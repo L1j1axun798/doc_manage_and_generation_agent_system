@@ -14,3 +14,6 @@ PASSWORD_HASHERS = [
 ]
 
 EMAIL_BACKEND = "django.core.mail.backends.locmem.EmailBackend"
+
+WEBAUTHN_RP_ID = "testserver"
+WEBAUTHN_ALLOWED_ORIGINS = ["http://testserver"]

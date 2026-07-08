@@ -52,8 +52,11 @@ async function handleCommand(command: string): Promise<void> {
   }
 
   if (command === 'logout') {
-    await authStore.logout()
-    await router.replace('/login')
+    try {
+      await authStore.logout()
+    } finally {
+      await router.replace('/login')
+    }
   }
 }
 

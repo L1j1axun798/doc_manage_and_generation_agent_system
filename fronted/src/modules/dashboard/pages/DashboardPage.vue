@@ -3,8 +3,13 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { onMounted, ref } from 'vue'
 
 import { getErrorMessage } from '@/core/http/error-normalizer'
-import { fetchMyLatestLocation, reportLocation } from '@/modules/locations/api/locations.api'
-import type { LocationSnapshot } from '@/modules/locations/locations.types'
+import { authenticateWithWebAuthn } from '@/modules/auth/services/webauthn'
+import {
+  createLocationReportChallenge,
+  fetchMyLatestLocation,
+  reportLocation,
+} from '@/modules/locations/api/locations.api'
+import type { LocationReportPayload, LocationSnapshot } from '@/modules/locations/locations.types'
 import { locateCurrentUser } from '@/modules/locations/services/location-provider'
 import {
   getLocationDisplayAddress,
@@ -97,7 +102,7 @@ async function reportCurrentLocation(): Promise<void> {
       return
     }
 
-    await reportLocation({
+    await submitVerifiedLocationReport({
       longitude: result.longitude,
       latitude: result.latitude,
       accuracy: result.accuracy,
@@ -114,7 +119,7 @@ async function reportCurrentLocation(): Promise<void> {
 
 async function submitLocationFailure(reason: string): Promise<void> {
   try {
-    await reportLocation({
+    await submitVerifiedLocationReport({
       report_status: 'locate_failed',
       failure_reason: reason,
     })
@@ -123,6 +128,18 @@ async function submitLocationFailure(reason: string): Promise<void> {
   } catch (error) {
     ElMessage.error(getErrorMessage(error))
   }
+}
+
+async function submitVerifiedLocationReport(payload: LocationReportPayload): Promise<void> {
+  const challenge = await createLocationReportChallenge(payload)
+  const credential = await authenticateWithWebAuthn(challenge.options)
+  await reportLocation({
+    ...payload,
+    webauthn: {
+      challenge_token: challenge.token,
+      credential,
+    },
+  })
 }
 
 function formatAccuracy(value: string | null | undefined): string {

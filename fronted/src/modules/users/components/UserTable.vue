@@ -14,6 +14,8 @@ const emit = defineEmits<{
   edit: [user: SystemUser]
   disable: [user: SystemUser]
   resetPassword: [user: SystemUser]
+  createWebauthnTicket: [user: SystemUser]
+  resetWebauthn: [user: SystemUser]
 }>()
 
 function getUserRowClassName({ row }: { row: SystemUser }): string {
@@ -58,15 +60,25 @@ function getUserRowClassName({ row }: { row: SystemUser }): string {
       </template>
     </el-table-column>
 
+    <el-table-column label="本人验证" width="110">
+      <template #default="{ row }: { row: SystemUser }">
+        <el-tag :type="row.webauthn_enabled ? 'success' : 'danger'" effect="light">
+          {{ row.webauthn_enabled ? `${row.webauthn_credentials_count} 台` : '未绑定' }}
+        </el-tag>
+      </template>
+    </el-table-column>
+
     <el-table-column label="创建时间" width="170">
       <template #default="{ row }: { row: SystemUser }">{{ formatDateTime(row.created_at) }}</template>
     </el-table-column>
 
-    <el-table-column label="操作" fixed="right" width="230">
+    <el-table-column label="操作" fixed="right" width="330">
       <template #default="{ row }: { row: SystemUser }">
         <el-button link type="primary" @click="emit('view', row)">详情</el-button>
         <el-button link @click="emit('edit', row)">编辑</el-button>
         <el-button link @click="emit('resetPassword', row)">重置密码</el-button>
+        <el-button link @click="emit('createWebauthnTicket', row)">绑定验证</el-button>
+        <el-button link type="warning" @click="emit('resetWebauthn', row)">重置验证</el-button>
         <el-button :disabled="!row.is_active" link type="danger" @click="emit('disable', row)">
           停用
         </el-button>

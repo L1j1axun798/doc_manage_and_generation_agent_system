@@ -7,6 +7,8 @@ import DashboardPage from '@/modules/dashboard/pages/DashboardPage.vue'
 const mocks = vi.hoisted(() => ({
   fetchDashboardCounts: vi.fn(),
   fetchMyLatestLocation: vi.fn(),
+  createLocationReportChallenge: vi.fn(),
+  authenticateWithWebAuthn: vi.fn(),
   locateCurrentUser: vi.fn(),
   reportLocation: vi.fn(),
 }))
@@ -16,8 +18,13 @@ vi.mock('@/modules/dashboard/api/dashboard.api', () => ({
 }))
 
 vi.mock('@/modules/locations/api/locations.api', () => ({
+  createLocationReportChallenge: mocks.createLocationReportChallenge,
   fetchMyLatestLocation: mocks.fetchMyLatestLocation,
   reportLocation: mocks.reportLocation,
+}))
+
+vi.mock('@/modules/auth/services/webauthn', () => ({
+  authenticateWithWebAuthn: mocks.authenticateWithWebAuthn,
 }))
 
 vi.mock('@/modules/locations/services/location-provider', () => ({
@@ -67,6 +74,8 @@ describe('dashboard location reporting', () => {
     await flushPromises()
 
     expect(mocks.locateCurrentUser).toHaveBeenCalledTimes(1)
+    expect(mocks.createLocationReportChallenge).not.toHaveBeenCalled()
+    expect(mocks.authenticateWithWebAuthn).not.toHaveBeenCalled()
     expect(mocks.reportLocation).not.toHaveBeenCalled()
   })
 })

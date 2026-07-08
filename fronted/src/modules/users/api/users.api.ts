@@ -7,6 +7,7 @@ import type {
   UserCreatePayload,
   UserListQuery,
   UserPayload,
+  WebAuthnResetResponse,
 } from '../users.types'
 
 export async function fetchUsers(query: UserListQuery): Promise<ApiPage<SystemUser>> {
@@ -43,6 +44,11 @@ export async function resetUserPassword(
     `/users/${userId}/reset-password/`,
     payload,
   )
+  return response.data
+}
+
+export async function resetUserWebAuthn(userId: number): Promise<WebAuthnResetResponse> {
+  const response = await apiClient.post<WebAuthnResetResponse>(`/users/${userId}/webauthn-reset/`)
   return response.data
 }
 

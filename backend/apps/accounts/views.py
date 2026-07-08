@@ -6,6 +6,8 @@ from django.contrib.auth import (
     update_session_auth_hash,
 )
 from django.middleware.csrf import get_token
+from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import ensure_csrf_cookie
 from drf_spectacular.types import OpenApiTypes
@@ -22,14 +24,45 @@ from apps.audit.services import audit_log
 from .permissions import IsSystemAdmin
 from .serializers import (
     ChangePasswordSerializer,
+    LoginChallengeResponseSerializer,
     LoginSerializer,
     ResetPasswordSerializer,
     UserCreateSerializer,
     UserSerializer,
+    WebAuthnCredentialSerializer,
+    WebAuthnEnrollmentTicketCreateSerializer,
+    WebAuthnEnrollmentTicketSerializer,
+    WebAuthnLoginVerifySerializer,
+    WebAuthnRegisterOptionsResponseSerializer,
+    WebAuthnRegisterOptionsSerializer,
+    WebAuthnRegisterVerifySerializer,
 )
 from .services import create_user, disable_user, reset_password, update_user
+from .webauthn_services import (
+    active_credentials_for_user,
+    begin_login,
+    begin_registration,
+    create_enrollment_ticket,
+    finish_login,
+    finish_registration,
+    reset_user_webauthn_credentials,
+    revoke_credential,
+)
 
 User = get_user_model()
+WEBAUTHN_SESSION_USER_KEY = "webauthn_verified_user_id"
+WEBAUTHN_SESSION_VERIFIED_AT_KEY = "webauthn_verified_at"
+
+
+def mark_webauthn_session(request, user) -> None:
+    request.session[WEBAUTHN_SESSION_USER_KEY] = user.pk
+    request.session[WEBAUTHN_SESSION_VERIFIED_AT_KEY] = timezone.now().isoformat()
+
+
+def is_webauthn_session(request) -> bool:
+    if not request.user.is_authenticated:
+        return False
+    return request.session.get(WEBAUTHN_SESSION_USER_KEY) == request.user.pk
 
 
 class CsrfView(APIView):
@@ -46,7 +79,7 @@ class LoginView(APIView):
     permission_classes = [AllowAny]
     authentication_classes = []
 
-    @extend_schema(request=LoginSerializer, responses=UserSerializer)
+    @extend_schema(request=LoginSerializer, responses=LoginChallengeResponseSerializer)
     def post(self, request):
         serializer = LoginSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -76,7 +109,31 @@ class LoginView(APIView):
             )
             raise AuthenticationFailed("用户名或密码错误")
 
+        result = begin_login(user=user, request=request)
+        return Response(
+            {
+                "status": "webauthn_required",
+                "pending_token": result.token,
+                "options": result.options,
+            }
+        )
+
+
+class WebAuthnLoginVerifyView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    @extend_schema(request=WebAuthnLoginVerifySerializer, responses=UserSerializer)
+    def post(self, request):
+        serializer = WebAuthnLoginVerifySerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user = finish_login(
+            pending_token=serializer.validated_data["pending_token"],
+            credential=serializer.validated_data["credential"],
+            request=request,
+        )
         login(request, user)
+        mark_webauthn_session(request, user)
         audit_log(
             user=user,
             action="auth.login",
@@ -87,13 +144,89 @@ class LoginView(APIView):
         return Response(UserSerializer(user).data)
 
 
-class LogoutView(APIView):
+class WebAuthnEnrollmentTicketView(APIView):
+    permission_classes = [IsSystemAdmin]
+
+    @extend_schema(
+        request=WebAuthnEnrollmentTicketCreateSerializer,
+        responses=WebAuthnEnrollmentTicketSerializer,
+    )
+    def post(self, request):
+        serializer = WebAuthnEnrollmentTicketCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user = get_object_or_404(User, pk=serializer.validated_data["user"])
+        result = create_enrollment_ticket(user=user, actor=request.user, request=request)
+        return Response(WebAuthnEnrollmentTicketSerializer(result).data, status=201)
+
+
+class WebAuthnRegisterOptionsView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    @extend_schema(
+        request=WebAuthnRegisterOptionsSerializer,
+        responses=WebAuthnRegisterOptionsResponseSerializer,
+    )
+    def post(self, request):
+        serializer = WebAuthnRegisterOptionsSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        result = begin_registration(
+            ticket_token=serializer.validated_data["ticket"],
+            device_name=serializer.validated_data.get("device_name", ""),
+        )
+        return Response({"challenge_token": result.token, "options": result.options})
+
+
+class WebAuthnRegisterVerifyView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    @extend_schema(request=WebAuthnRegisterVerifySerializer, responses=WebAuthnCredentialSerializer)
+    def post(self, request):
+        serializer = WebAuthnRegisterVerifySerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        credential = finish_registration(
+            ticket_token=serializer.validated_data["ticket"],
+            challenge_token=serializer.validated_data["challenge_token"],
+            credential=serializer.validated_data["credential"],
+            request=request,
+        )
+        return Response(WebAuthnCredentialSerializer(credential).data, status=201)
+
+
+class WebAuthnCredentialListView(APIView):
     permission_classes = [IsAuthenticated]
+
+    @extend_schema(responses=WebAuthnCredentialSerializer(many=True))
+    def get(self, request):
+        credentials = active_credentials_for_user(request.user).order_by("-created_at")
+        return Response(WebAuthnCredentialSerializer(credentials, many=True).data)
+
+
+class WebAuthnCredentialDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(request=None, responses={204: OpenApiResponse(description="已撤销")})
+    def delete(self, request, pk):
+        credential = get_object_or_404(active_credentials_for_user(request.user), pk=pk)
+        revoke_credential(credential=credential, actor=request.user, request=request)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class LogoutView(APIView):
+    permission_classes = [AllowAny]
 
     @extend_schema(request=None, responses={204: OpenApiResponse(description="已退出")})
     def post(self, request):
-        user = request.user
-        audit_log(user=user, action="auth.logout", resource=user, result="success", request=request)
+        user = request.user if request.user.is_authenticated else None
+        if user is not None:
+            audit_log(
+                user=user,
+                action="auth.logout",
+                resource=user,
+                result="success",
+                request=request,
+            )
         logout(request)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
@@ -103,6 +236,9 @@ class MeView(APIView):
 
     @extend_schema(responses=UserSerializer)
     def get(self, request):
+        if not is_webauthn_session(request):
+            logout(request)
+            raise AuthenticationFailed("登录态已过期，请重新登录")
         return Response(UserSerializer(request.user).data)
 
 
@@ -192,3 +328,13 @@ class UserViewSet(viewsets.ModelViewSet):
                 "must_change_password": True,
             }
         )
+
+    @action(detail=True, methods=["post"], url_path="webauthn-reset")
+    def webauthn_reset(self, request, pk=None):
+        user = self.get_object()
+        revoked_count = reset_user_webauthn_credentials(
+            user=user,
+            actor=request.user,
+            request=request,
+        )
+        return Response({"revoked_credentials": revoked_count})

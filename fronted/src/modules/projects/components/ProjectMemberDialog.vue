@@ -55,6 +55,8 @@ watch(
           email: '',
           is_active: true,
           must_change_password: false,
+          webauthn_enabled: true,
+          webauthn_credentials_count: 1,
           created_at: '',
         },
       ]

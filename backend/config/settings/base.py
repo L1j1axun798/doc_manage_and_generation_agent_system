@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import environ
+from django.core.exceptions import ImproperlyConfigured
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 
@@ -15,6 +16,11 @@ env = environ.Env(
     TEMPORARY_STORAGE_ROOT=(str, "data/temporary"),
     MAX_UPLOAD_SIZE_MB=(int, 200),
     TEMPORARY_GRANT_DEFAULT_HOURS=(int, 24),
+    WEBAUTHN_RP_ID=(str, "localhost"),
+    WEBAUTHN_RP_NAME=(str, "绿能信盾资料管理系统"),
+    WEBAUTHN_ALLOWED_ORIGINS=(list, ["http://localhost:5174"]),
+    WEBAUTHN_CHALLENGE_TTL_SECONDS=(int, 300),
+    WEBAUTHN_ENROLLMENT_TICKET_TTL_SECONDS=(int, 1800),
 )
 environ.Env.read_env(BASE_DIR / ".env")
 
@@ -77,6 +83,11 @@ WSGI_APPLICATION = "config.wsgi.application"
 ASGI_APPLICATION = "config.asgi.application"
 
 DATABASES = {"default": env.db("DATABASE_URL")}
+if (
+    DATABASES["default"]["ENGINE"] != "django.db.backends.mysql"
+    and env("DJANGO_SETTINGS_MODULE", default="") != "config.settings.testing"
+):
+    raise ImproperlyConfigured("DATABASE_URL must point to MySQL outside testing settings.")
 if DATABASES["default"]["ENGINE"] == "django.db.backends.mysql":
     DATABASES["default"].setdefault("OPTIONS", {})
     DATABASES["default"]["OPTIONS"].update(
@@ -169,3 +180,8 @@ FILE_STORAGE_ROOT = BASE_DIR / env("FILE_STORAGE_ROOT")
 TEMPORARY_STORAGE_ROOT = BASE_DIR / env("TEMPORARY_STORAGE_ROOT")
 MAX_UPLOAD_SIZE_BYTES = env("MAX_UPLOAD_SIZE_MB") * 1024 * 1024
 TEMPORARY_GRANT_DEFAULT_HOURS = env("TEMPORARY_GRANT_DEFAULT_HOURS")
+WEBAUTHN_RP_ID = env("WEBAUTHN_RP_ID")
+WEBAUTHN_RP_NAME = env("WEBAUTHN_RP_NAME")
+WEBAUTHN_ALLOWED_ORIGINS = env("WEBAUTHN_ALLOWED_ORIGINS")
+WEBAUTHN_CHALLENGE_TTL_SECONDS = env("WEBAUTHN_CHALLENGE_TTL_SECONDS")
+WEBAUTHN_ENROLLMENT_TICKET_TTL_SECONDS = env("WEBAUTHN_ENROLLMENT_TICKET_TTL_SECONDS")

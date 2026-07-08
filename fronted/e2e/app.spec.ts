@@ -841,6 +841,8 @@ async function mockAuthenticatedSession(page: Page): Promise<void> {
         email: 'admin@example.com',
         is_active: true,
         must_change_password: false,
+        webauthn_enabled: true,
+        webauthn_credentials_count: 1,
         created_at: '2026-06-25T10:00:00+08:00',
       }),
     })
@@ -965,6 +967,8 @@ const userFixture = {
   email: 'operator@example.com',
   is_active: true,
   must_change_password: false,
+  webauthn_enabled: true,
+  webauthn_credentials_count: 1,
   created_at: '2026-06-25T10:00:00+08:00',
 }
 

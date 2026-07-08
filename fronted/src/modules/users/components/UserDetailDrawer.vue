@@ -36,6 +36,9 @@ const drawerVisible = computed({
       <el-descriptions-item label="下次登录改密">
         {{ user.must_change_password ? '是' : '否' }}
       </el-descriptions-item>
+      <el-descriptions-item label="本人验证">
+        {{ user.webauthn_enabled ? `已绑定 ${user.webauthn_credentials_count} 台设备` : '未绑定' }}
+      </el-descriptions-item>
       <el-descriptions-item label="创建时间">{{ formatDateTime(user.created_at) }}</el-descriptions-item>
     </el-descriptions>
   </el-drawer>

@@ -12,6 +12,12 @@ export function normalizeApiError(error: unknown): NormalizedApiError {
   }
 
   if (!axios.isAxiosError(error)) {
+    if (error instanceof Error && error.message.trim()) {
+      return {
+        detail: error.message,
+      }
+    }
+
     return {
       detail: '请求处理失败',
     }

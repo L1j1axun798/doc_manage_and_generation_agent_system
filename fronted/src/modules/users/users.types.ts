@@ -10,6 +10,8 @@ export interface SystemUser {
   email: string
   is_active: boolean
   must_change_password: boolean
+  webauthn_enabled: boolean
+  webauthn_credentials_count: number
   created_at: string
 }
 
@@ -41,4 +43,8 @@ export interface ResetPasswordPayload {
 export interface ResetPasswordResponse {
   temporary_password: string
   must_change_password: boolean
+}
+
+export interface WebAuthnResetResponse {
+  revoked_credentials: number
 }

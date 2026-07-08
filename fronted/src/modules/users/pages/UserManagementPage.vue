@@ -3,6 +3,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { onMounted, ref } from 'vue'
 
 import { getErrorMessage } from '@/core/http/error-normalizer'
+import { createWebAuthnEnrollmentTicket } from '@/modules/auth/api/auth.api'
 import type { ApiPage } from '@/shared/types/api.types'
 import {
   createUser,
@@ -10,6 +11,7 @@ import {
   fetchUser,
   fetchUsers,
   resetUserPassword,
+  resetUserWebAuthn,
   updateUser,
 } from '../api/users.api'
 import ResetPasswordDialog from '../components/ResetPasswordDialog.vue'
@@ -31,6 +33,9 @@ const editingUser = ref<SystemUser | null>(null)
 const selectedUser = ref<SystemUser | null>(null)
 const resetUser = ref<SystemUser | null>(null)
 const temporaryPassword = ref('')
+const webauthnTicketVisible = ref(false)
+const webauthnTicketUrl = ref('')
+const webauthnTicketExpiresAt = ref('')
 
 onMounted(loadUsers)
 
@@ -151,6 +156,57 @@ async function submitResetPassword(newPassword?: string): Promise<void> {
     mutationLoading.value = false
   }
 }
+
+async function createWebauthnTicket(user: SystemUser): Promise<void> {
+  mutationLoading.value = true
+  try {
+    const response = await createWebAuthnEnrollmentTicket(user.id)
+    webauthnTicketUrl.value = `${window.location.origin}/webauthn/register?ticket=${encodeURIComponent(response.token)}`
+    webauthnTicketExpiresAt.value = response.expires_at
+    webauthnTicketVisible.value = true
+    ElMessage.success('本人验证绑定链接已生成')
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error))
+  } finally {
+    mutationLoading.value = false
+  }
+}
+
+async function resetWebauthn(user: SystemUser): Promise<void> {
+  try {
+    await ElMessageBox.confirm(
+      `确认重置用户“${user.real_name || user.username}”的本人验证设备？`,
+      '重置本人验证',
+      {
+        confirmButtonText: '重置',
+        cancelButtonText: '取消',
+        type: 'warning',
+      },
+    )
+  } catch {
+    return
+  }
+
+  mutationLoading.value = true
+  try {
+    const response = await resetUserWebAuthn(user.id)
+    ElMessage.success(`已撤销 ${response.revoked_credentials} 个本人验证设备`)
+    await loadUsers()
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error))
+  } finally {
+    mutationLoading.value = false
+  }
+}
+
+async function copyWebauthnTicketUrl(): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(webauthnTicketUrl.value)
+    ElMessage.success('绑定链接已复制')
+  } catch {
+    ElMessage.warning('复制失败，请手动复制绑定链接')
+  }
+}
 </script>
 
 <template>
@@ -174,9 +230,11 @@ async function submitResetPassword(newPassword?: string): Promise<void> {
     <UserTable
       :loading="loading || mutationLoading"
       :users="users"
+      @create-webauthn-ticket="createWebauthnTicket"
       @disable="disableCurrentUser"
       @edit="openEdit"
       @reset-password="openResetPassword"
+      @reset-webauthn="resetWebauthn"
       @view="openDetail"
     />
 
@@ -206,5 +264,20 @@ async function submitResetPassword(newPassword?: string): Promise<void> {
       :temporary-password="temporaryPassword"
       @submit="submitResetPassword"
     />
+
+    <el-dialog v-model="webauthnTicketVisible" title="本人验证绑定链接" width="560px">
+      <el-form label-width="92px">
+        <el-form-item label="有效期至">
+          {{ webauthnTicketExpiresAt }}
+        </el-form-item>
+        <el-form-item label="绑定链接">
+          <el-input v-model="webauthnTicketUrl" readonly>
+            <template #append>
+              <el-button @click="copyWebauthnTicketUrl">复制</el-button>
+            </template>
+          </el-input>
+        </el-form-item>
+      </el-form>
+    </el-dialog>
   </section>
 </template>

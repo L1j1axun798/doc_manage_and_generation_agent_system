@@ -1,3 +1,8 @@
+import type {
+  AuthenticationResponseJSON,
+  PublicKeyCredentialRequestOptionsJSON,
+} from '@simplewebauthn/browser'
+
 export type LocationReportStatus = 'success' | 'locate_failed'
 
 export type LocationStatus = 'normal' | 'expired' | 'today_unreported' | 'locate_failed'
@@ -37,4 +42,15 @@ export interface LocationReportPayload {
   address?: string
   report_status?: LocationReportStatus
   failure_reason?: string
+  webauthn?: LocationReportWebAuthnPayload
+}
+
+export interface LocationReportWebAuthnPayload {
+  challenge_token: string
+  credential: AuthenticationResponseJSON
+}
+
+export interface LocationReportChallenge {
+  token: string
+  options: PublicKeyCredentialRequestOptionsJSON
 }

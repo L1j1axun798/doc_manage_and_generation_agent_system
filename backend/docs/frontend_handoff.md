@@ -14,7 +14,8 @@
   - `fetch`：`credentials: "include"`
   - axios：`withCredentials: true`
 - 写请求必须带 `X-CSRFToken`。先请求 `GET /api/v1/auth/csrf/`，从响应 `csrfToken` 或 `csrftoken` cookie 中读取。
-- 登录：`POST /api/v1/auth/login/`，成功后后端写入 session cookie。
+- 登录：`POST /api/v1/auth/login/` 只校验账号密码并返回 WebAuthn options；随后调用 `POST /api/v1/auth/webauthn/login/verify/`，本人验证通过后后端才写入 session cookie。
+- 设备绑定：系统管理员调用 `POST /api/v1/auth/webauthn/enrollment-tickets/` 生成一次性绑定票据，用户通过票据完成 `auth/webauthn/register/options/` 与 `auth/webauthn/register/verify/`。
 - 当前用户：`GET /api/v1/auth/me/`
 - 退出：`POST /api/v1/auth/logout/`
 
@@ -63,7 +64,7 @@
 
 ## 前端核心流程
 
-1. 初始化登录态：`auth/csrf` -> `auth/login` -> `auth/me`。
+1. 初始化登录态：`auth/csrf` -> `auth/login` -> 浏览器 WebAuthn -> `auth/webauthn/login/verify` -> `auth/me`。
 2. 项目页：`GET /projects/` 展示当前用户可见项目。
 3. 目录树：`GET /folders/tree/?project_id=<id>`；公共目录可不传项目。
 4. 文档列表：`GET /documents/?project=<id>&folder=<id>&search=...`。
@@ -75,6 +76,7 @@
 10. 临时访问：`POST /temporary-access-grants/` 创建后只在创建响应返回明文 `token` 和 `download_url`。
 11. 通知中心：`GET /notifications/`、`POST /notifications/{id}/read/`、`POST /notifications/{id}/unread/`。
 12. 审计页：系统管理员访问 `GET /audit-logs/`。
+13. 位置上报：先用即将提交的位置 payload 请求 `POST /locations/report/challenge/`，浏览器 WebAuthn 通过后，再把同一 payload 与 assertion 提交到 `POST /locations/report/`。
 
 ## 乐观锁
 
