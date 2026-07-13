@@ -4,5 +4,8 @@ export type {
   FolderMovePayload,
   FolderUpdatePayload,
   HealthStatus,
+  SystemBackupRun,
+  SystemBackupStatus,
+  SystemBackupTrigger,
   SystemFolder,
 } from './system.types'

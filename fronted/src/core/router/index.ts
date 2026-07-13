@@ -168,7 +168,7 @@ export const routes: RouteRecordRaw[] = [
     component: PublicLayout,
     children: [
       {
-        path: 'share/:token',
+        path: 'share',
         name: 'temporary-download',
         component: () => import('@/modules/access/pages/TemporaryDownloadPage.vue'),
         meta: {

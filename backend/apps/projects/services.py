@@ -3,7 +3,7 @@ from typing import Any
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import PermissionDenied, ValidationError
 
 from apps.audit.services import audit_log
 from apps.documents.models import Document
@@ -46,28 +46,48 @@ def update_project(
     data: dict[str, Any],
     request: Any = None,
 ) -> Project:
-    if project.status == Project.Status.ARCHIVED:
+    locked_project = Project.objects.select_for_update().get(pk=project.pk)
+    if locked_project.status == Project.Status.ARCHIVED:
         raise ValidationError("项目已归档，不能修改")
-    before_data = project_snapshot(project)
+    if "manager" in data and not getattr(actor, "is_system_admin", False):
+        raise PermissionDenied("只有系统管理员可以变更项目负责人")
+    before_data = project_snapshot(locked_project)
+    old_manager_id = locked_project.manager_id
     for field, value in data.items():
-        setattr(project, field, value)
-    project.save()
+        setattr(locked_project, field, value)
+    locked_project.save()
+    if "manager" in data:
+        new_manager = data["manager"]
+        if old_manager_id and old_manager_id != getattr(new_manager, "pk", None):
+            ProjectMember.objects.filter(
+                project=locked_project,
+                user_id=old_manager_id,
+                role=ProjectMember.Role.MANAGER,
+            ).update(
+                role=ProjectMember.Role.VIEWER,
+                can_upload=False,
+                can_download_restricted=False,
+                can_manage_folder=False,
+                can_delete=False,
+                can_restore=False,
+                can_manage_permission=False,
+            )
     if "manager" in data and data["manager"] is not None:
         ProjectMember.objects.update_or_create(
-            project=project,
+            project=locked_project,
             user=data["manager"],
             defaults=manager_member_defaults(),
         )
     audit_log(
         user=actor,
         action="project.update",
-        resource=project,
+        resource=locked_project,
         result="success",
         request=request,
         before_data=before_data,
-        after_data=project_snapshot(project),
+        after_data=project_snapshot(locked_project),
     )
-    return project
+    return locked_project
 
 
 @transaction.atomic
@@ -117,6 +137,10 @@ def unarchive_project(*, actor: Any, project: Project, request: Any = None) -> P
 
 @transaction.atomic
 def delete_project(*, actor: Any, project: Project, request: Any = None) -> None:
+    from apps.system.services import ensure_backup_not_running
+
+    ensure_backup_not_running()
+    project = Project.objects.select_for_update().get(pk=project.pk)
     before_data = project_snapshot(project)
     project_id = project.pk
     if project_has_active_documents(project=project):
@@ -248,6 +272,7 @@ def delete_project_member(*, actor: Any, member: ProjectMember, request: Any = N
 def manager_member_defaults() -> dict[str, Any]:
     return {
         "role": ProjectMember.Role.MANAGER,
+        "can_upload": True,
         "can_download_restricted": True,
         "can_manage_folder": True,
         "can_delete": True,

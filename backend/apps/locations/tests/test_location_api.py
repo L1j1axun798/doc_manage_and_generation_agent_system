@@ -63,12 +63,14 @@ def test_authenticated_user_can_report_success_location(client):
 
     response = client.post(
         "/api/v1/locations/report/",
-        with_webauthn({
-            "longitude": "116.397128",
-            "latitude": "39.916527",
-            "accuracy": "25.50",
-            "address": "北京市东城区",
-        }),
+        with_webauthn(
+            {
+                "longitude": "116.397128",
+                "latitude": "39.916527",
+                "accuracy": "25.50",
+                "address": "北京市东城区",
+            }
+        ),
         content_type="application/json",
     )
 
@@ -89,11 +91,13 @@ def test_report_accepts_browser_precision_coordinates(client):
 
     response = client.post(
         "/api/v1/locations/report/",
-        with_webauthn({
-            "longitude": 116.397128456789,
-            "latitude": 39.916527987654,
-            "accuracy": 25.507,
-        }),
+        with_webauthn(
+            {
+                "longitude": 116.397128456789,
+                "latitude": 39.916527987654,
+                "accuracy": 25.507,
+            }
+        ),
         content_type="application/json",
     )
 
@@ -111,10 +115,12 @@ def test_report_accepts_locate_failed_without_coordinates(client):
 
     response = client.post(
         "/api/v1/locations/report/",
-        with_webauthn({
-            "report_status": "locate_failed",
-            "failure_reason": "用户拒绝定位授权",
-        }),
+        with_webauthn(
+            {
+                "report_status": "locate_failed",
+                "failure_reason": "用户拒绝定位授权",
+            }
+        ),
         content_type="application/json",
     )
 

@@ -9,6 +9,8 @@ import type { AuditLog, AuditResult } from '../audit.types'
 import AuditLogDetailDrawer from '../components/AuditLogDetailDrawer.vue'
 import AuditResultTag from '../components/AuditResultTag.vue'
 
+const PAGE_SIZE = 20
+
 const auditLogs = ref<AuditLog[]>([])
 const selectedAuditLog = ref<AuditLog | null>(null)
 const total = ref(0)
@@ -70,6 +72,7 @@ async function openDetail(auditLog: AuditLog): Promise<void> {
     ElMessage.error(getErrorMessage(error))
   }
 }
+
 </script>
 
 <template>
@@ -96,7 +99,11 @@ async function openDetail(auditLog: AuditLog): Promise<void> {
       <el-button @click="resetFilters">重置</el-button>
     </section>
 
-    <el-table :data="auditLogs" :loading="loading" row-key="id">
+    <el-table
+      :data="auditLogs"
+      :loading="loading"
+      row-key="id"
+    >
       <el-table-column label="动作" min-width="180" prop="action" />
       <el-table-column label="用户" min-width="140">
         <template #default="{ row }: { row: AuditLog }">
@@ -121,7 +128,14 @@ async function openDetail(auditLog: AuditLog): Promise<void> {
       </el-table-column>
       <el-table-column label="操作" fixed="right" width="80">
         <template #default="{ row }: { row: AuditLog }">
-          <el-button link type="primary" @click="openDetail(row)">详情</el-button>
+          <el-button
+            :disabled="loading"
+            link
+            type="primary"
+            @click="openDetail(row)"
+          >
+            详情
+          </el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -131,7 +145,7 @@ async function openDetail(auditLog: AuditLog): Promise<void> {
         background
         layout="prev, pager, next, total"
         :current-page="page"
-        :page-size="20"
+        :page-size="PAGE_SIZE"
         :total="total"
         @current-change="(nextPage: number) => { page = nextPage; void loadAuditLogs() }"
       />

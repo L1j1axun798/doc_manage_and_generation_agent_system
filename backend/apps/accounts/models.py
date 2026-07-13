@@ -1,4 +1,5 @@
 import hashlib
+from typing import Any
 
 from django.conf import settings
 from django.contrib.auth.models import AbstractUser
@@ -79,11 +80,11 @@ class WebAuthnCredential(models.Model):
     def __str__(self) -> str:
         return f"{self.user_id}:{self.name or self.credential_id}"
 
-    def save(self, *args, **kwargs):
+    def save(self, *args: Any, **kwargs: Any) -> None:
         self.credential_id_hash = hashlib.sha256(self.credential_id.encode("utf-8")).hexdigest()
         super().save(*args, **kwargs)
 
-    def revoke(self, *, actor) -> None:
+    def revoke(self, *, actor: "User") -> None:
         self.is_active = False
         self.revoked_at = timezone.now()
         self.revoked_by = actor

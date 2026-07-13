@@ -1,9 +1,12 @@
 from typing import Any
 
-from django.db.models import Q, QuerySet
+from django.db.models import Prefetch, Q, QuerySet
+from django.utils import timezone
 
+from apps.access.models import DocumentGrant
 from apps.folders.defaults import standard_root_for_code
 from apps.folders.models import Folder
+from apps.projects.models import ProjectMember
 from apps.projects.selectors import visible_projects_for_user
 
 from .models import Document
@@ -16,6 +19,20 @@ def base_documents_for_user(user: Any, *, include_deleted: bool = False) -> Quer
         "current_version",
         "created_by",
         "deleted_by",
+    ).prefetch_related(
+        Prefetch(
+            "grants",
+            queryset=DocumentGrant.objects.filter(
+                user=user,
+                revoked_at__isnull=True,
+            ).filter(Q(expires_at__isnull=True) | Q(expires_at__gt=timezone.now())),
+            to_attr="_active_request_user_grants",
+        ),
+        Prefetch(
+            "project__members",
+            queryset=ProjectMember.objects.filter(user=user),
+            to_attr="_request_user_memberships",
+        ),
     )
     if not include_deleted:
         queryset = queryset.filter(deleted_at__isnull=True)
@@ -45,9 +62,17 @@ def visible_documents_for_user(user: Any, *, include_deleted: bool = False) -> Q
         return queryset
     visible_project_ids = visible_projects_for_user(user).values("id")
     granted_view_document_ids = _active_granted_document_ids(user, "view")
+    restricted_project_ids = ProjectMember.objects.filter(
+        user=user,
+        can_download_restricted=True,
+    ).values("project_id")
     queryset = queryset.filter(
-        Q(project__isnull=True)
-        | Q(project_id__in=visible_project_ids)
+        Q(access_level=Document.AccessLevel.INTERNAL, project__isnull=True)
+        | Q(access_level=Document.AccessLevel.INTERNAL, project_id__in=visible_project_ids)
+        | Q(
+            access_level=Document.AccessLevel.RESTRICTED,
+            project_id__in=restricted_project_ids,
+        )
         | Q(id__in=granted_view_document_ids)
     )
     return _filter_public_staff_documents_for_user(queryset, user)
@@ -117,9 +142,7 @@ def _folder_and_descendant_ids(root_ids: list[int]) -> list[int]:
     folder_ids = list(dict.fromkeys(root_ids))
     frontier = folder_ids.copy()
     while frontier:
-        child_ids = list(
-            Folder.objects.filter(parent_id__in=frontier).values_list("id", flat=True)
-        )
+        child_ids = list(Folder.objects.filter(parent_id__in=frontier).values_list("id", flat=True))
         frontier = [child_id for child_id in child_ids if child_id not in folder_ids]
         folder_ids.extend(frontier)
     return folder_ids

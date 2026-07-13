@@ -1,10 +1,7 @@
-from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 from rest_framework import serializers
 
-from .models import WebAuthnCredential
-
-User = get_user_model()
+from .models import User, WebAuthnCredential
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -30,9 +27,15 @@ class UserSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "created_at"]
 
     def get_webauthn_enabled(self, obj: User) -> bool:
+        annotated_count = getattr(obj, "active_webauthn_credentials_count", None)
+        if annotated_count is not None:
+            return bool(annotated_count)
         return obj.webauthn_credentials.filter(is_active=True, revoked_at__isnull=True).exists()
 
     def get_webauthn_credentials_count(self, obj: User) -> int:
+        annotated_count = getattr(obj, "active_webauthn_credentials_count", None)
+        if annotated_count is not None:
+            return int(annotated_count)
         return obj.webauthn_credentials.filter(is_active=True, revoked_at__isnull=True).count()
 
 

@@ -21,6 +21,7 @@ const visible = computed({
 const form = reactive({
   title: '',
   description: '',
+  access_level: 'internal' as 'internal' | 'restricted',
 })
 
 watch(
@@ -29,6 +30,7 @@ watch(
     if (opened && document) {
       form.title = document.title
       form.description = document.description
+      form.access_level = document.access_level
     }
   },
   { immediate: true },
@@ -42,6 +44,7 @@ function submit(): void {
   emit('submit', {
     title: form.title,
     description: form.description,
+    access_level: form.access_level,
     expected_updated_at: props.document.updated_at,
   })
 }
@@ -55,6 +58,12 @@ function submit(): void {
       </el-form-item>
       <el-form-item label="描述">
         <el-input v-model="form.description" :rows="3" type="textarea" />
+      </el-form-item>
+      <el-form-item label="访问级别">
+        <el-radio-group v-model="form.access_level">
+          <el-radio value="internal">内部</el-radio>
+          <el-radio value="restricted">受限</el-radio>
+        </el-radio-group>
       </el-form-item>
     </el-form>
     <template #footer>

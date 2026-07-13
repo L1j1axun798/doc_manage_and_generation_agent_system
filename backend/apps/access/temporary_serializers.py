@@ -1,4 +1,3 @@
-from django.urls import reverse
 from rest_framework import serializers
 
 from apps.documents.models import DocumentVersion
@@ -68,6 +67,10 @@ class TemporaryAccessGrantCreateSerializer(serializers.Serializer):
     max_downloads = serializers.IntegerField(min_value=1, default=1)
 
 
+class TemporaryAccessDownloadSerializer(serializers.Serializer):
+    token = serializers.CharField(min_length=20, max_length=200, trim_whitespace=True)
+
+
 class TemporaryAccessGrantCreatedSerializer(TemporaryAccessGrantSerializer):
     token = serializers.SerializerMethodField()
     download_url = serializers.SerializerMethodField()
@@ -80,8 +83,4 @@ class TemporaryAccessGrantCreatedSerializer(TemporaryAccessGrantSerializer):
 
     def get_download_url(self, obj: TemporaryAccessGrant) -> str:
         token = self.context["token"]
-        request = self.context.get("request")
-        path = reverse("temporary-access-download", kwargs={"token": token})
-        if request is None:
-            return path
-        return request.build_absolute_uri(path)
+        return f"/share#token={token}"

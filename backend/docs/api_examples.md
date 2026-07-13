@@ -161,8 +161,9 @@ curl -b cookies.txt -H "Content-Type: application/json" -H "X-CSRFToken: <csrfTo
 创建响应中的 `token` 只返回一次。公开下载不需要登录：
 
 ```bash
-curl -L -o temp-download.pdf \
-  http://127.0.0.1:8000/api/v1/temporary-access/<token>/download/
+curl -L -X POST -H "Content-Type: application/json" \
+  -d '{"token":"<token>"}' -o temp-download.pdf \
+  http://127.0.0.1:8000/api/v1/temporary-access/download/
 ```
 
 ## 通知与审计

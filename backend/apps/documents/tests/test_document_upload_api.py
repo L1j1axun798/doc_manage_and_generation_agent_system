@@ -3,12 +3,14 @@ from hashlib import sha256
 import pytest
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
+from rest_framework.exceptions import ValidationError
 
 from apps.audit.models import AuditLog
 from apps.documents.models import Document, DocumentVersion
 from apps.documents.services import document_storage_consistency
 from apps.folders.models import Folder
 from apps.projects.models import Project, ProjectMember
+from common.validators import normalize_upload_filename
 
 User = get_user_model()
 
@@ -266,7 +268,7 @@ def test_upload_rejects_same_name_and_duplicate_content_in_same_folder(
 
 
 @pytest.mark.django_db
-def test_project_member_without_upload_permission_can_upload(client, tmp_path, settings):
+def test_project_member_without_upload_permission_cannot_upload(client, tmp_path, settings):
     settings.FILE_STORAGE_ROOT = tmp_path
     admin = make_user("admin", User.Role.SYSTEM_ADMIN)
     operator = make_user("operator", User.Role.DATA_OPERATOR)
@@ -283,10 +285,8 @@ def test_project_member_without_upload_permission_can_upload(client, tmp_path, s
         },
     )
 
-    assert response.status_code == 201
-    document = Document.objects.get()
-    assert document.folder == folder
-    assert document.created_by == operator
+    assert response.status_code == 403
+    assert not Document.objects.exists()
 
 
 @pytest.mark.django_db
@@ -407,6 +407,52 @@ def test_create_document_version_locks_document_and_updates_current_version(
     assert [version.version_number for version in versions] == [1, 2]
     assert document.current_version == versions[-1]
     assert versions[-1].sha256 == sha256(b"v2").hexdigest()
+
+
+@pytest.mark.django_db
+def test_public_viewer_cannot_replace_document_current_version(client, tmp_path, settings):
+    settings.FILE_STORAGE_ROOT = tmp_path
+    admin = make_user("admin-version", User.Role.SYSTEM_ADMIN)
+    viewer = make_user("viewer-version", User.Role.DATA_OPERATOR)
+    root = Folder.objects.create(name="公司资质", is_system_root=True, created_by=admin)
+    folder = Folder.objects.create(parent=root, name="示例公司", created_by=admin)
+    client.force_login(admin)
+    created = client.post(
+        "/api/v1/documents/",
+        {"folder": folder.id, "file": upload_file("report.pdf", b"v1")},
+    )
+    document = Document.objects.get(pk=created.json()["id"])
+    original_version_id = document.current_version_id
+    client.force_login(viewer)
+
+    response = client.post(
+        f"/api/v1/documents/{document.pk}/versions/",
+        {"file": upload_file("report-v2.pdf", b"v2")},
+    )
+
+    document.refresh_from_db()
+    assert response.status_code == 403
+    assert document.current_version_id == original_version_id
+    assert document.versions.count() == 1
+
+
+@pytest.mark.django_db
+def test_upload_rejects_spoofed_signature_and_path_filename(client, tmp_path, settings):
+    settings.FILE_STORAGE_ROOT = tmp_path
+    settings.VALIDATE_UPLOAD_FILE_SIGNATURES = True
+    admin = make_user("admin-signature", User.Role.SYSTEM_ADMIN)
+    root = Folder.objects.create(name="公司资质", is_system_root=True, created_by=admin)
+    folder = Folder.objects.create(parent=root, name="示例公司", created_by=admin)
+    client.force_login(admin)
+
+    spoofed = client.post(
+        "/api/v1/documents/",
+        {"folder": folder.id, "file": upload_file("fake.pdf", b"not-a-pdf")},
+    )
+    assert spoofed.status_code == 400
+    with pytest.raises(ValidationError):
+        normalize_upload_filename("..\\escape.pdf")
+    assert Document.objects.count() == 0
 
 
 @pytest.mark.django_db

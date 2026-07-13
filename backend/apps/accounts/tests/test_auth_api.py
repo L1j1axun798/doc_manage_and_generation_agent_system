@@ -118,6 +118,27 @@ def test_public_register_endpoint_does_not_exist(client):
 
 
 @pytest.mark.django_db
+def test_user_delete_endpoint_is_disabled(client):
+    admin = User.objects.create_user(
+        username="admin-delete-disabled",
+        password="AdminPass123!",
+        real_name="管理员",
+        role=User.Role.SYSTEM_ADMIN,
+    )
+    target = User.objects.create_user(
+        username="target-delete-disabled",
+        password="TargetPass123!",
+        real_name="目标用户",
+    )
+    client.force_login(admin)
+
+    response = client.delete(f"/api/v1/users/{target.pk}/")
+
+    assert response.status_code == 405
+    assert User.objects.filter(pk=target.pk).exists()
+
+
+@pytest.mark.django_db
 def test_admin_user_list_can_order_active_users_first(client):
     admin = User.objects.create_user(
         username="admin",

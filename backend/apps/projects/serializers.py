@@ -40,6 +40,11 @@ class ProjectSerializer(serializers.ModelSerializer):
             "archived_by",
         ]
 
+    def validate_manager(self, manager: Any) -> Any:
+        if manager is not None and not manager.is_active:
+            raise serializers.ValidationError("不能指定已停用用户为项目负责人")
+        return manager
+
 
 class ProjectMemberSerializer(serializers.ModelSerializer):
     user_username = serializers.CharField(source="user.username", read_only=True)
@@ -54,9 +59,12 @@ class ProjectMemberSerializer(serializers.ModelSerializer):
             "user_username",
             "user_real_name",
             "role",
+            "can_upload",
+            "can_download_restricted",
             "can_manage_folder",
             "can_delete",
             "can_restore",
+            "can_manage_permission",
             "joined_at",
         ]
         read_only_fields = [
@@ -78,3 +86,12 @@ class ProjectMemberSerializer(serializers.ModelSerializer):
         ):
             raise serializers.ValidationError("该用户已是项目成员")
         return user
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        attrs = super().validate(attrs)
+        role = attrs.get("role", getattr(self.instance, "role", ProjectMember.Role.VIEWER))
+        user = attrs.get("user", getattr(self.instance, "user", None))
+        project = self.context.get("project")
+        if role == ProjectMember.Role.MANAGER and project is not None and user != project.manager:
+            raise serializers.ValidationError({"role": "负责人角色只能通过项目负责人转移流程设置"})
+        return attrs

@@ -15,7 +15,7 @@ from apps.folders.defaults import ARCHIVE_ROOT, standard_root_for_code, standard
 from apps.folders.models import Folder
 from apps.projects.models import Project
 from common.storage import LocalDocumentStorage, StoredFile
-from common.validators import validate_uploaded_file
+from common.validators import normalize_upload_filename, validate_uploaded_file
 
 from .models import Document, DocumentVersion
 from .permissions import (
@@ -63,20 +63,25 @@ def create_document(
 ) -> Document:
     _ensure_upload_allowed(actor=actor, folder=folder)
     validate_uploaded_file(uploaded_file)
-    document_title = title.strip() or PurePath(uploaded_file.name).name
+    original_filename = normalize_upload_filename(uploaded_file.name)
+    document_title = title.strip() or original_filename
     backend = storage or LocalDocumentStorage()
     stored_file = backend.save_uploaded_file(uploaded_file)
     try:
-        _ensure_folder_accepts_document(
-            folder=folder,
-            title=document_title,
-            original_filename=PurePath(uploaded_file.name).name,
-            sha256=stored_file.sha256,
-        )
         with transaction.atomic():
+            if folder.project_id is not None:
+                Project.objects.select_for_update().get(pk=folder.project_id)
+            locked_folder = Folder.objects.select_for_update().get(pk=folder.pk)
+            _ensure_upload_allowed(actor=actor, folder=locked_folder)
+            _ensure_folder_accepts_document(
+                folder=locked_folder,
+                title=document_title,
+                original_filename=original_filename,
+                sha256=stored_file.sha256,
+            )
             document = Document.objects.create(
-                project=folder.project,
-                folder=folder,
+                project=locked_folder.project,
+                folder=locked_folder,
                 title=document_title,
                 description=description,
                 access_level=access_level,
@@ -85,7 +90,8 @@ def create_document(
             version = _create_version(
                 document=document,
                 actor=actor,
-                uploaded_file=uploaded_file,
+                original_filename=original_filename,
+                content_type=_safe_content_type(original_filename),
                 stored_file=stored_file,
                 version_number=1,
             )
@@ -115,8 +121,10 @@ def create_document_version(
 ) -> DocumentVersion:
     if document.is_deleted:
         raise ValidationError("文档已删除，不能新增版本")
-    _ensure_upload_allowed(actor=actor, folder=document.folder)
+    if not can_update_document(actor, document):
+        raise PermissionDenied("无权新增文档版本")
     validate_uploaded_file(uploaded_file)
+    original_filename = normalize_upload_filename(uploaded_file.name)
     backend = storage or LocalDocumentStorage()
     stored_file = backend.save_uploaded_file(uploaded_file)
     try:
@@ -126,6 +134,10 @@ def create_document_version(
                 .select_related("folder", "project")
                 .get(pk=document.pk)
             )
+            _ensure_not_deleted(locked_document)
+            _ensure_project_write_allowed(locked_document)
+            if not can_update_document(actor, locked_document):
+                raise PermissionDenied("无权新增文档版本")
             latest_version = (
                 DocumentVersion.objects.filter(document=locked_document).aggregate(
                     latest=Max("version_number")
@@ -135,7 +147,8 @@ def create_document_version(
             version = _create_version(
                 document=locked_document,
                 actor=actor,
-                uploaded_file=uploaded_file,
+                original_filename=original_filename,
+                content_type=_safe_content_type(original_filename),
                 stored_file=stored_file,
                 version_number=latest_version + 1,
             )
@@ -225,6 +238,7 @@ def update_document_metadata(
     request: Any = None,
 ) -> Document:
     locked_document = _locked_document(document)
+    Folder.objects.select_for_update().get(pk=locked_document.folder_id)
     _ensure_not_deleted(locked_document)
     _ensure_project_write_allowed(locked_document)
     _ensure_expected_updated_at(locked_document, expected_updated_at)
@@ -232,7 +246,7 @@ def update_document_metadata(
         raise PermissionDenied("无权更新该文档")
     before_data = document_snapshot(locked_document)
     changed_fields = []
-    for field in ["title", "description"]:
+    for field in ["title", "description", "access_level"]:
         if field in data:
             setattr(locked_document, field, data[field])
             changed_fields.append(field)
@@ -265,6 +279,11 @@ def move_document(
     request: Any = None,
 ) -> Document:
     locked_document = _locked_document(document)
+    list(
+        Folder.objects.select_for_update()
+        .filter(pk__in={locked_document.folder_id, folder.pk})
+        .order_by("pk")
+    )
     _ensure_not_deleted(locked_document)
     _ensure_project_write_allowed(locked_document)
     _ensure_expected_updated_at(locked_document, expected_updated_at)
@@ -312,6 +331,7 @@ def soft_delete_document(
     locked_document.deleted_at = timezone.now()
     locked_document.deleted_by = actor
     _touch_document(locked_document, extra_fields=["deleted_at", "deleted_by"])
+    _revoke_temporary_access_for_document(document=locked_document, actor=actor)
     audit_log(
         user=actor,
         action="document.delete",
@@ -322,6 +342,15 @@ def soft_delete_document(
         after_data=document_snapshot(locked_document),
     )
     return locked_document
+
+
+def _revoke_temporary_access_for_document(*, document: Document, actor: Any) -> int:
+    from apps.access.models import TemporaryAccessGrant
+
+    return TemporaryAccessGrant.objects.filter(
+        document_version__document=document,
+        revoked_at__isnull=True,
+    ).update(revoked_at=timezone.now(), revoked_by=actor)
 
 
 @transaction.atomic
@@ -373,6 +402,9 @@ def permanently_delete_document(
     request: Any = None,
     storage: LocalDocumentStorage | None = None,
 ) -> None:
+    from apps.system.services import ensure_backup_not_running
+
+    ensure_backup_not_running()
     backend = storage or LocalDocumentStorage()
     with transaction.atomic():
         locked_document = _locked_document(document)
@@ -583,20 +615,35 @@ def _create_version(
     *,
     document: Document,
     actor: Any,
-    uploaded_file: Any,
+    original_filename: str,
+    content_type: str,
     stored_file: StoredFile,
     version_number: int,
 ) -> DocumentVersion:
     return DocumentVersion.objects.create(
         document=document,
         version_number=version_number,
-        original_filename=PurePath(uploaded_file.name).name,
-        content_type=getattr(uploaded_file, "content_type", ""),
+        original_filename=original_filename,
+        content_type=content_type,
         file_size=stored_file.size,
         sha256=stored_file.sha256,
         storage_path=stored_file.relative_path,
         uploaded_by=actor,
     )
+
+
+def _safe_content_type(filename: str) -> str:
+    extension = PurePath(filename).suffix.lower()
+    return {
+        ".pdf": "application/pdf",
+        ".doc": "application/msword",
+        ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        ".xls": "application/vnd.ms-excel",
+        ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".png": "image/png",
+    }.get(extension, "application/octet-stream")
 
 
 def document_snapshot(document: Document) -> dict[str, Any]:
@@ -622,5 +669,4 @@ def version_snapshot(version: DocumentVersion) -> dict[str, Any]:
         "original_filename": version.original_filename,
         "file_size": version.file_size,
         "sha256": version.sha256,
-        "storage_path": version.storage_path,
     }

@@ -405,8 +405,8 @@ test('manages document grants and temporary access from document detail', async 
           id: 10,
           project: null,
           parent: null,
-          name: '公司资质',
-          code: 'CERT',
+          name: '技术方案',
+          code: 'PUBLIC-TECH-SOLUTION',
           sort_order: 10,
           is_active: true,
           is_system_root: true,
@@ -430,6 +430,12 @@ test('manages document grants and temporary access from document detail', async 
     await route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({ ...documentFixture, access_level: 'restricted' }),
+    })
+  })
+  await page.route('**/api/v1/users/?**', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ count: 0, next: null, previous: null, results: [] }),
     })
   })
   await page.route('**/api/v1/document-grants/**', async (route) => {
@@ -488,12 +494,14 @@ test('manages document grants and temporary access from document detail', async 
   await page.getByRole('button', { name: '生成', exact: true }).click()
   await expect(page.getByText('临时链接只在创建后显示一次')).toBeVisible()
   await expect(page.locator('.temporary-access-created input').first()).toHaveValue(
-    /\/share\/temp-token-001/,
+    /\/share#token=temp-token-001/,
   )
 })
 
 test('downloads from temporary access page', async ({ page }) => {
-  await page.route('**/api/v1/temporary-access/temp-token-001/download/', async (route) => {
+  await page.route('**/api/v1/temporary-access/download/', async (route) => {
+    expect(route.request().method()).toBe('POST')
+    expect(route.request().postDataJSON()).toEqual({ token: 'temp-token-001' })
     await route.fulfill({
       contentType: 'application/pdf',
       headers: {
@@ -503,7 +511,7 @@ test('downloads from temporary access page', async ({ page }) => {
     })
   })
 
-  await page.goto('/share/temp-token-001')
+  await page.goto('/share#token=temp-token-001')
 
   await expect(page.getByRole('heading', { name: '临时文件下载' })).toBeVisible()
   const download = page.waitForEvent('download')
@@ -671,7 +679,7 @@ test('shows notifications and toggles read state', async ({ page }) => {
   await expect(page.getByText('已标记为已读')).toBeVisible()
 })
 
-test('shows system management directories, status and unavailable panels', async ({ page }) => {
+test('shows system management directories, status and backup state', async ({ page }) => {
   await mockAuthenticatedSession(page)
   await page.route('**/api/v1/folders/**', async (route) => {
     await route.fulfill({
@@ -695,6 +703,28 @@ test('shows system management directories, status and unavailable panels', async
       }),
     })
   })
+  await page.route('**/api/v1/system/backups/latest/', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        id: 1,
+        trigger: 'scheduled',
+        status: 'success',
+        started_at: '2026-07-09T01:00:00+08:00',
+        finished_at: '2026-07-09T01:05:00+08:00',
+        local_available: true,
+        offsite_available: false,
+        sha256: 'a'.repeat(64),
+        size_bytes: 1048576,
+        error_summary: '',
+        created_by: null,
+        created_by_username: '',
+        created_by_real_name: '',
+        created_at: '2026-07-09T01:00:00+08:00',
+        updated_at: '2026-07-09T01:05:00+08:00',
+      }),
+    })
+  })
 
   await page.goto('/system/status')
 
@@ -712,7 +742,10 @@ test('shows system management directories, status and unavailable panels', async
   await page.getByRole('tab', { name: '系统配置' }).click()
   await expect(page.getByText('后端暂未开放系统配置接口')).toBeVisible()
   await page.getByRole('tab', { name: '备份恢复' }).click()
-  await expect(page.getByText('后端暂未开放备份恢复接口')).toBeVisible()
+  await expect(page.getByRole('heading', { name: '系统备份状态' })).toBeVisible()
+  await expect(page.getByText('计划任务')).toBeVisible()
+  await expect(page.getByText('待定期下载')).toBeVisible()
+  await expect(page.getByText('已生成')).toBeVisible()
 })
 
 test('shows project management detail, members, documents and archive', async ({ page }) => {
@@ -883,6 +916,11 @@ const documentFixture = {
   title: '安全生产许可证',
   description: '证照扫描件',
   access_level: 'internal',
+  can_download: true,
+  can_update: true,
+  can_delete: true,
+  can_restore: true,
+  can_create_version: true,
   current_version: {
     id: 100,
     document: 1,
@@ -954,7 +992,7 @@ const temporaryAccessFixture = {
 const temporaryAccessCreatedFixture = {
   ...temporaryAccessFixture,
   token: 'temp-token-001',
-  download_url: 'http://127.0.0.1:8000/api/v1/temporary-access/temp-token-001/download/',
+  download_url: '/share#token=temp-token-001',
 }
 
 const userFixture = {

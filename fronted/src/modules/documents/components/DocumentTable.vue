@@ -77,7 +77,12 @@ function canDownloadDocument(document: DocumentItem): boolean {
       <template #default="{ row }: { row: DocumentItem }">
         <el-button link type="primary" @click="emit('view', row)">详情</el-button>
         <template v-if="mode === 'trash'">
-          <el-button link type="success" @click="emit('restore', row)">恢复</el-button>
+          <el-button
+            v-if="row.can_restore"
+            link
+            type="success"
+            @click="emit('restore', row)"
+          >恢复</el-button>
         </template>
         <template v-else>
           <el-button
@@ -89,10 +94,10 @@ function canDownloadDocument(document: DocumentItem): boolean {
             下载
           </el-button>
           <template v-if="!readOnly">
-            <el-button link @click="emit('edit', row)">修改</el-button>
-            <el-button link @click="emit('move', row)">移动</el-button>
-            <el-button link @click="emit('version', row)">新版本</el-button>
-            <el-button link type="danger" @click="emit('delete', row)">删除</el-button>
+            <el-button v-if="row.can_update" link @click="emit('edit', row)">修改</el-button>
+            <el-button v-if="row.can_update" link @click="emit('move', row)">移动</el-button>
+            <el-button v-if="row.can_create_version" link @click="emit('version', row)">新版本</el-button>
+            <el-button v-if="row.can_delete" link type="danger" @click="emit('delete', row)">删除</el-button>
           </template>
         </template>
       </template>

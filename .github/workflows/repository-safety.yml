@@ -1,0 +1,29 @@
+name: Repository safety
+
+on:
+  pull_request:
+  push:
+
+jobs:
+  reject-sensitive-artifacts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Reject secrets, dumps, archives, and oversized files
+        shell: bash
+        run: |
+          set -euo pipefail
+          forbidden="$(git ls-files | grep -E '(^|/)(\.env|\.env\.production)$|backend/data/backups/|\.(sql|dump|tar|tar\.gz|tgz|zip|7z)$' || true)"
+          if [ -n "$forbidden" ]; then
+            echo "Forbidden tracked artifacts:"
+            echo "$forbidden"
+            exit 1
+          fi
+          oversized="$(git ls-files -z | xargs -0 -r du -b | awk '$1 > 52428800 {print}')"
+          if [ -n "$oversized" ]; then
+            echo "Tracked files larger than 50 MiB:"
+            echo "$oversized"
+            exit 1
+          fi

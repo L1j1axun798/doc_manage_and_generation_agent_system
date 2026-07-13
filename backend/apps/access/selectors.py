@@ -4,6 +4,7 @@ from django.db.models import Q, QuerySet
 from django.utils import timezone
 
 from apps.documents.models import Document
+from apps.projects.models import ProjectMember
 
 from .models import DocumentGrant
 
@@ -40,7 +41,14 @@ def manageable_document_ids_for_user(user: Any) -> QuerySet[Document]:
     queryset = Document.objects.all()
     if getattr(user, "is_system_admin", False):
         return queryset
-    return queryset.none()
+    manageable_project_ids = ProjectMember.objects.filter(
+        user=user,
+        can_manage_permission=True,
+    ).values("project_id")
+    delegated_document_ids = active_granted_document_ids(user, "manage")
+    return queryset.filter(
+        Q(project_id__in=manageable_project_ids) | Q(id__in=delegated_document_ids)
+    )
 
 
 def grants_manageable_by_user(user: Any) -> QuerySet[DocumentGrant]:

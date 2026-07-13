@@ -7,7 +7,11 @@ from .models import AuditLog
 from .serializers import AuditLogSerializer
 
 
-class AuditLogViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.GenericViewSet):
+class AuditLogViewSet(
+    mixins.ListModelMixin,
+    mixins.RetrieveModelMixin,
+    viewsets.GenericViewSet,
+):
     queryset = AuditLog.objects.select_related("user")
     serializer_class = AuditLogSerializer
     permission_classes = [IsSystemAdmin]

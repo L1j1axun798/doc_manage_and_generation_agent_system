@@ -5,6 +5,7 @@ from django.contrib.auth import (
     logout,
     update_session_auth_hash,
 )
+from django.db.models import Count, Q
 from django.middleware.csrf import get_token
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -14,13 +15,16 @@ from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import OpenApiResponse, extend_schema
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import AuthenticationFailed, PermissionDenied
+from rest_framework.exceptions import AuthenticationFailed
 from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.audit.services import audit_log
+from common.throttles import LoginAccountThrottle, LoginIPThrottle
 
+from .models import User as UserModel
 from .permissions import IsSystemAdmin
 from .serializers import (
     ChangePasswordSerializer,
@@ -54,12 +58,12 @@ WEBAUTHN_SESSION_USER_KEY = "webauthn_verified_user_id"
 WEBAUTHN_SESSION_VERIFIED_AT_KEY = "webauthn_verified_at"
 
 
-def mark_webauthn_session(request, user) -> None:
+def mark_webauthn_session(request: Request, user: UserModel) -> None:
     request.session[WEBAUTHN_SESSION_USER_KEY] = user.pk
     request.session[WEBAUTHN_SESSION_VERIFIED_AT_KEY] = timezone.now().isoformat()
 
 
-def is_webauthn_session(request) -> bool:
+def is_webauthn_session(request: Request) -> bool:
     if not request.user.is_authenticated:
         return False
     return request.session.get(WEBAUTHN_SESSION_USER_KEY) == request.user.pk
@@ -78,6 +82,7 @@ class CsrfView(APIView):
 class LoginView(APIView):
     permission_classes = [AllowAny]
     authentication_classes = []
+    throttle_classes = [LoginIPThrottle, LoginAccountThrottle]
 
     @extend_schema(request=LoginSerializer, responses=LoginChallengeResponseSerializer)
     def post(self, request):
@@ -98,7 +103,7 @@ class LoginView(APIView):
                     request=request,
                     error_message="inactive_user",
                 )
-                raise PermissionDenied("账号已停用")
+                raise AuthenticationFailed("用户名或密码错误")
             audit_log(
                 user=existing_user,
                 action="auth.login",
@@ -279,11 +284,20 @@ class ChangePasswordView(APIView):
 
 
 class UserViewSet(viewsets.ModelViewSet):
-    queryset = User.objects.order_by("-is_active", "id")
+    queryset = User.objects.annotate(
+        active_webauthn_credentials_count=Count(
+            "webauthn_credentials",
+            filter=Q(
+                webauthn_credentials__is_active=True,
+                webauthn_credentials__revoked_at__isnull=True,
+            ),
+        )
+    ).order_by("-is_active", "id")
     permission_classes = [IsSystemAdmin]
     search_fields = ["username", "real_name", "phone", "employee_no"]
     ordering_fields = ["id", "username", "real_name", "is_active", "created_at"]
     ordering = ["-is_active", "id"]
+    http_method_names = ["get", "post", "put", "patch", "head", "options"]
 
     def get_serializer_class(self):
         if self.action == "create":

@@ -1,7 +1,6 @@
 from typing import Any
-from urllib.parse import quote
 
-from django.http import FileResponse
+from django.http import HttpResponse
 from drf_spectacular.utils import extend_schema
 from rest_framework import status, viewsets
 from rest_framework.decorators import action, api_view, permission_classes
@@ -9,9 +8,12 @@ from rest_framework.generics import get_object_or_404
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
+from common.downloads import protected_download_response
+
 from .models import TemporaryAccessGrant
 from .selectors import manageable_document_ids_for_user
 from .temporary_serializers import (
+    TemporaryAccessDownloadSerializer,
     TemporaryAccessGrantCreatedSerializer,
     TemporaryAccessGrantCreateSerializer,
     TemporaryAccessGrantSerializer,
@@ -82,17 +84,19 @@ class TemporaryAccessGrantViewSet(viewsets.ModelViewSet):
         return Response(TemporaryAccessGrantSerializer(grant).data)
 
 
-@extend_schema(request=None, responses={200: bytes})
-@api_view(["GET"])
+@extend_schema(request=TemporaryAccessDownloadSerializer, responses={200: bytes})
+@api_view(["POST"])
 @permission_classes([AllowAny])
-def temporary_access_download(request: Any, token: str) -> FileResponse:
-    file_handle, version = consume_temporary_access_token(token=token, request=request)
-    response = FileResponse(
-        file_handle,
-        as_attachment=True,
-        content_type=version.content_type or "application/octet-stream",
+def temporary_access_download(request: Any) -> HttpResponse:
+    serializer = TemporaryAccessDownloadSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    file_handle, version = consume_temporary_access_token(
+        token=serializer.validated_data["token"],
+        request=request,
     )
-    filename = quote(version.original_filename)
-    response["Content-Disposition"] = f"attachment; filename*=UTF-8''{filename}"
-    response["Content-Length"] = str(version.file_size)
-    return response
+    return protected_download_response(
+        file_handle=file_handle,
+        storage_path=version.storage_path,
+        filename=version.original_filename,
+        file_size=version.file_size,
+    )

@@ -31,8 +31,13 @@ export interface DocumentItem {
   folder_name: string
   title: string
   description: string
+  access_level: 'internal' | 'restricted'
   current_version: DocumentVersion | null
   can_download: boolean
+  can_update: boolean
+  can_delete: boolean
+  can_restore: boolean
+  can_create_version: boolean
   lock_version: number
   deleted_at: string | null
   deleted_by: number | null
@@ -56,6 +61,7 @@ export interface DocumentUploadPayload {
   files: File[]
   title?: string
   description?: string
+  access_level: 'internal' | 'restricted'
 }
 
 export interface SingleDocumentUploadPayload {
@@ -63,11 +69,13 @@ export interface SingleDocumentUploadPayload {
   file: File
   title?: string
   description?: string
+  access_level: 'internal' | 'restricted'
 }
 
 export interface DocumentUpdatePayload {
   title?: string
   description?: string
+  access_level?: 'internal' | 'restricted'
   expected_updated_at: string
 }
 

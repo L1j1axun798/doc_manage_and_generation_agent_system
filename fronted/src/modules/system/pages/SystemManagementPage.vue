@@ -4,8 +4,9 @@ import { computed, onMounted, ref } from 'vue'
 
 import { getErrorMessage } from '@/core/http/error-normalizer'
 import type { ApiPage } from '@/shared/types/api.types'
+import { formatDateTime, formatFileSize } from '@/shared/utils/format'
 import { createFolder, disableFolder, fetchFolders, moveFolder, updateFolder } from '../api/folders.api'
-import { fetchHealthStatus } from '../api/system.api'
+import { fetchHealthStatus, fetchLatestSystemBackup } from '../api/system.api'
 import FolderFormDialog from '../components/FolderFormDialog.vue'
 import FolderMoveDialog from '../components/FolderMoveDialog.vue'
 import FolderTable from '../components/FolderTable.vue'
@@ -14,17 +15,22 @@ import type {
   FolderMovePayload,
   FolderUpdatePayload,
   HealthStatus,
+  SystemBackupRun,
+  SystemBackupStatus,
+  SystemBackupTrigger,
   SystemFolder,
 } from '../system.types'
 
 const activeTab = ref('directories')
 const folders = ref<SystemFolder[]>([])
 const health = ref<HealthStatus | null>(null)
+const backup = ref<SystemBackupRun | null>(null)
 const total = ref(0)
 const page = ref(1)
 const search = ref('')
 const folderLoading = ref(false)
 const healthLoading = ref(false)
+const backupLoading = ref(false)
 const mutationLoading = ref(false)
 const formVisible = ref(false)
 const moveVisible = ref(false)
@@ -34,7 +40,7 @@ const movingFolder = ref<SystemFolder | null>(null)
 const statusType = computed(() => (health.value?.status === 'ok' ? 'success' : 'danger'))
 
 onMounted(async () => {
-  await Promise.all([loadFolders(), loadHealth()])
+  await Promise.all([loadFolders(), loadHealth(), loadBackup()])
 })
 
 async function loadFolders(): Promise<void> {
@@ -63,6 +69,44 @@ async function loadHealth(): Promise<void> {
   } finally {
     healthLoading.value = false
   }
+}
+
+async function loadBackup(): Promise<void> {
+  backupLoading.value = true
+  try {
+    backup.value = await fetchLatestSystemBackup()
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error))
+  } finally {
+    backupLoading.value = false
+  }
+}
+
+function backupStatusText(status: SystemBackupStatus): string {
+  const labels: Record<SystemBackupStatus, string> = {
+    running: '执行中',
+    success: '成功',
+    failure: '失败',
+  }
+  return labels[status]
+}
+
+function backupStatusType(status: SystemBackupStatus): 'success' | 'warning' | 'danger' {
+  if (status === 'success') {
+    return 'success'
+  }
+  if (status === 'running') {
+    return 'warning'
+  }
+  return 'danger'
+}
+
+function backupTriggerText(trigger: SystemBackupTrigger): string {
+  const labels: Record<SystemBackupTrigger, string> = {
+    scheduled: '计划任务',
+    manual: '手动',
+  }
+  return labels[trigger]
 }
 
 function submitSearch(): void {
@@ -229,14 +273,51 @@ async function disableCurrentFolder(folder: SystemFolder): Promise<void> {
       </el-tab-pane>
 
       <el-tab-pane label="备份恢复" name="backup">
-        <el-alert
-          show-icon
-          title="后端暂未开放备份恢复接口"
-          type="info"
-          :closable="false"
-        >
-          备份创建、下载、恢复需要后端提供明确接口和权限审计后再接入。
-        </el-alert>
+        <section class="system-status-panel">
+          <header>
+            <h2>系统备份状态</h2>
+            <el-button :loading="backupLoading" @click="loadBackup">刷新</el-button>
+          </header>
+
+          <el-skeleton v-if="backupLoading && !backup" :rows="6" animated />
+          <el-empty v-else-if="!backup" description="暂无系统备份记录" />
+
+          <el-descriptions v-else border :column="1">
+            <el-descriptions-item label="状态">
+              <el-tag :type="backupStatusType(backup.status)">
+                {{ backupStatusText(backup.status) }}
+              </el-tag>
+            </el-descriptions-item>
+            <el-descriptions-item label="触发方式">
+              {{ backupTriggerText(backup.trigger) }}
+            </el-descriptions-item>
+            <el-descriptions-item label="开始时间">
+              {{ formatDateTime(backup.started_at) }}
+            </el-descriptions-item>
+            <el-descriptions-item label="结束时间">
+              {{ formatDateTime(backup.finished_at) }}
+            </el-descriptions-item>
+            <el-descriptions-item label="服务器本机副本">
+              <el-tag :type="backup.local_available ? 'success' : 'danger'" effect="light">
+                {{ backup.local_available ? '已生成' : '不可用' }}
+              </el-tag>
+            </el-descriptions-item>
+            <el-descriptions-item label="可选离机副本">
+              <el-tag :type="backup.offsite_available ? 'success' : 'info'" effect="light">
+                {{ backup.offsite_available ? '已校验' : '待定期下载' }}
+              </el-tag>
+            </el-descriptions-item>
+            <el-descriptions-item label="备份大小">
+              {{ formatFileSize(backup.size_bytes) }}
+            </el-descriptions-item>
+            <el-descriptions-item label="SHA-256">
+              <span class="system-path">{{ backup.sha256 || '-' }}</span>
+            </el-descriptions-item>
+            <el-descriptions-item v-if="backup.error_summary" label="失败原因">
+              {{ backup.error_summary }}
+            </el-descriptions-item>
+          </el-descriptions>
+        </section>
       </el-tab-pane>
     </el-tabs>
 

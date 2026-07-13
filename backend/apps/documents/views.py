@@ -1,5 +1,3 @@
-from urllib.parse import quote
-
 from django.db.models import Q
 from django.http import FileResponse
 from drf_spectacular.utils import extend_schema
@@ -13,6 +11,7 @@ from rest_framework.response import Response
 
 from apps.folders.defaults import ARCHIVE_ROOT, standard_root_for_code, standard_root_for_name
 from apps.folders.models import Folder
+from common.downloads import protected_download_response
 
 from .models import Document
 from .selectors import (
@@ -112,6 +111,7 @@ class DocumentViewSet(
             uploaded_file=serializer.validated_data["file"],
             title=serializer.validated_data.get("title", ""),
             description=serializer.validated_data.get("description", ""),
+            access_level=serializer.validated_data["access_level"],
             request=request,
         )
         return Response(
@@ -265,15 +265,12 @@ class DocumentViewSet(
             document=document,
             request=request,
         )
-        response = FileResponse(
-            file_handle,
-            as_attachment=True,
-            content_type=version.content_type or "application/octet-stream",
+        return protected_download_response(
+            file_handle=file_handle,
+            storage_path=version.storage_path,
+            filename=version.original_filename,
+            file_size=version.file_size,
         )
-        filename = quote(version.original_filename)
-        response["Content-Disposition"] = f"attachment; filename*=UTF-8''{filename}"
-        response["Content-Length"] = str(version.file_size)
-        return response
 
 
 def descendant_folder_ids(raw_folder_id: str) -> list[int]:

@@ -1,0 +1,27 @@
+[Unit]
+Description=Wind document system Gunicorn
+After=network.target mysql.service
+RequiresMountsFor=/data/documents /data/exports /data/backups
+
+[Service]
+Type=notify
+User=winddoc
+Group=winddoc
+WorkingDirectory=/opt/wind-doc-system/backend
+Environment=DJANGO_SETTINGS_MODULE=config.settings.production
+RuntimeDirectory=wind-doc-system
+RuntimeDirectoryMode=0750
+ExecStart=/opt/wind-doc-system/venv/bin/gunicorn config.wsgi:application --config /opt/wind-doc-system/deploy/gunicorn.conf.py
+ExecReload=/bin/kill -s HUP $MAINPID
+KillSignal=SIGQUIT
+TimeoutStopSec=30
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/data/documents /data/exports /data/backups /run/wind-doc-system /opt/wind-doc-system/backend/staticfiles
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

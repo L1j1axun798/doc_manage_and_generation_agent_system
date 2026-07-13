@@ -61,9 +61,10 @@ def test_batch_download_returns_zip_and_deduplicates_filenames(client, tmp_path,
         filename="report.pdf",
         content=b"one",
     )
+    second_folder = Folder.objects.create(project=project, name="资料二", created_by=admin)
     second = create_document(
         client,
-        folder=folder,
+        folder=second_folder,
         title="B",
         filename="report.pdf",
         content=b"two",

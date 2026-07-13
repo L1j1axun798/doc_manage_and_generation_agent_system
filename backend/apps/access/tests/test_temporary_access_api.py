@@ -72,7 +72,7 @@ def test_create_temporary_access_returns_token_once_and_stores_hash(client, tmp_
     grant = TemporaryAccessGrant.objects.get()
     assert response.status_code == 201
     assert token
-    assert response.json()["download_url"].endswith(f"/temporary-access/{token}/download/")
+    assert response.json()["download_url"] == f"/share#token={token}"
     assert grant.token_hash == hash_temporary_access_token(token)
     assert token not in grant.token_hash
     assert "token" not in list_response.json()["results"][0]
@@ -97,8 +97,16 @@ def test_temporary_access_downloads_specific_version_once(client, tmp_path, sett
     token = token_response.json()["token"]
     client.logout()
 
-    first_download = client.get(f"/api/v1/temporary-access/{token}/download/")
-    second_download = client.get(f"/api/v1/temporary-access/{token}/download/")
+    first_download = client.post(
+        "/api/v1/temporary-access/download/",
+        {"token": token},
+        content_type="application/json",
+    )
+    second_download = client.post(
+        "/api/v1/temporary-access/download/",
+        {"token": token},
+        content_type="application/json",
+    )
 
     grant = TemporaryAccessGrant.objects.get()
     assert first_download.status_code == 200
@@ -129,7 +137,14 @@ def test_temporary_access_respects_max_downloads(client, tmp_path, settings):
     token = token_response.json()["token"]
     client.logout()
 
-    responses = [client.get(f"/api/v1/temporary-access/{token}/download/") for _ in range(3)]
+    responses = [
+        client.post(
+            "/api/v1/temporary-access/download/",
+            {"token": token},
+            content_type="application/json",
+        )
+        for _ in range(3)
+    ]
 
     assert [response.status_code for response in responses] == [200, 200, 403]
     assert TemporaryAccessGrant.objects.get().used_count == 2
@@ -143,7 +158,7 @@ def test_expired_temporary_access_is_denied(client, tmp_path, settings):
     folder = Folder.objects.create(project=project, name="过程资料", created_by=admin)
     client.force_login(admin)
     document = create_document(client, folder=folder)
-    token = "expired-token"
+    token = "expired-token-that-is-long-enough"
     TemporaryAccessGrant.objects.create(
         document_version_id=document["current_version"]["id"],
         token_hash=hash_temporary_access_token(token),
@@ -152,7 +167,11 @@ def test_expired_temporary_access_is_denied(client, tmp_path, settings):
     )
     client.logout()
 
-    response = client.get(f"/api/v1/temporary-access/{token}/download/")
+    response = client.post(
+        "/api/v1/temporary-access/download/",
+        {"token": token},
+        content_type="application/json",
+    )
 
     assert response.status_code == 403
     assert TemporaryAccessGrant.objects.get().used_count == 0
@@ -177,7 +196,11 @@ def test_revoked_temporary_access_is_denied(client, tmp_path, settings):
     )
     client.logout()
 
-    response = client.get(f"/api/v1/temporary-access/{token}/download/")
+    response = client.post(
+        "/api/v1/temporary-access/download/",
+        {"token": token},
+        content_type="application/json",
+    )
 
     assert revoke_response.status_code == 200
     assert response.status_code == 403
@@ -186,7 +209,46 @@ def test_revoked_temporary_access_is_denied(client, tmp_path, settings):
 
 
 @pytest.mark.django_db
-def test_user_without_manage_permission_cannot_create_temporary_access(
+def test_deleted_document_revokes_temporary_access_permanently(client, tmp_path, settings):
+    settings.FILE_STORAGE_ROOT = tmp_path
+    admin = make_user("admin-delete-token", User.Role.SYSTEM_ADMIN)
+    project = Project.objects.create(name="项目", code="P-DELETE-TOKEN", created_by=admin)
+    folder = Folder.objects.create(project=project, name="过程资料", created_by=admin)
+    client.force_login(admin)
+    document_payload = create_document(client, folder=folder)
+    token_response = client.post(
+        "/api/v1/temporary-access-grants/",
+        {"document_version": document_payload["current_version"]["id"]},
+        content_type="application/json",
+    )
+    token = token_response.json()["token"]
+    deleted = client.post(
+        f"/api/v1/documents/{document_payload['id']}/delete/",
+        {"expected_updated_at": document_payload["updated_at"]},
+        content_type="application/json",
+    )
+    document = Document.objects.get(pk=document_payload["id"])
+    restored = client.post(
+        f"/api/v1/documents/{document.pk}/restore/",
+        {"expected_updated_at": document.updated_at.isoformat().replace("+00:00", "Z")},
+        content_type="application/json",
+    )
+    client.logout()
+
+    download = client.post(
+        "/api/v1/temporary-access/download/",
+        {"token": token},
+        content_type="application/json",
+    )
+
+    assert deleted.status_code == 204
+    assert restored.status_code == 200
+    assert download.status_code == 403
+    assert TemporaryAccessGrant.objects.get().revoked_at is not None
+
+
+@pytest.mark.django_db
+def test_user_with_manage_permission_can_create_temporary_access(
     client,
     tmp_path,
     settings,
@@ -212,8 +274,8 @@ def test_user_without_manage_permission_cannot_create_temporary_access(
         content_type="application/json",
     )
 
-    assert response.status_code == 403
-    assert TemporaryAccessGrant.objects.count() == 0
+    assert response.status_code == 201
+    assert TemporaryAccessGrant.objects.count() == 1
 
 
 @pytest.mark.django_db(transaction=True)

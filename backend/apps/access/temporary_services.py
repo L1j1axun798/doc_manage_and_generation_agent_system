@@ -42,9 +42,14 @@ def create_temporary_access_grant(
     _ensure_manage_allowed(actor=actor, document=document)
     if max_downloads < 1:
         raise ValidationError("最大下载次数至少为 1")
+    if max_downloads > settings.TEMPORARY_GRANT_MAX_DOWNLOADS:
+        raise ValidationError(f"最大下载次数不能超过 {settings.TEMPORARY_GRANT_MAX_DOWNLOADS} 次")
     expires_at = expires_at or _default_expires_at()
     if expires_at <= timezone.now():
         raise ValidationError("过期时间必须晚于当前时间")
+    latest_expires_at = timezone.now() + timedelta(hours=settings.TEMPORARY_GRANT_MAX_HOURS)
+    if expires_at > latest_expires_at:
+        raise ValidationError(f"临时访问有效期不能超过 {settings.TEMPORARY_GRANT_MAX_HOURS} 小时")
     token = generate_temporary_access_token()
     grant = TemporaryAccessGrant.objects.create(
         document_version=document_version,
@@ -111,7 +116,7 @@ def consume_temporary_access_token(
                 .select_related("document_version__document")
                 .get(token_hash=token_hash)
             )
-            if not grant.is_active:
+            if grant.document_version.document.is_deleted or not grant.is_active:
                 denied_document = grant.document_version.document
                 denied_snapshot = temporary_access_snapshot(grant)
                 version = grant.document_version

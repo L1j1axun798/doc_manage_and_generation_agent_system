@@ -228,6 +228,7 @@ class Command(BaseCommand):
             user=operator,
             defaults={
                 "role": ProjectMember.Role.OPERATOR,
+                "can_upload": True,
                 "can_download_restricted": False,
                 "can_manage_folder": True,
                 "can_delete": True,
@@ -240,6 +241,7 @@ class Command(BaseCommand):
             user=viewer,
             defaults={
                 "role": ProjectMember.Role.VIEWER,
+                "can_upload": False,
                 "can_download_restricted": False,
                 "can_manage_folder": False,
                 "can_delete": False,

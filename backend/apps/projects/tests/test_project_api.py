@@ -132,6 +132,50 @@ def test_project_manager_can_update_only_authorized_project(client):
 
 
 @pytest.mark.django_db
+def test_only_admin_can_transfer_project_manager(client):
+    admin = make_user("admin-transfer", User.Role.SYSTEM_ADMIN)
+    old_manager = make_user("old-manager", User.Role.PROJECT_MANAGER)
+    new_manager = make_user("new-manager", User.Role.PROJECT_MANAGER)
+    project = Project.objects.create(
+        name="负责人转移项目",
+        code="TRANSFER-001",
+        manager=old_manager,
+        created_by=admin,
+    )
+    ProjectMember.objects.create(
+        project=project,
+        user=old_manager,
+        role=ProjectMember.Role.MANAGER,
+        can_upload=True,
+        can_manage_permission=True,
+    )
+    client.force_login(old_manager)
+
+    denied = client.patch(
+        f"/api/v1/projects/{project.pk}/",
+        {"manager": new_manager.pk},
+        content_type="application/json",
+    )
+    client.force_login(admin)
+    allowed = client.patch(
+        f"/api/v1/projects/{project.pk}/",
+        {"manager": new_manager.pk},
+        content_type="application/json",
+    )
+
+    project.refresh_from_db()
+    old_membership = ProjectMember.objects.get(project=project, user=old_manager)
+    new_membership = ProjectMember.objects.get(project=project, user=new_manager)
+    assert denied.status_code == 403
+    assert allowed.status_code == 200
+    assert project.manager == new_manager
+    assert old_membership.role == ProjectMember.Role.VIEWER
+    assert old_membership.can_manage_permission is False
+    assert new_membership.role == ProjectMember.Role.MANAGER
+    assert new_membership.can_upload is True
+
+
+@pytest.mark.django_db
 def test_only_system_admin_can_delete_project(client):
     admin = make_user("admin", User.Role.SYSTEM_ADMIN)
     manager = make_user("manager", User.Role.PROJECT_MANAGER)
@@ -280,7 +324,9 @@ def test_only_system_admin_can_manage_project_members(client):
     assert viewer_denied_response.status_code == 403
     assert manager_denied_response.status_code == 403
     assert allowed_response.status_code == 201
-    assert "can_upload" not in allowed_response.json()
+    assert allowed_response.json()["can_upload"] is False
+    assert allowed_response.json()["can_download_restricted"] is False
+    assert allowed_response.json()["can_manage_permission"] is False
     assert AuditLog.objects.filter(action="permission.denied", result="denied").exists()
 
 

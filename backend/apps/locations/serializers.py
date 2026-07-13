@@ -142,11 +142,9 @@ class LocationSnapshotSerializer(serializers.Serializer):
     location_status = serializers.CharField()
     should_report = serializers.BooleanField()
 
-    def to_representation(self, instance: LocationSnapshot):
+    def to_representation(self, instance: LocationSnapshot) -> dict[str, Any]:
         latest_report = instance.latest_report
-        latest_report_data = (
-            LocationReportSerializer(latest_report).data if latest_report else None
-        )
+        latest_report_data = LocationReportSerializer(latest_report).data if latest_report else None
         return {
             "user": LocationUserSerializer(instance.user).data,
             "latest_report": latest_report_data,

@@ -2,6 +2,7 @@ import axios from 'axios'
 
 export interface NormalizedApiError {
   status?: number
+  code?: string
   detail: string
   fieldErrors?: Record<string, string[]>
 }
@@ -29,6 +30,7 @@ export function normalizeApiError(error: unknown): NormalizedApiError {
   if (isRecord(data)) {
     return {
       status,
+      code: typeof data.code === 'string' ? data.code : undefined,
       detail: readDetail(data),
       fieldErrors: readFieldErrors(data),
     }
@@ -68,8 +70,9 @@ function readDetail(data: Record<string, unknown>): string {
 }
 
 function readFieldErrors(data: Record<string, unknown>): Record<string, string[]> | undefined {
-  const entries = Object.entries(data)
-    .filter(([key]) => key !== 'detail')
+  const errorSource = isRecord(data.errors) ? data.errors : data
+  const entries = Object.entries(errorSource)
+    .filter(([key]) => !['detail', 'message', 'code', 'request_id', 'errors'].includes(key))
     .map(([key, value]) => [key, normalizeFieldError(value)] as const)
     .filter(([, value]) => value.length > 0)
 

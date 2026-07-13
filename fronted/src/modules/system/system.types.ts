@@ -46,3 +46,24 @@ export interface HealthStatus {
   debug: boolean
   request_id: string | null
 }
+
+export type SystemBackupStatus = 'running' | 'success' | 'failure'
+export type SystemBackupTrigger = 'scheduled' | 'manual'
+
+export interface SystemBackupRun {
+  id: number
+  trigger: SystemBackupTrigger
+  status: SystemBackupStatus
+  started_at: string
+  finished_at: string | null
+  local_available: boolean
+  offsite_available: boolean
+  sha256: string
+  size_bytes: number
+  error_summary: string
+  created_by: number | null
+  created_by_username: string
+  created_by_real_name: string
+  created_at: string
+  updated_at: string
+}

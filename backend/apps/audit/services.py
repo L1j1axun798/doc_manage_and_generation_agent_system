@@ -1,4 +1,7 @@
+from ipaddress import ip_address
 from typing import Any
+
+from django.conf import settings
 
 from .models import AuditLog
 
@@ -38,10 +41,17 @@ def audit_log(
 def _get_client_ip(request: Any) -> str | None:
     if request is None:
         return None
-    forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR")
-    if forwarded_for:
-        return forwarded_for.split(",", 1)[0].strip()
-    return request.META.get("REMOTE_ADDR")
+    candidate = (
+        request.META.get("HTTP_X_REAL_IP")
+        if getattr(settings, "TRUST_PROXY_HEADERS", False)
+        else request.META.get("REMOTE_ADDR")
+    )
+    if not candidate:
+        return None
+    try:
+        return str(ip_address(candidate.strip()))
+    except ValueError:
+        return None
 
 
 def _get_user_agent(request: Any) -> str:

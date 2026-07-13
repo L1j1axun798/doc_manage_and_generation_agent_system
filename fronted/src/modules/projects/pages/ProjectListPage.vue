@@ -110,7 +110,7 @@ async function removeProject(project: Project): Promise<void> {
         <h1>项目管理</h1>
         <p>查询当前账号可见项目，并进入项目详情维护成员和资料。</p>
       </div>
-      <el-button type="primary" @click="openCreate">创建项目</el-button>
+      <el-button v-if="authStore.isSystemAdmin" type="primary" @click="openCreate">创建项目</el-button>
     </header>
 
     <section class="document-search-panel">
@@ -142,6 +142,7 @@ async function removeProject(project: Project): Promise<void> {
       v-model="formVisible"
       :loading="formLoading"
       :project="editingProject"
+      :allow-manager-change="authStore.isSystemAdmin"
       @submit="submitProject"
     />
   </section>

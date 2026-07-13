@@ -859,7 +859,8 @@ body {
   gap: 16px;
 }
 
-.user-page__header-actions {
+.user-page__header-actions,
+.audit-page__header-actions {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
@@ -1092,6 +1093,11 @@ body {
   margin: 0;
   color: var(--color-text-primary);
   font-size: 18px;
+}
+
+.system-path {
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .document-dialog-form {
@@ -1720,5 +1726,14 @@ body {
   .audit-page__filters,
   .system-page__toolbar {
     grid-template-columns: 1fr;
+  }
+
+  .audit-page__header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .audit-page__header-actions {
+    justify-content: flex-start;
   }
 }

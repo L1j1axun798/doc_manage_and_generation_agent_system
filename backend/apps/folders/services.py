@@ -13,6 +13,10 @@ from .permissions import can_manage_folder
 @transaction.atomic
 def create_folder(*, actor: Any, data: dict[str, Any], request: Any = None) -> Folder:
     project = _resolve_project_from_data(data)
+    project, parent = _lock_folder_scope(project=project, parent=data.get("parent"))
+    data["project"] = project
+    if parent is not None:
+        data["parent"] = parent
     _ensure_folder_write_allowed(actor, project)
     _validate_parent(project=project, parent=data.get("parent"))
     _validate_public_root(project=project, parent=data.get("parent"))
@@ -37,6 +41,10 @@ def update_folder(
     data: dict[str, Any],
     request: Any = None,
 ) -> Folder:
+    folder = (
+        Folder.objects.select_for_update().select_related("project", "parent").get(pk=folder.pk)
+    )
+    _lock_folder_scope(project=folder.project, parent=folder.parent)
     if folder.is_system_root:
         raise ValidationError("系统根分类不能修改")
     _ensure_folder_write_allowed(actor, folder.project)
@@ -74,6 +82,10 @@ def move_folder(
     sort_order: int | None = None,
     request: Any = None,
 ) -> Folder:
+    folder = (
+        Folder.objects.select_for_update().select_related("project", "parent").get(pk=folder.pk)
+    )
+    _, parent = _lock_folder_scope(project=folder.project, parent=parent)
     if folder.is_system_root:
         raise ValidationError("系统根分类不能移动")
     _ensure_folder_write_allowed(actor, folder.project)
@@ -134,6 +146,22 @@ def _resolve_project_from_data(data: dict[str, Any]) -> Project | None:
         data["project"] = parent.project
         return parent.project
     return data.get("project")
+
+
+def _lock_folder_scope(
+    *,
+    project: Project | None,
+    parent: Folder | None,
+) -> tuple[Project | None, Folder | None]:
+    locked_project = project
+    if project is not None:
+        locked_project = Project.objects.select_for_update().get(pk=project.pk)
+    locked_parent = parent
+    if parent is not None:
+        locked_parent = (
+            Folder.objects.select_for_update().select_related("project").get(pk=parent.pk)
+        )
+    return locked_project, locked_parent
 
 
 def _ensure_folder_write_allowed(actor: Any, project: Project | None) -> None:

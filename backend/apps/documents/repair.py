@@ -143,11 +143,7 @@ def _ensure_project_archive_root(
         .first()
     )
     if folder is None:
-        folder = (
-            Folder.objects.filter(project=project, code=definition.code)
-            .order_by("id")
-            .first()
-        )
+        folder = Folder.objects.filter(project=project, code=definition.code).order_by("id").first()
 
     if folder is None:
         return Folder.objects.create(

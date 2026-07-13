@@ -1,0 +1,13 @@
+/var/log/wind-doc-system/*.log {
+    daily
+    rotate 14
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0640 winddoc adm
+    sharedscripts
+    postrotate
+        systemctl kill -s USR1 wind-doc-system.service >/dev/null 2>&1 || true
+    endscript
+}

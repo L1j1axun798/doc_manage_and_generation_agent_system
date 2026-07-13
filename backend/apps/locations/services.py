@@ -1,15 +1,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
+from typing import Any
 
-from django.contrib.auth import get_user_model
 from django.db.models import OuterRef, Subquery
+from django.db.models.query import QuerySet
 from django.utils import timezone
 
-from .models import LocationReport
+from apps.accounts.models import User
 
-User = get_user_model()
+from .models import LocationReport
 
 LOCATION_FRESHNESS_HOURS = 4
 
@@ -23,17 +24,17 @@ class LocationState:
 
 @dataclass(frozen=True)
 class LocationSnapshot:
-    user: object
+    user: Any
     latest_report: LocationReport | None
     location_status: str
     should_report: bool
 
 
-def get_latest_report(user: object) -> LocationReport | None:
+def get_latest_report(user: User) -> LocationReport | None:
     return LocationReport.objects.filter(user=user).order_by("-reported_at", "-id").first()
 
 
-def get_active_employee_users():
+def get_active_employee_users() -> QuerySet[User]:
     return (
         User.objects.filter(is_active=True)
         .exclude(role=User.Role.TEMPORARY_USER)
@@ -48,9 +49,7 @@ def get_admin_location_snapshots() -> list[LocationSnapshot]:
         .values("id")[:1]
     )
     users = list(
-        get_active_employee_users().annotate(
-            latest_location_report_id=Subquery(latest_report_id)
-        )
+        get_active_employee_users().annotate(latest_location_report_id=Subquery(latest_report_id))
     )
     report_ids = [
         user.latest_location_report_id for user in users if user.latest_location_report_id
@@ -72,9 +71,9 @@ def get_admin_location_snapshots() -> list[LocationSnapshot]:
 
 def build_location_snapshot(
     *,
-    user: object,
+    user: Any,
     latest_report: LocationReport | None,
-    now=None,
+    now: datetime | None = None,
 ) -> LocationSnapshot:
     now = now or timezone.now()
     status = resolve_location_status(latest_report=latest_report, now=now)
@@ -86,7 +85,9 @@ def build_location_snapshot(
     )
 
 
-def resolve_location_status(*, latest_report: LocationReport | None, now=None) -> str:
+def resolve_location_status(
+    *, latest_report: LocationReport | None, now: datetime | None = None
+) -> str:
     if latest_report is None:
         return LocationState.TODAY_UNREPORTED
 

@@ -42,7 +42,7 @@ const frontendTemporaryUrl = computed(() => {
   if (!createdTemporaryAccess.value?.token) {
     return ''
   }
-  return `${window.location.origin}/share/${createdTemporaryAccess.value.token}`
+  return `${window.location.origin}/share#token=${encodeURIComponent(createdTemporaryAccess.value.token)}`
 })
 
 watch(
@@ -255,14 +255,6 @@ async function copyText(text: string): Promise<void> {
             <el-input :model-value="frontendTemporaryUrl" readonly>
               <template #append>
                 <el-button @click="copyText(frontendTemporaryUrl)">复制</el-button>
-              </template>
-            </el-input>
-          </label>
-          <label>
-            <span>API 直链</span>
-            <el-input :model-value="createdTemporaryAccess.download_url" readonly>
-              <template #append>
-                <el-button @click="copyText(createdTemporaryAccess.download_url)">复制</el-button>
               </template>
             </el-input>
           </label>

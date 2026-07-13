@@ -35,7 +35,7 @@ export async function revokeTemporaryAccessGrant(grantId: number): Promise<Tempo
 }
 
 export async function downloadTemporaryAccess(token: string): Promise<void> {
-  const response = await apiClient.get<Blob>(`/temporary-access/${token}/download/`, {
+  const response = await apiClient.post<Blob>('/temporary-access/download/', { token }, {
     responseType: 'blob',
   })
   const filename = getFilenameFromContentDisposition(response.headers['content-disposition'] ?? null)

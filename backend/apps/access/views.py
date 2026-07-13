@@ -18,6 +18,7 @@ class DocumentGrantViewSet(viewsets.ModelViewSet):
     filterset_fields = ["document", "user", "revoked_at"]
     ordering_fields = ["created_at", "expires_at", "updated_at"]
     ordering = ["-created_at", "-id"]
+    http_method_names = ["get", "post", "put", "patch", "head", "options"]
 
     def get_queryset(self):
         if getattr(self, "swagger_fake_view", False):

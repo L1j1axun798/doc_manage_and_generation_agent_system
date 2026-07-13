@@ -15,7 +15,7 @@ router.register(
 urlpatterns = [
     *router.urls,
     path(
-        "temporary-access/<str:token>/download/",
+        "temporary-access/download/",
         temporary_access_download,
         name="temporary-access-download",
     ),

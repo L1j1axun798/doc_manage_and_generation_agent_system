@@ -19,4 +19,7 @@ def project_members_for_project(project: Project) -> QuerySet[ProjectMember]:
 def get_project_membership(user: Any, project: Project) -> ProjectMember | None:
     if not getattr(user, "is_authenticated", False):
         return None
+    prefetched = getattr(project, "_request_user_memberships", None)
+    if prefetched is not None:
+        return prefetched[0] if prefetched else None
     return ProjectMember.objects.filter(project=project, user=user).first()

@@ -1,3 +1,5 @@
+from django.db.models import Q
+from django.utils import timezone
 from rest_framework import serializers
 
 from .models import DocumentGrant
@@ -28,6 +30,7 @@ class DocumentGrantSerializer(serializers.ModelSerializer):
             "can_update",
             "can_delete",
             "can_restore",
+            "can_manage",
             "expires_at",
             "is_expired",
             "is_active",
@@ -72,7 +75,9 @@ class DocumentGrantSerializer(serializers.ModelSerializer):
                     document=document,
                     user=user,
                     revoked_at__isnull=True,
-                ).exists()
+                )
+                .filter(Q(expires_at__isnull=True) | Q(expires_at__gt=timezone.now()))
+                .exists()
             ):
                 raise serializers.ValidationError("该用户已有未撤销授权")
         return attrs

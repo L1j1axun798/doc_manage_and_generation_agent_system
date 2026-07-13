@@ -1,0 +1,10 @@
+bind = "unix:/run/wind-doc-system/gunicorn.sock"
+workers = 3
+worker_class = "gthread"
+threads = 4
+timeout = 120
+graceful_timeout = 30
+keepalive = 5
+accesslog = "/var/log/wind-doc-system/gunicorn-access.log"
+errorlog = "/var/log/wind-doc-system/gunicorn-error.log"
+capture_output = True

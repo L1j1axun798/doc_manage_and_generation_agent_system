@@ -8,8 +8,8 @@ from datetime import timedelta
 from typing import Any
 
 from django.conf import settings
-from django.contrib.auth import get_user_model
 from django.db import transaction
+from django.db.models import QuerySet
 from django.utils import timezone
 from rest_framework.exceptions import AuthenticationFailed, PermissionDenied, ValidationError
 from webauthn import (
@@ -32,9 +32,7 @@ from webauthn.helpers.structs import (
 
 from apps.audit.services import audit_log
 
-from .models import WebAuthnChallenge, WebAuthnCredential, WebAuthnEnrollmentTicket
-
-User = get_user_model()
+from .models import User, WebAuthnChallenge, WebAuthnCredential, WebAuthnEnrollmentTicket
 
 
 @dataclass(frozen=True)
@@ -43,7 +41,9 @@ class WebAuthnOptionsResult:
     options: dict[str, Any]
 
 
-def create_enrollment_ticket(*, user, actor, request=None) -> dict[str, Any]:
+def create_enrollment_ticket(
+    *, user: User, actor: User | None, request: Any | None = None
+) -> dict[str, Any]:
     token = secrets.token_urlsafe(32)
     ticket = WebAuthnEnrollmentTicket.objects.create(
         user=user,
@@ -73,8 +73,7 @@ def begin_registration(*, ticket_token: str, device_name: str = "") -> WebAuthnO
     challenge_token = secrets.token_urlsafe(32)
     user = ticket.user
     existing_credentials = [
-        credential_descriptor(credential)
-        for credential in active_credentials_for_user(user)
+        credential_descriptor(credential) for credential in active_credentials_for_user(user)
     ]
     options = generate_registration_options(
         rp_id=settings.WEBAUTHN_RP_ID,
@@ -112,7 +111,7 @@ def finish_registration(
     ticket_token: str,
     challenge_token: str,
     credential: dict[str, Any],
-    request=None,
+    request: Any | None = None,
 ) -> WebAuthnCredential:
     ticket = get_available_ticket(ticket_token, lock=True)
     challenge = get_available_challenge(
@@ -182,7 +181,7 @@ def finish_registration(
     return webauthn_credential
 
 
-def begin_login(*, user, request=None) -> WebAuthnOptionsResult:
+def begin_login(*, user: User, request: Any | None = None) -> WebAuthnOptionsResult:
     credentials = list(active_credentials_for_user(user))
     if not credentials:
         audit_log(
@@ -222,7 +221,9 @@ def begin_login(*, user, request=None) -> WebAuthnOptionsResult:
 
 
 @transaction.atomic
-def finish_login(*, pending_token: str, credential: dict[str, Any], request=None):
+def finish_login(
+    *, pending_token: str, credential: dict[str, Any], request: Any | None = None
+) -> User:
     challenge = get_available_challenge(
         token=pending_token,
         purpose=WebAuthnChallenge.Purpose.LOGIN,
@@ -250,7 +251,9 @@ def finish_login(*, pending_token: str, credential: dict[str, Any], request=None
     return challenge.user
 
 
-def begin_location_challenge(*, user, payload_hash: str, request=None) -> WebAuthnOptionsResult:
+def begin_location_challenge(
+    *, user: User, payload_hash: str, request: Any | None = None
+) -> WebAuthnOptionsResult:
     credentials = list(active_credentials_for_user(user))
     if not credentials:
         audit_log(
@@ -286,11 +289,11 @@ def begin_location_challenge(*, user, payload_hash: str, request=None) -> WebAut
 @transaction.atomic
 def verify_location_challenge(
     *,
-    user,
+    user: User,
     challenge_token: str,
     credential: dict[str, Any],
     payload_hash: str,
-    request=None,
+    request: Any | None = None,
 ) -> WebAuthnCredential:
     challenge = get_available_challenge(
         token=challenge_token,
@@ -315,7 +318,7 @@ def verify_location_challenge(
     return webauthn_credential
 
 
-def reset_user_webauthn_credentials(*, user, actor, request=None) -> int:
+def reset_user_webauthn_credentials(*, user: User, actor: User, request: Any | None = None) -> int:
     credentials = list(WebAuthnCredential.objects.filter(user=user, is_active=True))
     for credential in credentials:
         credential.revoke(actor=actor)
@@ -334,7 +337,9 @@ def reset_user_webauthn_credentials(*, user, actor, request=None) -> int:
     return len(credentials)
 
 
-def revoke_credential(*, credential: WebAuthnCredential, actor, request=None) -> None:
+def revoke_credential(
+    *, credential: WebAuthnCredential, actor: User, request: Any | None = None
+) -> None:
     active_count = WebAuthnCredential.objects.filter(user=credential.user, is_active=True).count()
     if active_count <= 1:
         raise ValidationError("不能删除最后一个本人验证设备")
@@ -348,7 +353,7 @@ def revoke_credential(*, credential: WebAuthnCredential, actor, request=None) ->
     )
 
 
-def active_credentials_for_user(user):
+def active_credentials_for_user(user: User) -> QuerySet[WebAuthnCredential]:
     return WebAuthnCredential.objects.filter(user=user, is_active=True, revoked_at__isnull=True)
 
 
@@ -356,7 +361,7 @@ def hash_token(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
-def options_as_dict(options) -> dict[str, Any]:
+def options_as_dict(options: Any) -> dict[str, Any]:
     return json.loads(options_to_json(options))
 
 
@@ -412,13 +417,15 @@ def consume_challenge(challenge: WebAuthnChallenge) -> None:
     challenge.save(update_fields=["used_at"])
 
 
-def get_credential_for_assertion(*, user, credential: dict[str, Any]) -> WebAuthnCredential:
+def get_credential_for_assertion(*, user: User, credential: dict[str, Any]) -> WebAuthnCredential:
     credential_id = credential.get("id") or credential.get("rawId")
     if not isinstance(credential_id, str):
         raise AuthenticationFailed("本人验证凭据无效")
-    webauthn_credential = active_credentials_for_user(user).filter(
-        credential_id_hash=hash_token(credential_id)
-    ).first()
+    webauthn_credential = (
+        active_credentials_for_user(user)
+        .filter(credential_id_hash=hash_token(credential_id))
+        .first()
+    )
     if not webauthn_credential:
         raise PermissionDenied("当前设备未绑定，不能用于登录或定位")
     return webauthn_credential
@@ -429,7 +436,7 @@ def verify_assertion(
     challenge: WebAuthnChallenge,
     credential_record: WebAuthnCredential,
     credential: dict[str, Any],
-    request=None,
+    request: Any | None = None,
     failure_action: str,
 ) -> None:
     try:
@@ -458,6 +465,4 @@ def verify_assertion(
     credential_record.device_type = verification.credential_device_type.value
     credential_record.backed_up = verification.credential_backed_up
     credential_record.last_used_at = timezone.now()
-    credential_record.save(
-        update_fields=["sign_count", "device_type", "backed_up", "last_used_at"]
-    )
+    credential_record.save(update_fields=["sign_count", "device_type", "backed_up", "last_used_at"])

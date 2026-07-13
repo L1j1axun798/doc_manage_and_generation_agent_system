@@ -157,6 +157,7 @@ paths:
       - v1
       security:
       - cookieAuth: []
+      - {}
       responses:
         '204':
           description: 已退出
@@ -464,22 +465,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/DocumentGrantUpdate'
           description: ''
-    delete:
-      operationId: v1_document_grants_destroy
-      parameters:
-      - in: path
-        name: id
-        schema:
-          type: integer
-        description: 标识此 文档授权 的 唯一整数值。
-        required: true
-      tags:
-      - v1
-      security:
-      - cookieAuth: []
-      responses:
-        '204':
-          description: No response body
   /api/v1/document-grants/{id}/revoke/:
     post:
       operationId: v1_document_grants_revoke_create
@@ -1691,6 +1676,76 @@ paths:
       responses:
         '204':
           description: No response body
+  /api/v1/system/backups/:
+    get:
+      operationId: v1_system_backups_list
+      parameters:
+      - name: ordering
+        required: false
+        in: query
+        description: 用于排序结果的字段。
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: 分页结果集中的页码。
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: 搜索关键词。
+        schema:
+          type: string
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedSystemBackupRunList'
+          description: ''
+  /api/v1/system/backups/{id}/:
+    get:
+      operationId: v1_system_backups_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: 标识此 系统备份记录 的 唯一整数值。
+        required: true
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SystemBackupRun'
+          description: ''
+  /api/v1/system/backups/latest/:
+    get:
+      operationId: v1_system_backups_latest_retrieve
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SystemBackupRun'
+          description: ''
+        '204':
+          description: No response body
   /api/v1/temporary-access-grants/:
     get:
       operationId: v1_temporary_access_grants_list
@@ -1800,17 +1855,23 @@ paths:
               schema:
                 $ref: '#/components/schemas/TemporaryAccessGrant'
           description: ''
-  /api/v1/temporary-access/{token}/download/:
-    get:
-      operationId: v1_temporary_access_download_retrieve
-      parameters:
-      - in: path
-        name: token
-        schema:
-          type: string
-        required: true
+  /api/v1/temporary-access/download/:
+    post:
+      operationId: v1_temporary_access_download_create
       tags:
       - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TemporaryAccessDownload'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TemporaryAccessDownload'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TemporaryAccessDownload'
+        required: true
       security:
       - cookieAuth: []
       - {}
@@ -1964,22 +2025,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/User'
           description: ''
-    delete:
-      operationId: v1_users_destroy
-      parameters:
-      - in: path
-        name: id
-        schema:
-          type: integer
-        description: 标识此 用户 的 唯一整数值。
-        required: true
-      tags:
-      - v1
-      security:
-      - cookieAuth: []
-      responses:
-        '204':
-          description: No response body
   /api/v1/users/{id}/disable/:
     post:
       operationId: v1_users_disable_create
@@ -2081,6 +2126,14 @@ paths:
           description: ''
 components:
   schemas:
+    AccessLevelEnum:
+      enum:
+      - internal
+      - restricted
+      type: string
+      description: |-
+        * `internal` - 内部
+        * `restricted` - 受限
     AuditLog:
       type: object
       properties:
@@ -2209,11 +2262,28 @@ components:
           type: string
           readOnly: true
           title: 描述
+        access_level:
+          allOf:
+          - $ref: '#/components/schemas/AccessLevelEnum'
+          readOnly: true
+          title: 访问级别
         current_version:
           allOf:
           - $ref: '#/components/schemas/DocumentVersion'
           readOnly: true
         can_download:
+          type: boolean
+          readOnly: true
+        can_update:
+          type: boolean
+          readOnly: true
+        can_delete:
+          type: boolean
+          readOnly: true
+        can_restore:
+          type: boolean
+          readOnly: true
+        can_create_version:
           type: boolean
           readOnly: true
         lock_version:
@@ -2253,7 +2323,12 @@ components:
           readOnly: true
           title: 更新时间
       required:
+      - access_level
+      - can_create_version
+      - can_delete
       - can_download
+      - can_restore
+      - can_update
       - created_at
       - created_by
       - created_by_name
@@ -2321,6 +2396,9 @@ components:
         can_restore:
           type: boolean
           title: 可恢复
+        can_manage:
+          type: boolean
+          title: 可管理授权
         expires_at:
           type: string
           format: date-time
@@ -2422,6 +2500,9 @@ components:
         can_restore:
           type: boolean
           title: 可恢复
+        can_manage:
+          type: boolean
+          title: 可管理授权
         expires_at:
           type: string
           format: date-time
@@ -2509,6 +2590,8 @@ components:
           maxLength: 255
         description:
           type: string
+        access_level:
+          $ref: '#/components/schemas/AccessLevelEnum'
         expected_updated_at:
           type: string
           format: date-time
@@ -2527,6 +2610,10 @@ components:
           maxLength: 255
         description:
           type: string
+        access_level:
+          allOf:
+          - $ref: '#/components/schemas/AccessLevelEnum'
+          default: internal
       required:
       - file
       - folder
@@ -2623,7 +2710,7 @@ components:
           maxLength: 50
         sort_order:
           type: integer
-          maximum: 4294967295
+          maximum: 9223372036854775807
           minimum: 0
           format: int64
           title: 排序
@@ -3042,6 +3129,29 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ProjectMember'
+    PaginatedSystemBackupRunList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/SystemBackupRun'
     PaginatedTemporaryAccessGrantList:
       type: object
       required:
@@ -3129,6 +3239,9 @@ components:
         can_restore:
           type: boolean
           title: 可恢复
+        can_manage:
+          type: boolean
+          title: 可管理授权
         expires_at:
           type: string
           format: date-time
@@ -3180,6 +3293,8 @@ components:
           maxLength: 255
         description:
           type: string
+        access_level:
+          $ref: '#/components/schemas/AccessLevelEnum'
         expected_updated_at:
           type: string
           format: date-time
@@ -3214,7 +3329,7 @@ components:
           maxLength: 50
         sort_order:
           type: integer
-          maximum: 4294967295
+          maximum: 9223372036854775807
           minimum: 0
           format: int64
           title: 排序
@@ -3325,6 +3440,12 @@ components:
           allOf:
           - $ref: '#/components/schemas/ProjectMemberRoleEnum'
           title: 项目角色
+        can_upload:
+          type: boolean
+          title: 可上传
+        can_download_restricted:
+          type: boolean
+          title: 可下载受限文件
         can_manage_folder:
           type: boolean
           title: 可管理文件夹
@@ -3334,6 +3455,9 @@ components:
         can_restore:
           type: boolean
           title: 可恢复
+        can_manage_permission:
+          type: boolean
+          title: 可管理授权
         joined_at:
           type: string
           format: date-time
@@ -3484,6 +3608,12 @@ components:
           allOf:
           - $ref: '#/components/schemas/ProjectMemberRoleEnum'
           title: 项目角色
+        can_upload:
+          type: boolean
+          title: 可上传
+        can_download_restricted:
+          type: boolean
+          title: 可下载受限文件
         can_manage_folder:
           type: boolean
           title: 可管理文件夹
@@ -3493,6 +3623,9 @@ components:
         can_restore:
           type: boolean
           title: 可恢复
+        can_manage_permission:
+          type: boolean
+          title: 可管理授权
         joined_at:
           type: string
           format: date-time
@@ -3533,6 +3666,106 @@ components:
         * `success` - 成功
         * `failure` - 失败
         * `denied` - 拒绝
+    SystemBackupRun:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        trigger:
+          allOf:
+          - $ref: '#/components/schemas/TriggerEnum'
+          readOnly: true
+          title: 触发方式
+        status:
+          allOf:
+          - $ref: '#/components/schemas/SystemBackupRunStatusEnum'
+          readOnly: true
+          title: 状态
+        started_at:
+          type: string
+          format: date-time
+          readOnly: true
+          title: 开始时间
+        finished_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          title: 结束时间
+        local_available:
+          type: boolean
+          readOnly: true
+        offsite_available:
+          type: boolean
+          readOnly: true
+        sha256:
+          type: string
+          readOnly: true
+          title: SHA-256
+        size_bytes:
+          type: integer
+          readOnly: true
+          title: 备份大小
+        error_summary:
+          type: string
+          readOnly: true
+        created_by:
+          type: integer
+          readOnly: true
+          nullable: true
+          title: 创建人
+        created_by_username:
+          type: string
+          readOnly: true
+        created_by_real_name:
+          type: string
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+          title: 创建时间
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+          title: 更新时间
+      required:
+      - created_at
+      - created_by
+      - created_by_real_name
+      - created_by_username
+      - error_summary
+      - finished_at
+      - id
+      - local_available
+      - offsite_available
+      - sha256
+      - size_bytes
+      - started_at
+      - status
+      - trigger
+      - updated_at
+    SystemBackupRunStatusEnum:
+      enum:
+      - running
+      - success
+      - failure
+      type: string
+      description: |-
+        * `running` - 执行中
+        * `success` - 成功
+        * `failure` - 失败
+    TemporaryAccessDownload:
+      type: object
+      properties:
+        token:
+          type: string
+          maxLength: 200
+          minLength: 20
+      required:
+      - token
     TemporaryAccessGrant:
       type: object
       properties:
@@ -3553,7 +3786,7 @@ components:
           readOnly: true
         max_downloads:
           type: integer
-          maximum: 4294967295
+          maximum: 9223372036854775807
           minimum: 0
           format: int64
           title: 最大下载次数
@@ -3659,7 +3892,7 @@ components:
           readOnly: true
         max_downloads:
           type: integer
-          maximum: 4294967295
+          maximum: 9223372036854775807
           minimum: 0
           format: int64
           title: 最大下载次数
@@ -3739,6 +3972,14 @@ components:
       - revoked_by_name
       - token
       - used_count
+    TriggerEnum:
+      enum:
+      - scheduled
+      - manual
+      type: string
+      description: |-
+        * `scheduled` - 计划任务
+        * `manual` - 手动
     User:
       type: object
       properties:

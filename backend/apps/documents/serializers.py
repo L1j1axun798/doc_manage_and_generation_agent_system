@@ -4,7 +4,12 @@ from apps.folders.models import Folder
 from common.validators import validate_uploaded_file
 
 from .models import Document, DocumentVersion
-from .permissions import can_download_document
+from .permissions import (
+    can_delete_document,
+    can_download_document,
+    can_restore_document,
+    can_update_document,
+)
 
 
 class DocumentVersionSerializer(serializers.ModelSerializer):
@@ -34,6 +39,10 @@ class DocumentSerializer(serializers.ModelSerializer):
     deleted_by_name = serializers.CharField(source="deleted_by.real_name", read_only=True)
     current_version = DocumentVersionSerializer(read_only=True)
     can_download = serializers.SerializerMethodField()
+    can_update = serializers.SerializerMethodField()
+    can_delete = serializers.SerializerMethodField()
+    can_restore = serializers.SerializerMethodField()
+    can_create_version = serializers.SerializerMethodField()
 
     class Meta:
         model = Document
@@ -45,8 +54,13 @@ class DocumentSerializer(serializers.ModelSerializer):
             "folder_name",
             "title",
             "description",
+            "access_level",
             "current_version",
             "can_download",
+            "can_update",
+            "can_delete",
+            "can_restore",
+            "can_create_version",
             "lock_version",
             "deleted_at",
             "deleted_by",
@@ -65,10 +79,33 @@ class DocumentSerializer(serializers.ModelSerializer):
             return False
         return can_download_document(user, document)
 
+    def get_can_update(self, document: Document) -> bool:
+        user = self._request_user()
+        return bool(user and can_update_document(user, document))
+
+    def get_can_delete(self, document: Document) -> bool:
+        user = self._request_user()
+        return bool(user and can_delete_document(user, document))
+
+    def get_can_restore(self, document: Document) -> bool:
+        user = self._request_user()
+        return bool(user and can_restore_document(user, document))
+
+    def get_can_create_version(self, document: Document) -> bool:
+        return self.get_can_update(document) and not document.is_deleted
+
+    def _request_user(self):
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if user is None or not getattr(user, "is_authenticated", False):
+            return None
+        return user
+
 
 class DocumentUpdateSerializer(serializers.Serializer):
     title = serializers.CharField(max_length=255, required=False)
     description = serializers.CharField(required=False, allow_blank=True)
+    access_level = serializers.ChoiceField(choices=Document.AccessLevel.choices, required=False)
     expected_updated_at = serializers.DateTimeField()
 
 
@@ -94,6 +131,10 @@ class DocumentUploadSerializer(serializers.Serializer):
     file = serializers.FileField()
     title = serializers.CharField(max_length=255, required=False, allow_blank=True)
     description = serializers.CharField(required=False, allow_blank=True)
+    access_level = serializers.ChoiceField(
+        choices=Document.AccessLevel.choices,
+        default=Document.AccessLevel.INTERNAL,
+    )
 
     def validate_file(self, uploaded_file):
         validate_uploaded_file(uploaded_file)

@@ -17,7 +17,8 @@ def can_upload_document(user: Any, project: Project | None) -> bool:
         return True
     if project is None:
         return True
-    return get_project_membership(user, project) is not None
+    membership = get_project_membership(user, project)
+    return bool(membership and membership.can_upload)
 
 
 def can_download_document(user: Any, document: Document) -> bool:
@@ -25,7 +26,12 @@ def can_download_document(user: Any, document: Document) -> bool:
         return False
     if getattr(user, "is_system_admin", False):
         return True
-    return _has_active_grant(user, document, "download")
+    if _has_active_grant(user, document, "download"):
+        return True
+    if document.access_level != Document.AccessLevel.RESTRICTED or document.project is None:
+        return False
+    membership = get_project_membership(user, document.project)
+    return bool(membership and membership.can_download_restricted)
 
 
 def can_view_document(user: Any, document: Document) -> bool:
@@ -35,6 +41,11 @@ def can_view_document(user: Any, document: Document) -> bool:
         return True
     if _has_active_grant(user, document, "view"):
         return True
+    if document.access_level == Document.AccessLevel.RESTRICTED:
+        if document.project is None:
+            return False
+        membership = get_project_membership(user, document.project)
+        return bool(membership and membership.can_download_restricted)
     return _has_basic_scope(user, document)
 
 
@@ -90,6 +101,9 @@ def _has_basic_scope(user: Any, document: Document) -> bool:
 
 
 def _has_active_grant(user: Any, document: Document, action: str) -> bool:
+    prefetched = getattr(document, "_active_request_user_grants", None)
+    if prefetched is not None:
+        return any(getattr(grant, f"can_{action}", False) for grant in prefetched)
     from apps.access.selectors import has_active_document_grant
 
     return has_active_document_grant(user, document, action)

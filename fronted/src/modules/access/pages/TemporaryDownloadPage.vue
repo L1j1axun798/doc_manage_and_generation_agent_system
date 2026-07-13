@@ -1,14 +1,12 @@
 <script setup lang="ts">
 import { ElMessage } from 'element-plus'
 import { computed, ref } from 'vue'
-import { useRoute } from 'vue-router'
 
 import { getErrorMessage } from '@/core/http/error-normalizer'
 import { downloadTemporaryAccess } from '../api/temporary-access.api'
 
-const route = useRoute()
 const loading = ref(false)
-const token = computed(() => String(route.params.token || ''))
+const token = computed(() => new URLSearchParams(window.location.hash.slice(1)).get('token') || '')
 const isInvalidToken = computed(() => token.value.trim().length === 0)
 
 async function download(): Promise<void> {

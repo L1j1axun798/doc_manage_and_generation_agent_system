@@ -7,6 +7,7 @@ const props = defineProps<{
   modelValue: boolean
   project?: Project | null
   loading?: boolean
+  allowManagerChange?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -40,12 +41,15 @@ watch(
 )
 
 function submit(): void {
-  emit('submit', {
+  const payload: ProjectPayload = {
     name: form.name,
     code: form.code,
     description: form.description,
-    manager: form.manager || null,
-  })
+  }
+  if (props.allowManagerChange) {
+    payload.manager = form.manager || null
+  }
+  emit('submit', payload)
 }
 </script>
 
@@ -58,7 +62,7 @@ function submit(): void {
       <el-form-item label="项目编号" required>
         <el-input v-model="form.code" :disabled="Boolean(project)" />
       </el-form-item>
-      <el-form-item label="负责人ID">
+      <el-form-item v-if="allowManagerChange" label="负责人ID">
         <el-input-number v-model="form.manager" :min="1" controls-position="right" />
       </el-form-item>
       <el-form-item label="描述">

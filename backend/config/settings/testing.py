@@ -17,3 +17,6 @@ EMAIL_BACKEND = "django.core.mail.backends.locmem.EmailBackend"
 
 WEBAUTHN_RP_ID = "testserver"
 WEBAUTHN_ALLOWED_ORIGINS = ["http://testserver"]
+API_REQUIRE_WEBAUTHN_SESSION = False
+API_ENFORCE_PASSWORD_CHANGE = False
+VALIDATE_UPLOAD_FILE_SIGNATURES = False

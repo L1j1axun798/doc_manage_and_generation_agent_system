@@ -323,11 +323,10 @@ function canSelectSubfolder(item: FolderTreeNode): boolean {
 }
 
 function closeDocumentResults(): void {
-  if (!canCloseDocumentResults.value || selectedFolderId.value === undefined) {
+  if (!canCloseDocumentResults.value) {
     return
   }
-
-  hiddenDocumentResultsFolderId.value = selectedFolderId.value
+  returnToSubfolderList()
 }
 
 async function createSubfolder(): Promise<void> {
@@ -495,6 +494,7 @@ async function handleUpload(payload: DocumentUploadPayload): Promise<void> {
           file,
           title: payload.files.length === 1 ? payload.title : '',
           description: payload.description,
+          access_level: payload.access_level,
         })
         successCount += 1
       } catch (error) {
