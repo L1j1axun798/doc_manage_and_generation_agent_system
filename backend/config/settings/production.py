@@ -18,6 +18,7 @@ SECURE_HSTS_PRELOAD = False
 TRUST_PROXY_HEADERS = True
 USE_X_ACCEL_REDIRECT = True
 ENABLE_DJANGO_ADMIN = False
+ENABLE_API_DOCS = False
 
 if len(SECRET_KEY) < 50 or SECRET_KEY.startswith(("unsafe-", "replace-")):  # noqa: F405
     raise ImproperlyConfigured("DJANGO_SECRET_KEY 必须替换为至少 50 字符的随机生产密钥")

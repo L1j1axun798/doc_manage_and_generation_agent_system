@@ -31,6 +31,12 @@ class TemporaryAccessGrantViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     http_method_names = ["get", "post", "head", "options"]
     filterset_fields = ["document_version", "revoked_at"]
+    search_fields = [
+        "document_version__document__title",
+        "document_version__original_filename",
+        "created_by__username",
+        "created_by__real_name",
+    ]
     ordering_fields = ["created_at", "expires_at", "last_used_at"]
     ordering = ["-created_at", "-id"]
 

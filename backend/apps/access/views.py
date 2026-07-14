@@ -16,6 +16,7 @@ class DocumentGrantViewSet(viewsets.ModelViewSet):
     serializer_class = DocumentGrantSerializer
     permission_classes = [IsAuthenticated]
     filterset_fields = ["document", "user", "revoked_at"]
+    search_fields = ["document__title", "user__username", "user__real_name"]
     ordering_fields = ["created_at", "expires_at", "updated_at"]
     ordering = ["-created_at", "-id"]
     http_method_names = ["get", "post", "put", "patch", "head", "options"]

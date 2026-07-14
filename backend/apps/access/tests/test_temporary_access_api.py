@@ -53,6 +53,34 @@ def create_version(client, *, document_id: int, content: bytes):
 
 
 @pytest.mark.django_db
+def test_temporary_access_list_searches_document_filename_and_creator(client, tmp_path, settings):
+    settings.FILE_STORAGE_ROOT = tmp_path
+    admin = make_user("admin-search", User.Role.SYSTEM_ADMIN)
+    admin.real_name = "安全管理员"
+    admin.save(update_fields=["real_name"])
+    project = Project.objects.create(name="项目", code="P-SEARCH-TEMP", created_by=admin)
+    folder = Folder.objects.create(project=project, name="过程资料", created_by=admin)
+    client.force_login(admin)
+    document = create_document(client, folder=folder)
+    create_response = client.post(
+        "/api/v1/temporary-access-grants/",
+        {"document_version": document["current_version"]["id"]},
+        content_type="application/json",
+    )
+
+    title_response = client.get("/api/v1/temporary-access-grants/?search=检测报告")
+    filename_response = client.get("/api/v1/temporary-access-grants/?search=report.pdf")
+    creator_response = client.get("/api/v1/temporary-access-grants/?search=安全管理员")
+    missing_response = client.get("/api/v1/temporary-access-grants/?search=不存在")
+
+    assert create_response.status_code == 201
+    assert title_response.json()["count"] == 1
+    assert filename_response.json()["count"] == 1
+    assert creator_response.json()["count"] == 1
+    assert missing_response.json()["count"] == 0
+
+
+@pytest.mark.django_db
 def test_create_temporary_access_returns_token_once_and_stores_hash(client, tmp_path, settings):
     settings.FILE_STORAGE_ROOT = tmp_path
     admin = make_user("admin", User.Role.SYSTEM_ADMIN)

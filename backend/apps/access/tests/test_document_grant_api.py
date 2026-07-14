@@ -41,6 +41,33 @@ def create_restricted_document(client, *, folder: Folder, title: str = "受限�
 
 
 @pytest.mark.django_db
+def test_document_grant_list_searches_document_and_user(client, tmp_path, settings):
+    settings.FILE_STORAGE_ROOT = tmp_path
+    admin = make_user("admin-search", User.Role.SYSTEM_ADMIN)
+    recipient = make_user("recipient-search", User.Role.DATA_OPERATOR)
+    recipient.real_name = "张三"
+    recipient.save(update_fields=["real_name"])
+    project = Project.objects.create(name="项目", code="P-SEARCH-GRANT", created_by=admin)
+    folder = Folder.objects.create(project=project, name="过程资料", created_by=admin)
+    client.force_login(admin)
+    document = create_restricted_document(client, folder=folder, title="专项验收报告")
+    create_response = client.post(
+        "/api/v1/document-grants/",
+        {"document": document["id"], "user": recipient.id, "can_view": True},
+        content_type="application/json",
+    )
+
+    user_response = client.get("/api/v1/document-grants/?search=张三")
+    document_response = client.get("/api/v1/document-grants/?search=专项验收")
+    missing_response = client.get("/api/v1/document-grants/?search=不存在")
+
+    assert create_response.status_code == 201
+    assert user_response.json()["count"] == 1
+    assert document_response.json()["count"] == 1
+    assert missing_response.json()["count"] == 0
+
+
+@pytest.mark.django_db
 def test_admin_can_grant_restricted_download_to_non_member(client, tmp_path, settings):
     settings.FILE_STORAGE_ROOT = tmp_path
     admin = make_user("admin", User.Role.SYSTEM_ADMIN)
