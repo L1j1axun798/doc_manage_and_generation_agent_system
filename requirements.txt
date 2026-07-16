@@ -1,0 +1,31 @@
+# ============================================================
+# 风电检测资料管理系统 — 生产环境依赖
+# 生成日期: 2026-07-16
+# 基于 requirements/base.txt + requirements/prod.txt 合并
+# ============================================================
+
+# --- Web 框架 ---
+Django>=5.2,<5.3
+djangorestframework>=3.15,<4.0
+
+# --- 数据库 ---
+mysqlclient>=2.2,<3.0
+
+# --- API 工具 ---
+django-filter>=24.3
+drf-spectacular>=0.27,<1.0
+django-cors-headers>=4.4,<5.0
+
+# --- 配置管理 ---
+django-environ>=0.11,<1.0
+
+# --- 安全 ---
+django-axes>=6.5,<7.0
+argon2-cffi>=23.1,<26.0
+webauthn>=2.7,<3.0
+
+# --- 文件处理 ---
+Pillow>=10.4,<12.0
+
+# --- WSGI 服务器 ---
+gunicorn>=22.0,<24.0
