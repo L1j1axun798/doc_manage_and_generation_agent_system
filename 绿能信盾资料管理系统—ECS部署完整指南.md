@@ -186,7 +186,11 @@ mysql -u root -p
 CREATE DATABASE wind_doc_prod CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- 创建用户（把 'your-password' 换成你自己的强密码）
+-- ESC数据库密码：winddocsystem123
 CREATE USER 'wind_doc_user'@'127.0.0.1' IDENTIFIED BY 'your-password';
+-- （CREATE USER 'wind_doc_user'@'127.0.0.1' IDENTIFIED BY '123456';）
+
+
 
 -- 授权
 GRANT ALL PRIVILEGES ON wind_doc_prod.* TO 'wind_doc_user'@'127.0.0.1';
@@ -389,7 +393,7 @@ sudo install -d -o winddoc -g winddoc -m 0750 /run/wind-doc-system
 sudo chown -R winddoc:winddoc /opt/wind-doc-system
 ```
 
-### 9.4 复制部署配置文件
+### 9.4 复制部署配置文件（这里有的文件没有）
 
 ```bash
 sudo cp /opt/wind-doc-system/deploy/systemd/wind-doc-system.service /etc/systemd/system/
