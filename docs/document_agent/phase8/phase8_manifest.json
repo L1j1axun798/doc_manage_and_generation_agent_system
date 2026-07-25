@@ -1,0 +1,12 @@
+{
+  "phase": 8,
+  "status": "development_complete_feature_disabled",
+  "as_of": "2026-07-25",
+  "project_detail_tab": "入场资料编制（四措两案）",
+  "poll_interval_seconds": 2,
+  "dedicated_sensitive_upload_feature_added": false,
+  "report_generation_supported": false,
+  "frontend_feature_enabled_by_default": false,
+  "backend_authoritative_permissions": true,
+  "production_activation_allowed": false
+}

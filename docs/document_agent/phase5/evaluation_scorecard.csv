@@ -1,0 +1,2 @@
+evaluation_version,blind_case_id,section_code,reviewer,reviewed_at,factual_accuracy,source_traceability,clause_correctness,safety_technical_completeness,current_project_consistency,professional_usability,manual_editing_effort,major_fabricated_fact,major_safety_or_technical_omission,all_numbers_have_sources,historical_entity_contamination,rag_hit_at_3,changed_character_ratio,baseline_minutes,agent_assisted_minutes,review_comments
+,,,jacklee,2026/7/25 16:00,2,3,2,1,2,3,5,TRUE,TRUE,FALSE,TRUE,TRUE,0.7,200,100,should be more accessible.

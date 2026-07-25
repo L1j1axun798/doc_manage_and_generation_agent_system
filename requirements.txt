@@ -26,6 +26,17 @@ webauthn>=2.7,<3.0
 
 # --- 文件处理 ---
 Pillow>=10.4,<12.0
+python-docx>=1.2,<2.0
+docxtpl>=0.20.2,<1.0
+pypdf>=6.0,<7.0
+
+# --- Document Agent 核心与RAG ---
+pydantic>=2.11,<3.0
+numpy>=2.0,<3.0
+tenacity>=9.1.4,<10.0
+django-rq>=4.1.1,<5.0
+rq>=2.10,<3.0
+redis>=8.0,<9.0
 
 # --- WSGI 服务器 ---
 gunicorn>=22.0,<24.0

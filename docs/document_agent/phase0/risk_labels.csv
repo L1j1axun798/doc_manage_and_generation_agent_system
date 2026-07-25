@@ -1,0 +1,13 @@
+risk_code,risk_name,trigger_facts,evidence_required,default_section_code,severity,approval_status,source_evidence,notes
+high_altitude,高处作业,存在登塔或高处检测任务,作业位置和高度证据,safety_measures,high,approved,S002-S006安全与应急章节,只按当前项目明确的登塔或高处事实触发
+climbing_tower,攀爬塔筒,作业流程包含攀爬塔筒,施工步骤证据,safety_measures,high,approved,S001-S006施工与安全章节,作为高处作业下的特定作业标签保留并允许同时触发
+electrical_work,电气作业,检测或准备涉及带电或电气设备,设备状态和作业方式证据,safety_measures,high,approved,S005-S006安全措施章节,不能仅凭历史条款触发
+temporary_power,临时用电,现场使用临时电源,电源和设备清单证据,safety_measures,high,approved,S005-S006安全措施章节,与电气作业可同时触发
+fire_hot_work,消防或动火,现场存在明火或动火作业,动火任务和工作票证据,safety_measures,high,approved,S001-S006安全措施章节,无动火事实时不得自动加入动火条款
+mechanical_injury,机械伤害,作业涉及旋转机械或机械工具,设备和步骤证据,safety_measures,high,approved,S001-S006安全与应急章节,同时映射预防和应急条款
+falling_object,物体打击或高空坠物,高处携带工具或存在上下交叉作业,作业步骤和工具证据,safety_measures,high,approved,S001-S006安全与应急章节,只在高处携带工具或交叉作业事实成立时触发
+confined_space,有限或狭小空间,作业进入受限通风空间,空间和通风条件证据,safety_measures,high,approved,S001及S005-S006安全与应急章节,不得因历史模板含有该内容而自动触发
+extreme_weather,极端天气,室外或高处作业受大风暴雨冰冻影响,地点工期和气象约束证据,emergency_plan,high,approved,S001-S006安全与应急章节,停工阈值必须来自当前已批准条款
+vehicle_traffic,车辆交通,人员或设备通过车辆进出场,车辆使用事实,emergency_plan,medium,approved,S001-S006应急章节,仅在当前项目确认使用车辆时触发
+environmental_pollution,环境污染,作业产生废油废液垃圾或经过林草区域,物料和场地证据,environmental_measures,medium,approved,S001及S003-S006环保章节,按当前项目的具体污染源和场地约束选择条款
+lifting_hoisting,起吊或电动葫芦,作业使用起吊设备,设备和吊装步骤证据,safety_measures,high,approved,S006安全措施章节,无设备事实时不得触发

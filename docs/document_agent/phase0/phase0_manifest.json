@@ -1,0 +1,41 @@
+{
+  "phase": 0,
+  "status": "approved",
+  "completion_date": "2026-07-24",
+  "as_of": "2026-07-24",
+  "target_document_family": "风电机组检测四措两案编制",
+  "selected_business_type_code": "wind_turbine_inspection_four_measures_two_plans",
+  "business_scope_confirmation_date": "2026-07-23",
+  "approved_template_baseline_count": 3,
+  "template_baseline_confirmation_date": "2026-07-23",
+  "selection_rule": "合格样本数量最多；并列时选择近6个月已完成业务项目数最多的业务",
+  "repository_evidence": {
+    "project_count": 2,
+    "document_count": 190,
+    "document_version_count": 190,
+    "word_version_count": 29,
+    "apparent_measure_plan_record_count": 21,
+    "unique_apparent_measure_plan_sha256_count": 15,
+    "candidate_content_confirmed": true,
+    "candidate_content_confirmation_date": "2026-07-23",
+    "approval_metadata_available": false,
+    "business_type_metadata_available": false
+  },
+  "blind_test_evidence": {
+    "uploaded_record_count": 14,
+    "approved_unique_docx_count": 8,
+    "excluded_duplicate_count": 5,
+    "excluded_non_docx_count": 1,
+    "content_opened_during_registration": false,
+    "isolation_date": "2026-07-24"
+  },
+  "known_gaps": [],
+  "prohibited_phase0_work": [
+    "生成流水线代码",
+    "Django模型和迁移",
+    "RQ和Redis",
+    "真实模型调用",
+    "Prompt调优",
+    "前端生成界面"
+  ]
+}

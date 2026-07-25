@@ -1,0 +1,64 @@
+{
+  "phase": 5,
+  "status": "real_generation_completed_awaiting_expert_review",
+  "as_of": "2026-07-25",
+  "offline_cli_status": "implemented_and_three_private_real_cases_completed",
+  "evaluation_harness_status": "implemented_fixed_and_technically_validated",
+  "input_delivery_mode": "controlled_local_directory_outside_platform",
+  "production_sensitive_document_upload_feature": false,
+  "pre_evaluation_freeze": {
+    "phase4_manifest_sha256": "edc5a64c2bac85f2aab73fa57f5ff290e444600c402483419c10fa84302276d8",
+    "knowledge_index_builder_sha256": "410ec4b834b7afb6db435f293665acd3d1de0a609d59e97fe8a916cbc3a435fb",
+    "offline_cli_sha256": "fadcadfa837f97a0f5cc47030bc450021c67657a48bdc8ba380b034ab38e622d",
+    "evaluation_harness_sha256": "7fc5f3d0627499c30204c6c43411bc92715be7f38ac315b36311991aec9ed30f",
+    "implementation_fingerprint_helper_sha256": "aec16e4c671c64eb637519a62f6f2c193fd092cc077008a0cfc5d53205f75ef9",
+    "review_scorecard_builder_sha256": "c87c257b3c6df00429973d1ee324bc0caa9415d323b8be444003e3dded041212",
+    "provider_healthcheck_sha256": "5083eb63a09b59ffff2f187de10ac5b719ea5519ce3a21ef8e6bb376e726b3c3"
+  },
+  "blind_case_count": 8,
+  "blind_answer_docx_count": 8,
+  "paired_current_project_input_bundle_count": 3,
+  "fake_smoke_completed_case_count": 3,
+  "real_model_completed_case_count": 3,
+  "private_answer_candidate_count": 4,
+  "private_quarantined_material_copy_count": 4,
+  "real_model_credentials_configured": true,
+  "expert_scorecard_completed_case_count": 0,
+  "accelerated_downstream_development_authorized": true,
+  "production_activation_allowed": false,
+  "prepared_artifacts": [
+    "offline_input.example.json",
+    "evaluation_cases.csv",
+    "evaluation_scorecard.csv",
+    "phase5_cli.py",
+    "phase5_evaluator.py",
+    "phase5_preparation_validator.py",
+    "phase5_fact_sheet.py",
+    "phase5_input_builder.py",
+    "phase5_scorecard_builder.py",
+    "fingerprints.py",
+    "provider_healthcheck.py",
+    "review_bundle.json"
+  ],
+  "evaluation_gate": {
+    "minimum_evaluated_case_count": 3,
+    "major_fabricated_fact_count": 0,
+    "major_safety_or_technical_omission_count": 0,
+    "all_project_numbers_have_sources": true,
+    "rag_hit_at_3_minimum": 0.8,
+    "minor_edit_section_ratio_minimum": 0.7,
+    "manual_editing_effort_score_counted_as_minor": 4,
+    "time_reduction_ratio_minimum": 0.5,
+    "real_model_usage_required": true,
+    "blind_answer_input_forbidden": true
+  },
+  "blocking_requirements": [
+    "技术负责人逐章评分",
+    "人工编制基线耗时和Agent辅助耗时"
+  ],
+  "prohibited_shortcuts": [
+    "不得把盲测四措两案答案正文作为生成输入",
+    "不得用Fake Provider结果冒充真实模型效果验收",
+    "Phase 6至8允许在功能默认关闭条件下加急开发，Phase 5真实评测未通过前不得生产启用"
+  ]
+}

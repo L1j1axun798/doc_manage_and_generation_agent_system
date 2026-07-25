@@ -1,0 +1,14 @@
+{
+  "phase": 7,
+  "status": "development_complete_feature_disabled",
+  "as_of": "2026-07-25",
+  "queue": "document-generation",
+  "job_payload": "generation_task_uuid_only",
+  "job_timeout_seconds": 1800,
+  "retry_count": 2,
+  "retry_intervals_seconds": [60, 300],
+  "mysql_authoritative": true,
+  "redis_contains_document_content": false,
+  "production_fake_provider_allowed": false,
+  "production_activation_allowed": false
+}

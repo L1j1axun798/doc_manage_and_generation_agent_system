@@ -6,6 +6,7 @@ interface ImportMetaEnv {
   readonly VITE_API_PROXY_TARGET?: string
   readonly VITE_AMAP_KEY?: string
   readonly VITE_AMAP_SECURITY_JS_CODE?: string
+  readonly VITE_DOCUMENT_AGENT_ENABLED?: string
 }
 
 interface ImportMeta {

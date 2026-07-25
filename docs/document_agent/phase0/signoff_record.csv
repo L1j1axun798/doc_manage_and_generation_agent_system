@@ -1,0 +1,11 @@
+artifact_code,artifact_name,required_role,decision,approver,approved_at,evidence_reference,notes
+business_selection,一期业务选择,技术负责人,approved,项目方,2026-07-23,用户确认统一归类为风电机组检测四措两案编制,已形成6份正确唯一DOCX开发样本
+sample_inventory,样本清单,技术负责人,approved,项目方,2026-07-23,用户确认技术方案目录内三措和四措两案均正确,重复SHA-256记录已排除
+field_dictionary,字段字典,技术负责人,approved,项目方授权,2026-07-24,field_dictionary.csv共33个字段已定稿,当前项目事实和人工确认优先于历史样本
+risk_and_clauses,风险标签和条款适用矩阵,技术负责人,approved,项目方授权,2026-07-24,risk_labels.csv和clause_applicability_matrix.csv,使用内部条款族编码且外部标准在具体项目中复核
+template_inventory,优先甲方模板清单,技术负责人,approved,项目方,2026-07-23,用户确认3份现有正确文档作为一期模板基线,登记为GENERAL通用基线且Phase 2已完成占位符预检和最小渲染验证
+blind_test_set,盲测清单,技术负责人,approved,项目方,2026-07-24,8份新增唯一DOCX已按元数据登记至blind_test_set.csv,正文未读取且不得参与Prompt规则RAG权重或切分策略开发
+model_configuration,模型和Embedding配置决定,安全负责人和技术负责人,approved,项目方授权,2026-07-24,model_configuration_decision.csv,生产启用前复核账号权限成本告警和服务协议且密钥只走环境变量
+expert_scoring,专家评分规则,技术负责人和业务负责人,approved,项目方授权,2026-07-24,expert_scoring_rubric.csv,硬门槛与阶段指南一致
+phase1_3_development,Phase 1至3开发放行,技术负责人,approved,项目方授权,2026-07-24,Phase 0开发门禁,允许依次开发Phase 1至3但Phase 4前必须补齐盲测并通过完整门禁
+phase0_completion,Phase 0完成,技术负责人,approved,项目方授权,2026-07-24,完整门禁预检除Manifest状态和本完成记录外无其他问题,8份盲测DOCX已隔离且Phase 0全部基线资料完成

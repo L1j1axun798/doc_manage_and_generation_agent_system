@@ -1,5 +1,24 @@
 # wind-doc-system
 
+## 环境文件规则
+
+这些文件用途不同，不是三个互相替代的版本：
+
+| 文件 | 是否被程序读取 | 用途 | 是否提交Git |
+| --- | --- | --- | --- |
+| `backend/.env` | 是，本地开发 | 本机数据库、WebAuthn、模型和Redis真实配置 | 否 |
+| `backend/.env.example` | 否 | 创建或补齐本地 `.env` 的开发模板 | 是 |
+| `backend/.env.production` | 是，生产环境 | ECS服务器真实生产配置，部署时创建 | 否 |
+| `backend/.env.production.example` | 否 | 创建生产 `.env.production` 的安全模板 | 是 |
+| `fronted/.env.local` | 是，本地前端 | 本机Vite公开变量 | 否 |
+| `fronted/.env.example` | 否 | 创建前端 `.env.local` 的模板 | 是 |
+
+后端根据 `DJANGO_SETTINGS_MODULE` 自动选择实际文件：
+
+- `config.settings.development` 读取 `backend/.env`；
+- `config.settings.production` 读取 `backend/.env.production`；
+- 所有 `.example` 文件只作模板，绝不能写入真实密钥。
+
 ## 后端
 
 ```powershell

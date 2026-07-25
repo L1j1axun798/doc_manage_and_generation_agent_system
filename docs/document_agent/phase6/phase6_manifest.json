@@ -1,0 +1,13 @@
+{
+  "phase": 6,
+  "status": "development_complete_feature_disabled",
+  "as_of": "2026-07-25",
+  "business_type": "wind_turbine_inspection_four_measures_two_plans",
+  "document_purpose": "entry_four_measures_two_plans",
+  "database_change": "additive_migrations_only",
+  "existing_document_core_tables_modified": false,
+  "dedicated_sensitive_upload_feature_added": false,
+  "feature_enabled_by_default": false,
+  "phase5_gate_required_for_activation": true,
+  "production_activation_allowed": false
+}

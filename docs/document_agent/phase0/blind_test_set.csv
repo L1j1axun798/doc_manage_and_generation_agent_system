@@ -1,0 +1,9 @@
+blind_case_id,sample_id,business_type_code,custodian,isolated_at,leakage_check_status,approval_status,notes
+B001,S009,wind_turbine_inspection_four_measures_two_plans,项目方,2026-07-24T15:28:54+08:00,passed,approved,仅登记文件名格式版本ID和SHA-256；正文未读取且不得参与后续Prompt规则或RAG调优
+B002,S010,wind_turbine_inspection_four_measures_two_plans,项目方,2026-07-24T15:28:54+08:00,passed,approved,仅登记文件名格式版本ID和SHA-256；正文未读取且不得参与后续Prompt规则或RAG调优
+B003,S011,wind_turbine_inspection_four_measures_two_plans,项目方,2026-07-24T15:28:54+08:00,passed,approved,仅登记文件名格式版本ID和SHA-256；正文未读取且不得参与后续Prompt规则或RAG调优
+B004,S012,wind_turbine_inspection_four_measures_two_plans,项目方,2026-07-24T15:28:54+08:00,passed,approved,仅登记文件名格式版本ID和SHA-256；正文未读取且不得参与后续Prompt规则或RAG调优
+B005,S015,wind_turbine_inspection_four_measures_two_plans,项目方,2026-07-24T15:28:54+08:00,passed,approved,仅登记文件名格式版本ID和SHA-256；正文未读取且不得参与后续Prompt规则或RAG调优
+B006,S016,wind_turbine_inspection_four_measures_two_plans,项目方,2026-07-24T15:28:54+08:00,passed,approved,仅登记文件名格式版本ID和SHA-256；正文未读取且不得参与后续Prompt规则或RAG调优
+B007,S017,wind_turbine_inspection_four_measures_two_plans,项目方,2026-07-24T15:28:54+08:00,passed,approved,仅登记文件名格式版本ID和SHA-256；正文未读取且不得参与后续Prompt规则或RAG调优
+B008,S018,wind_turbine_inspection_four_measures_two_plans,项目方,2026-07-24T15:28:54+08:00,passed,approved,仅登记文件名格式版本ID和SHA-256；正文未读取且不得参与后续Prompt规则或RAG调优

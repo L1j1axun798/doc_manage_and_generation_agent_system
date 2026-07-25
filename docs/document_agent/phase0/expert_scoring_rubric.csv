@@ -1,0 +1,9 @@
+criterion_code,criterion_name,scope,score_min,score_max,weight_percent,hard_gate,pass_rule,owner,approval_status,notes
+factual_accuracy,事实准确性,section,1,5,25,yes,不得出现重大虚构事实,技术负责人,approved,所有项目数字必须有来源
+source_traceability,来源可追溯性,section,1,5,15,yes,事实引用覆盖率必须为100%,技术负责人,approved,定位必须能回到来源文档版本和段落或页码
+clause_correctness,条款正确性,section,1,5,20,yes,不得错误适用或遗漏重大安全技术条款,技术负责人,approved,模型无权自行决定条款
+safety_technical_completeness,安全技术完整性,section,1,5,20,yes,重大安全和技术遗漏必须为0,技术负责人,approved,逐风险标签核对
+current_project_consistency,当前项目一致性,section,1,5,10,yes,不得混入历史项目专有信息,技术负责人,approved,检查甲方项目场站人员日期数量和标准编号
+professional_usability,专业表达可用性,section,1,5,5,no,平均分至少4分,技术负责人,approved,只评价表达而不替代事实和条款门槛
+manual_editing_effort,人工修改工作量,section,1,5,5,no,至少70%变化章节只需小幅修改,业务专家,approved,同时记录修改字数比例和审核耗时
+overall_time_reduction,编制时间降低,project,1,5,0,yes,预计人工编制时间降低至少50%,业务负责人,approved,记录基线耗时和Agent辅助耗时

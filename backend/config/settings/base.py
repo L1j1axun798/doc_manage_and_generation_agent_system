@@ -40,6 +40,12 @@ env = environ.Env(
     ENABLE_API_DOCS=(bool, True),
     VALIDATE_UPLOAD_FILE_SIGNATURES=(bool, True),
     DJANGO_SECURE_HSTS_SECONDS=(int, 3600),
+    DOCUMENT_AGENT_ENABLED=(bool, False),
+    DOCUMENT_AGENT_PHASE5_APPROVED=(bool, False),
+    DOCUMENT_AGENT_ALLOW_FAKE_PROVIDER=(bool, False),
+    REDIS_URL=(str, "redis://127.0.0.1:6379/0"),
+    DOCUMENT_AGENT_JOB_TIMEOUT_SECONDS=(int, 1800),
+    DOCUMENT_AGENT_STALE_TASK_SECONDS=(int, 2100),
 )
 ENV_FILE_NAME = (
     ".env.production"
@@ -63,10 +69,12 @@ INSTALLED_APPS = [
     "django_filters",
     "drf_spectacular",
     "rest_framework",
+    "django_rq",
     "apps.accounts",
     "apps.access",
     "apps.audit",
     "apps.documents",
+    "apps.document_generation",
     "apps.folders",
     "apps.locations",
     "apps.notifications",
@@ -236,3 +244,16 @@ ENABLE_DJANGO_ADMIN = env("ENABLE_DJANGO_ADMIN")
 ENABLE_API_DOCS = env("ENABLE_API_DOCS")
 VALIDATE_UPLOAD_FILE_SIGNATURES = env("VALIDATE_UPLOAD_FILE_SIGNATURES")
 SECURE_HSTS_SECONDS_VALUE = env("DJANGO_SECURE_HSTS_SECONDS")
+DOCUMENT_AGENT_ENABLED = env("DOCUMENT_AGENT_ENABLED")
+DOCUMENT_AGENT_PHASE5_APPROVED = env("DOCUMENT_AGENT_PHASE5_APPROVED")
+DOCUMENT_AGENT_ALLOW_FAKE_PROVIDER = env("DOCUMENT_AGENT_ALLOW_FAKE_PROVIDER")
+REDIS_URL = env("REDIS_URL")
+DOCUMENT_AGENT_JOB_TIMEOUT_SECONDS = env("DOCUMENT_AGENT_JOB_TIMEOUT_SECONDS")
+DOCUMENT_AGENT_STALE_TASK_SECONDS = env("DOCUMENT_AGENT_STALE_TASK_SECONDS")
+
+RQ_QUEUES = {
+    "document-generation": {
+        "URL": REDIS_URL,
+        "DEFAULT_TIMEOUT": DOCUMENT_AGENT_JOB_TIMEOUT_SECONDS,
+    }
+}

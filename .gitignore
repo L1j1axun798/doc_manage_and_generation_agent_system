@@ -39,3 +39,16 @@ backend/data/files/*
 !backend/data/files/.gitkeep
 backend/data/temporary/*
 !backend/data/temporary/.gitkeep
+
+# Document Agent Phase 0 仅提交元数据，不提交历史业务原文
+docs/document_agent/phase0/**/*.doc
+docs/document_agent/phase0/**/*.docx
+docs/document_agent/phase0/**/*.pdf
+
+# Document Agent 私有RAG索引、盲测输入和生成结果不得提交
+private-evaluation/
+offline-output/
+docs/document_agent/phase5/private/
+
+# Codex 本地验证日志和临时渲染工具
+.codex_tmp/

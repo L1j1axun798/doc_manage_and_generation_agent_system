@@ -1,0 +1,17 @@
+matrix_id,clause_code,clause_version,section_code,text,approval_status,approved_by,approved_at,notes
+M001,FMTP-SAFE-HIGH-ALTITUDE,internal-baseline-v1,safety_measures,涉及登塔或高处作业时应在入场前确认作业许可人员资质防坠落装备和现场监护安排；具体阈值按当前项目已确认标准执行,approved,项目方授权,2026-07-24,确定性插入且模型不得改写适用条件
+M002,FMTP-EMER-HIGH-ALTITUDE,internal-baseline-v1,emergency_plan,项目应针对高处作业风险形成现场处置安排并明确报告警戒救援联络和转运职责；联系人和路线采用当前项目确认信息,approved,项目方授权,2026-07-24,不得继承历史项目联系人
+M003,FMTP-SAFE-CLIMBING-TOWER,internal-baseline-v1,safety_measures,攀爬塔筒前应确认通道状态通信监护和防坠落系统可用并按当前项目批准流程组织上下塔,approved,项目方授权,2026-07-24,不包含未经确认的数值阈值
+M004,FMTP-SAFE-ELECTRICAL,internal-baseline-v1,safety_measures,涉及电气设备时应在作业前确认设备状态隔离措施验电接地要求和工作许可并由具备相应资格的人员执行,approved,项目方授权,2026-07-24,外部标准编号由当前项目确认
+M005,FMTP-SAFE-TEMPORARY-POWER,internal-baseline-v1,safety_measures,使用临时电源前应确认电源接入保护装置线路敷设设备接地和停送电责任并完成入场检查,approved,项目方授权,2026-07-24,仅在临时用电事实确认后插入
+M006,FMTP-SAFE-FIRE-HOT-WORK,internal-baseline-v1,safety_measures,存在动火或明火作业时应在入场前完成相应许可清理隔离消防器材监护和结束复查安排,approved,项目方授权,2026-07-24,无动火事实不得插入
+M007,FMTP-SAFE-MECHANICAL,internal-baseline-v1,safety_measures,使用旋转机械或机械工具前应确认防护装置设备状态操作人员和能量隔离安排并防止误启动和人员接触危险部位,approved,项目方授权,2026-07-24,确定性机械伤害预防条款
+M008,FMTP-EMER-MECHANICAL,internal-baseline-v1,emergency_plan,项目应针对机械伤害风险明确停机隔离现场警戒报告救援和医疗联络安排且不得在危险状态下盲目施救,approved,项目方授权,2026-07-24,确定性机械伤害处置条款
+M009,FMTP-SAFE-FALLING-OBJECT,internal-baseline-v1,safety_measures,高处携带工具或存在交叉作业时应在入场前确认工具防坠落作业区域隔离上下协同和现场监护安排,approved,项目方授权,2026-07-24,只在当前事实触发
+M010,FMTP-EMER-FALLING-OBJECT,internal-baseline-v1,emergency_plan,项目应针对物体打击风险明确停止作业现场警戒伤员救护信息报告和后续处置安排,approved,项目方授权,2026-07-24,不写入历史事故结果
+M011,FMTP-SAFE-CONFINED-SPACE,internal-baseline-v1,safety_measures,进入有限或狭小空间前应确认作业许可通风检测通信监护人员清点和应急撤离安排并使用当前项目批准的控制条件,approved,项目方授权,2026-07-24,阈值由当前项目条款确认
+M012,FMTP-EMER-CONFINED-SPACE,internal-baseline-v1,emergency_plan,项目应针对有限空间风险明确异常撤离现场警戒持续通风外部救援联络和禁止盲目施救要求,approved,项目方授权,2026-07-24,无有限空间事实不得插入
+M013,FMTP-EMER-EXTREME-WEATHER,internal-baseline-v1,emergency_plan,项目应根据当前地点工期和批准的气象条件设置监测预警暂停作业撤离复工确认和信息报告安排,approved,项目方授权,2026-07-24,不自行编造风速或天气阈值
+M014,FMTP-EMER-VEHICLE-TRAFFIC,internal-baseline-v1,emergency_plan,使用车辆进出场时应明确驾驶资格车辆检查场内路线限行要求人员避让和交通事件报告救援安排,approved,项目方授权,2026-07-24,路线采用当前项目信息
+M015,FMTP-ENV-POLLUTION,internal-baseline-v1,environmental_measures,存在废油废液垃圾或林草区域保护要求时应在入场前明确分类收集防泄漏临时存放清运和现场恢复安排,approved,项目方授权,2026-07-24,仅按当前污染源和场地约束插入
+M016,FMTP-SAFE-LIFTING,internal-baseline-v1,safety_measures,使用起吊设备前应确认设备和吊具状态操作指挥人员作业区域隔离载荷信息通信和试运行安排,approved,项目方授权,2026-07-24,载荷数值必须来自当前确认事实

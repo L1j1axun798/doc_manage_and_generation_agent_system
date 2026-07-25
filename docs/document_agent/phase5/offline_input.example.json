@@ -1,0 +1,47 @@
+{
+  "request_id": "offline-example-001",
+  "idempotency_key": "offline-example-001",
+  "business_type": "wind_turbine_inspection_four_measures_two_plans",
+  "template_id": "T001",
+  "template_path": "replace-with-approved-template.docx",
+  "template_required_placeholders": [],
+  "sources": [
+    {
+      "document_version_id": 1001,
+      "path": "replace-with-current-project-entry-source.docx"
+    }
+  ],
+  "confirmed_facts": [
+    {
+      "field": "project_name",
+      "value": "示例风电机组检测项目",
+      "value_type": "string",
+      "source_document_version_id": 1001,
+      "locator": {
+        "paragraph_index": 1
+      },
+      "confidence": 1.0,
+      "confirmed_by": 1
+    },
+    {
+      "field": "risk_evidence_items",
+      "value": [],
+      "value_type": "list[object]",
+      "source_document_version_id": 1001,
+      "locator": {
+        "paragraph_index": 2
+      },
+      "confidence": 1.0,
+      "confirmed_by": 1
+    }
+  ],
+  "required_fact_fields": [
+    "project_name",
+    "risk_evidence_items"
+  ],
+  "section_codes": [
+    "overview"
+  ],
+  "historical_entity_blacklist": [],
+  "knowledge_json_path": null
+}

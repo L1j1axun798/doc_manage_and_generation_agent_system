@@ -1,0 +1,62 @@
+{
+  "phase": 4,
+  "status": "approved_for_blind_evaluation",
+  "completed_at": "2026-07-25",
+  "corrective_freeze_note": "Phase 5真实生成暴露了列表二维Schema、计划数量措辞、断点章节复验和章节标题问题；现已完成受控结构归一化、严格复验、固定章节标题及输出实现指纹绑定，三个真实输出均按本冻结版本重建。",
+  "document_purpose": "entry_four_measures_two_plans",
+  "business_type": "wind_turbine_inspection_four_measures_two_plans",
+  "blind_content_accessed_during_development": false,
+  "real_model_called": true,
+  "freeze": {
+    "fact_extraction_prompt": {
+      "version": "fact_extraction/v1",
+      "sha256": "7bd5c4adf782f92970150669560babdfb4d15f02bf61b9ae0845aa60cdbeed3a"
+    },
+    "section_generation_prompt": {
+      "version": "section_generation/v1",
+      "sha256": "5212901b1d4afa7583a7029d8d182d5cddce9d4971da5a4c8a9e6ba7c9b24b42"
+    },
+    "section_revision_prompt": {
+      "version": "section_revision/v1",
+      "sha256": "7be928531a1c376c888fd948af15c31264711a08aac9cafa494a8ed2d6c87874"
+    },
+    "schema_repair_prompt": {
+      "version": "schema_repair/v1",
+      "sha256": "64f2e47a8875ffa9c221e027953d82fa2f964ae554c5b6b8246249a7afc05f98"
+    },
+    "field_dictionary_sha256": "f077e757b2970d630d9dc81b0b2552068f7cc17db17b3427155f4bf24cb19a59",
+    "risk_labels_sha256": "da411b77add4b06f46e342c73ee1935d914110ce397c09244425a3300cfdaa77",
+    "clause_matrix_sha256": "13be42eccd5477097b800b84c167bb99dee879d28bccfbaac58040943621a3b4",
+    "section_annotations_sha256": "1b6229c015a0088f3cba7421562452d49546ff5940c06f991e2f8aad97867dbe",
+    "model_configuration_decision_sha256": "2f353376bccbdf768bc805e78f995d86921811932906d4a16fc875e143b9ff83",
+    "expert_scoring_rubric_sha256": "1d845d95c501410737d14b24425b082658a00ceb569d40bb5db59824f6a32670",
+    "template_inventory_sha256": "10434da3babd83ec9a1d41f087b3e5f1426a630b8cb40c9fd5b6f64a49171e07",
+    "approved_clause_blocks_sha256": "65c5cdc6add33bcc5e589259553faad67c2958c025e93ffb75549b374c911fcf",
+    "contracts_implementation_sha256": "cea418e8e854fe94f3753f342b33cfcf5636c7aefefa5648051e0324e00fb6d1",
+    "errors_implementation_sha256": "a333e0246cb00a15a0163ed66223b13c865565849560fe79814f08775c52e8d6",
+    "facts_implementation_sha256": "6e425377699fad174e6d6414cc3c62bb6a16f6ba9bf8319f2ef63cfb8e126f9c",
+    "parsing_implementation_sha256": "5eee952fe41a8f9960d5cfbc3206f80fec7c313cde691947af713a8b8c9e37aa",
+    "ports_implementation_sha256": "9f989b23dfa1011037ea4a419a1b967f548bbd8aeb431ea42a50211f62849b8f",
+    "rendering_implementation_sha256": "5ac79e54cdbcc6c92161ead3b781b58099617d72afc8fa21e3f6df03b8205331",
+    "rules_implementation_sha256": "070a5773922b5e88de2162849fdf1d168a140cfe4d11146e664746d30c44416b",
+    "orchestrator_implementation_sha256": "5585575adfc48ba7ecc0580039f96dad03e876fd331a7c09aea7afc7b8773710",
+    "sections_implementation_sha256": "1093570ce5cd03f5b07acb31334da503f0b8a9cbaa4581adbabc5ef2495de56b",
+    "llm_provider_implementation_sha256": "7cec930c1fd09e90a8218d105fc363ec37ea9fbda6e596de7293edf75ad39bb7",
+    "embedding_provider_implementation_sha256": "9aa7ed32a2971bf0f83e409d9caff098ef686ff1aaecb9c6a3b1adf58be894bd",
+    "rag_implementation_sha256": "b24a04081f56b35cb9f7d96a48b5828fd2848423ea129e9159d7807805b59702",
+    "validation_implementation_sha256": "0b2a3fe19a81d01cae097d03a4785419da2c469bc9e3657b9a831df7b3cfed39"
+  },
+  "completion_gates": {
+    "fact_citation_coverage": 1.0,
+    "approved_risk_rule_count": 12,
+    "approved_clause_block_count": 16,
+    "model_can_select_or_create_clauses": false,
+    "schema_repair_limit": 1,
+    "model_request_max_attempts": 3
+  },
+  "next_phase_requirements": [
+    "至少3个盲测项目的当前项目输入JSON和入场编制来源资料",
+    "受控环境中的LLM_BASE_URL和LLM_API_KEY",
+    "技术负责人逐章评分和人工编制基线耗时"
+  ]
+}

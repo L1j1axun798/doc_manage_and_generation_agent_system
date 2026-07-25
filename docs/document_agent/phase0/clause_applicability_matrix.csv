@@ -1,0 +1,17 @@
+matrix_id,risk_code,section_code,clause_code,clause_version,applicability_condition,required_when_matched,conflict_priority,approval_status,approved_by,notes
+M001,high_altitude,safety_measures,FMTP-SAFE-HIGH-ALTITUDE,internal-baseline-v1,确认事实包含登塔或高处作业,yes,confirmed_fact_over_history,approved,项目方授权,内部条款族编码；来源S001-S006安全章节；正式输出前按当前项目复核外部标准编号
+M002,high_altitude,emergency_plan,FMTP-EMER-HIGH-ALTITUDE,internal-baseline-v1,高处作业风险已确认,yes,confirmed_fact_over_history,approved,项目方授权,内部条款族编码；来源S001-S006应急章节
+M003,climbing_tower,safety_measures,FMTP-SAFE-CLIMBING-TOWER,internal-baseline-v1,确认事实包含攀爬塔筒,yes,confirmed_fact_over_history,approved,项目方授权,内部条款族编码；与高处作业允许同时触发但渲染时去重
+M004,electrical_work,safety_measures,FMTP-SAFE-ELECTRICAL,internal-baseline-v1,确认事实包含电气作业,yes,confirmed_fact_over_history,approved,项目方授权,内部条款族编码；正式输出前逐项复核外部标准编号
+M005,temporary_power,safety_measures,FMTP-SAFE-TEMPORARY-POWER,internal-baseline-v1,确认事实包含临时用电,yes,confirmed_fact_over_history,approved,项目方授权,内部条款族编码；来源S005-S006安全章节
+M006,fire_hot_work,safety_measures,FMTP-SAFE-FIRE-HOT-WORK,internal-baseline-v1,确认事实包含明火或动火,yes,confirmed_fact_over_history,approved,项目方授权,内部条款族编码；不允许模型自行补充动火条件
+M007,mechanical_injury,safety_measures,FMTP-SAFE-MECHANICAL,internal-baseline-v1,确认事实包含机械伤害风险,yes,confirmed_fact_over_history,approved,项目方授权,内部预防条款族编码；来源S001-S006安全章节
+M008,mechanical_injury,emergency_plan,FMTP-EMER-MECHANICAL,internal-baseline-v1,机械伤害风险已确认,yes,confirmed_fact_over_history,approved,项目方授权,内部应急条款族编码；来源S001-S006应急章节
+M009,falling_object,safety_measures,FMTP-SAFE-FALLING-OBJECT,internal-baseline-v1,确认事实包含物体打击风险,yes,confirmed_fact_over_history,approved,项目方授权,内部预防条款族编码；来源S001-S006安全章节
+M010,falling_object,emergency_plan,FMTP-EMER-FALLING-OBJECT,internal-baseline-v1,物体打击风险已确认,yes,confirmed_fact_over_history,approved,项目方授权,内部应急条款族编码；来源S001-S006应急章节
+M011,confined_space,safety_measures,FMTP-SAFE-CONFINED-SPACE,internal-baseline-v1,确认事实包含有限或狭小空间,yes,confirmed_fact_over_history,approved,项目方授权,内部预防条款族编码；必须有空间和通风事实证据
+M012,confined_space,emergency_plan,FMTP-EMER-CONFINED-SPACE,internal-baseline-v1,有限空间风险已确认,yes,confirmed_fact_over_history,approved,项目方授权,内部应急条款族编码；不得因模板内容直接触发
+M013,extreme_weather,emergency_plan,FMTP-EMER-EXTREME-WEATHER,internal-baseline-v1,确认地点工期存在极端天气风险,yes,confirmed_fact_over_history,approved,项目方授权,内部应急条款族编码；阈值和停工条件必须来自当前批准条款
+M014,vehicle_traffic,emergency_plan,FMTP-EMER-VEHICLE-TRAFFIC,internal-baseline-v1,确认项目使用车辆进出场,yes,confirmed_fact_over_history,approved,项目方授权,内部应急条款族编码；来源S001-S006应急章节
+M015,environmental_pollution,environmental_measures,FMTP-ENV-POLLUTION,internal-baseline-v1,确认存在废油废液垃圾或林草地保护要求,yes,confirmed_fact_over_history,approved,项目方授权,内部环保条款族编码；按当前项目污染源选择
+M016,lifting_hoisting,safety_measures,FMTP-SAFE-LIFTING,internal-baseline-v1,确认使用起吊或电动葫芦设备,yes,confirmed_fact_over_history,approved,项目方授权,内部安全条款族编码；来源S006安全章节
