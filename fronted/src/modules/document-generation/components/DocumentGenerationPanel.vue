@@ -68,6 +68,7 @@ const props = defineProps<{
 const authStore = useAuthStore()
 const loading = ref(false)
 const actionLoading = ref(false)
+const openingTaskId = ref<string | null>(null)
 const createDialogVisible = ref(false)
 const templates = ref<DocumentGenerationTemplate[]>([])
 const documents = ref<DocumentItem[]>([])
@@ -121,24 +122,39 @@ onMounted(loadInitialData)
 onBeforeUnmount(stopPolling)
 
 async function loadInitialData(): Promise<void> {
+  stopPolling()
+  selectedTask.value = null
+  workflowEvents.value = []
+  factDrafts.value = []
   loading.value = true
   try {
     const [templateRows, documentRows, taskRows] = await Promise.all([
       fetchGenerationTemplates(),
       fetchAllProjectDocuments(),
-      fetchGenerationTasks(props.project.id),
+      fetchAllGenerationTasks(),
     ])
     templates.value = templateRows
     documents.value = documentRows
-    tasks.value = taskRows.results
-    if (tasks.value[0]) {
-      await selectTask(tasks.value[0])
-    }
+    tasks.value = taskRows
   } catch (error) {
     ElMessage.error(getErrorMessage(error))
   } finally {
     loading.value = false
   }
+}
+
+async function fetchAllGenerationTasks(): Promise<GenerationTask[]> {
+  const rows: GenerationTask[] = []
+  let page = 1
+  while (page <= 50) {
+    const response = await fetchGenerationTasks(props.project.id, page)
+    rows.push(...response.results)
+    if (!response.next || rows.length >= response.count) {
+      break
+    }
+    page += 1
+  }
+  return rows
 }
 
 async function fetchAllProjectDocuments(): Promise<DocumentItem[]> {
@@ -161,15 +177,41 @@ async function fetchAllProjectDocuments(): Promise<DocumentItem[]> {
 }
 
 async function refreshTasks(): Promise<void> {
-  const response = await fetchGenerationTasks(props.project.id)
-  tasks.value = response.results
+  tasks.value = await fetchAllGenerationTasks()
 }
 
-async function selectTask(task: GenerationTask): Promise<void> {
-  selectedTask.value = await fetchGenerationTask(task.id)
-  workflowEvents.value = await fetchGenerationEvents(task.id)
-  hydrateTaskDrafts()
-  configurePolling()
+async function openConversation(task: GenerationTask): Promise<void> {
+  openingTaskId.value = task.id
+  try {
+    selectedTask.value = await fetchGenerationTask(task.id)
+    workflowEvents.value = await fetchGenerationEvents(task.id)
+    hydrateTaskDrafts()
+    configurePolling()
+  } catch (error) {
+    selectedTask.value = null
+    workflowEvents.value = []
+    ElMessage.error(getErrorMessage(error))
+  } finally {
+    openingTaskId.value = null
+  }
+}
+
+function returnToConversationList(): void {
+  stopPolling()
+  selectedTask.value = null
+  workflowEvents.value = []
+  factDrafts.value = []
+  void refreshTasks().catch((error) => {
+    ElMessage.error(getErrorMessage(error))
+  })
+}
+
+function conversationTitle(task: GenerationTask): string {
+  return `四措两案编制 · ${formatDateTime(task.created_at)}`
+}
+
+async function refreshCurrentConversation(): Promise<void> {
+  await runAction(refreshSelectedTask)
 }
 
 async function refreshSelectedTask(): Promise<void> {
@@ -611,47 +653,72 @@ async function runAction(action: () => Promise<void>): Promise<void> {
 
     <div class="doc-agent__toolbar">
       <div>
-        <h2>入场资料编制（四措两案）</h2>
-        <p>选择系统中已有的项目资料，Agent提取事实；你确认后再生成、审核和导出。</p>
+        <h2 v-if="selectedTask">{{ conversationTitle(selectedTask) }}</h2>
+        <h2 v-else>{{ project.name }}的编制会话</h2>
+        <p v-if="selectedTask">查看本次会话的编制进度，并继续完成事实确认、审核或导出。</p>
+        <p v-else>历史编制按会话列出；选择一项后才会打开详细内容。</p>
       </div>
-      <div>
-        <el-button :loading="loading" @click="loadInitialData">刷新</el-button>
+      <div class="doc-agent__toolbar-actions">
+        <el-button v-if="selectedTask" @click="returnToConversationList">返回会话列表</el-button>
         <el-button
+          v-if="selectedTask"
+          :loading="actionLoading"
+          @click="refreshCurrentConversation"
+        >
+          刷新当前会话
+        </el-button>
+        <el-button v-else :loading="loading" @click="loadInitialData">刷新列表</el-button>
+        <el-button
+          v-if="!selectedTask"
           type="primary"
           :disabled="!isProjectActive || templates.length === 0"
           @click="openCreateDialog"
         >
-          新建编制任务
+          新建会话
         </el-button>
       </div>
     </div>
 
-    <el-empty v-if="!tasks.length && !loading" description="暂无四措两案编制任务" />
-    <el-table
-      v-else
-      :data="tasks"
-      highlight-current-row
-      row-key="id"
-      @current-change="(row: GenerationTask | undefined) => row && selectTask(row)"
-    >
-      <el-table-column prop="template_name" label="模板" min-width="150" />
-      <el-table-column label="状态" width="150">
-        <template #default="{ row }">
-          <el-tag :type="row.status === 'failed' ? 'danger' : row.status === 'exported' ? 'success' : 'info'">
-            {{ statusLabels[row.status as GenerationTaskStatus] }}
-          </el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column prop="progress" label="进度" width="90" />
-      <el-table-column label="创建时间" min-width="170">
-        <template #default="{ row }">{{ formatDateTime(row.created_at) }}</template>
-      </el-table-column>
-    </el-table>
+    <section v-if="!selectedTask" class="doc-agent__conversation-directory">
+      <div class="doc-agent__directory-heading">
+        <div>
+          <h3>历史会话</h3>
+          <span>{{ tasks.length }} 项</span>
+        </div>
+        <p>此处只展示会话名称和状态，不预览会话详情。</p>
+      </div>
+      <el-empty v-if="!tasks.length && !loading" description="暂无四措两案编制会话" />
+      <div v-else class="doc-agent__conversation-list" aria-label="历史编制会话">
+        <button
+          v-for="task in tasks"
+          :key="task.id"
+          class="doc-agent__conversation-item"
+          type="button"
+          :disabled="openingTaskId !== null"
+          @click="openConversation(task)"
+        >
+          <span class="doc-agent__conversation-copy">
+            <strong>{{ conversationTitle(task) }}</strong>
+            <small>{{ task.template_name || '默认四措两案模板' }}</small>
+          </span>
+          <span class="doc-agent__conversation-state">
+            <el-tag
+              size="small"
+              :type="task.status === 'failed' ? 'danger' : task.status === 'exported' ? 'success' : 'info'"
+            >
+              {{ statusLabels[task.status] }}
+            </el-tag>
+            <small v-if="openingTaskId === task.id">正在打开…</small>
+            <small v-else>{{ task.created_by_name || '当前用户' }}</small>
+          </span>
+        </button>
+      </div>
+    </section>
 
     <el-card v-if="selectedTask" class="doc-agent__task" shadow="never">
       <template #header>
         <div class="doc-agent__task-header">
-          <strong>任务 {{ selectedTask.id.slice(0, 8) }}</strong>
+          <strong>{{ conversationTitle(selectedTask) }}</strong>
           <el-tag>{{ statusLabels[selectedTask.status] }}</el-tag>
         </div>
       </template>
@@ -1034,6 +1101,108 @@ async function runAction(action: () => Promise<void>): Promise<void> {
   gap: 12px;
 }
 
+.doc-agent__toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.doc-agent__directory-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 2px 2px 10px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+}
+
+.doc-agent__directory-heading > div {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.doc-agent__directory-heading h3,
+.doc-agent__directory-heading p {
+  margin: 0;
+}
+
+.doc-agent__directory-heading span,
+.doc-agent__directory-heading p {
+  color: var(--el-text-color-secondary);
+  font-size: 13px;
+}
+
+.doc-agent__conversation-directory {
+  padding: 18px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 12px;
+  background: var(--el-bg-color);
+}
+
+.doc-agent__conversation-list {
+  display: grid;
+  gap: 6px;
+  padding-top: 8px;
+}
+
+.doc-agent__conversation-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--el-text-color-primary);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  transition: background-color 0.16s ease;
+}
+
+.doc-agent__conversation-item:hover,
+.doc-agent__conversation-item:focus-visible {
+  background: var(--el-fill-color-light);
+  outline: none;
+}
+
+.doc-agent__conversation-item:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+.doc-agent__conversation-copy,
+.doc-agent__conversation-state {
+  display: grid;
+  gap: 5px;
+}
+
+.doc-agent__conversation-copy {
+  min-width: 0;
+}
+
+.doc-agent__conversation-copy strong,
+.doc-agent__conversation-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.doc-agent__conversation-copy small,
+.doc-agent__conversation-state small {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+
+.doc-agent__conversation-state {
+  flex: 0 0 auto;
+  justify-items: end;
+}
+
 .doc-agent__toolbar h2,
 .doc-agent__toolbar p {
   margin: 0;
@@ -1135,6 +1304,22 @@ pre {
   .doc-agent__toolbar {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .doc-agent__directory-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
+@media (max-width: 640px) {
+  .doc-agent__conversation-item {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .doc-agent__conversation-state {
+    justify-items: start;
   }
 }
 </style>

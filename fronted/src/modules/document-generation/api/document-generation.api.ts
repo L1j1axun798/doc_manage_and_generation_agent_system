@@ -19,9 +19,12 @@ export async function fetchGenerationTemplates(): Promise<DocumentGenerationTemp
   return response.data
 }
 
-export async function fetchGenerationTasks(projectId: number): Promise<ApiPage<GenerationTask>> {
+export async function fetchGenerationTasks(
+  projectId: number,
+  page = 1,
+): Promise<ApiPage<GenerationTask>> {
   const response = await apiClient.get<ApiPage<GenerationTask>>(`${TASKS}/`, {
-    params: { project: projectId, ordering: '-created_at' },
+    params: { project: projectId, ordering: '-created_at', page },
   })
   return response.data
 }
