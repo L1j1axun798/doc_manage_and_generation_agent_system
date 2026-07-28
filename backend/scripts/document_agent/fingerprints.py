@@ -9,11 +9,12 @@ IMPLEMENTATION_PATHS = (
     "backend/apps/document_generation/engine/rag.py",
     "backend/apps/document_generation/engine/rendering.py",
     "backend/apps/document_generation/engine/rules.py",
+    "backend/apps/document_generation/engine/sections.py",
     "backend/apps/document_generation/engine/validation.py",
     "backend/apps/document_generation/providers/embedding.py",
     "backend/apps/document_generation/providers/llm.py",
-    "backend/apps/document_generation/prompts/section_generation/v1.md",
-    "backend/apps/document_generation/prompts/section_revision/v1.md",
+    "backend/apps/document_generation/prompts/section_generation/v2.md",
+    "backend/apps/document_generation/prompts/section_revision/v2.md",
     "backend/apps/document_generation/prompts/schema_repair/v1.md",
 )
 

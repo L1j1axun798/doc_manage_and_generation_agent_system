@@ -41,7 +41,8 @@ def validate_phase5_preparation(repository_root: Path) -> list[str]:
     checks = {
         "phase4_manifest": (
             "docs/document_agent/phase4/phase4_manifest.json",
-            freeze.get("phase4_manifest_sha256"),
+            freeze.get("current_phase4_manifest_sha256")
+            or freeze.get("phase4_manifest_sha256"),
         ),
         "knowledge_index_builder": (
             "backend/scripts/document_agent/phase3_evaluator.py",

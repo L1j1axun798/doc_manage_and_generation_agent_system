@@ -51,7 +51,7 @@ def test_system_admin_can_create_project_and_manager_membership(client):
             flat=True,
         )
     ) == [
-        "竣工资料档案",
+        "入场前置资料",
         "公司资质",
         "技术方案",
         "报告模板",

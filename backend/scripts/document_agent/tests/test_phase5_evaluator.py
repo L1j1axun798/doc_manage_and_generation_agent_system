@@ -9,6 +9,7 @@ from scripts.document_agent.phase5_evaluator import (
     EvaluationCase,
     ScoreRow,
     evaluate_phase5,
+    load_scorecard,
 )
 
 
@@ -163,19 +164,14 @@ def test_phase5_gate_rejects_incomplete_section_score_set(tmp_path) -> None:
         output_directory = _write_outputs(tmp_path, case_number)
         cases.append(_case(case_number, output_directory))
         section_codes = (
-            ENTRY_PLAN_SECTION_CODES[:-1]
-            if case_number == 1
-            else ENTRY_PLAN_SECTION_CODES
+            ENTRY_PLAN_SECTION_CODES[:-1] if case_number == 1 else ENTRY_PLAN_SECTION_CODES
         )
         scores.extend(_score(case_number, section_code) for section_code in section_codes)
 
     summary = evaluate_phase5(cases, scores, repository_root=tmp_path)
 
     assert summary["status"] == "failed"
-    assert any(
-        issue.startswith("SECTION_SCORE_SET_INVALID:B001")
-        for issue in summary["issues"]
-    )
+    assert any(issue.startswith("SECTION_SCORE_SET_INVALID:B001") for issue in summary["issues"])
 
 
 def test_phase5_gate_rejects_rag_hit_without_retrieval_evidence(tmp_path) -> None:
@@ -217,6 +213,37 @@ def test_phase5_gate_passes_three_real_reviewed_cases(tmp_path) -> None:
     assert summary["status"] == "passed"
     assert summary["evaluated_case_count"] == 3
     assert summary["time_reduction_ratio"] == 0.625
+    assert summary["time_gate_status"] == "evaluated"
+
+
+def test_phase5_gate_allows_explicit_project_owner_time_waiver(tmp_path) -> None:
+    cases = []
+    scores = []
+    for case_number in range(1, 4):
+        output_directory = _write_outputs(tmp_path, case_number)
+        cases.append(_case(case_number, output_directory))
+        for section_code in ENTRY_PLAN_SECTION_CODES:
+            score = _score(case_number, section_code)
+            scores.append(
+                ScoreRow(
+                    **{
+                        **score.__dict__,
+                        "baseline_minutes": None,
+                        "agent_assisted_minutes": None,
+                    }
+                )
+            )
+
+    summary = evaluate_phase5(
+        cases,
+        scores,
+        repository_root=tmp_path,
+        time_gate_waived=True,
+    )
+
+    assert summary["status"] == "passed"
+    assert summary["time_reduction_ratio"] is None
+    assert summary["time_gate_status"] == "waived_by_project_owner"
 
 
 def test_phase5_gate_rejects_incomplete_or_fake_evaluation(tmp_path) -> None:
@@ -256,3 +283,80 @@ def test_phase5_gate_rejects_blind_answer_as_generation_input(tmp_path) -> None:
     )
 
     assert "BLIND_ANSWER_USED_AS_INPUT:B001" in summary["issues"]
+
+
+def test_load_scorecard_accepts_excel_gb18030_csv(tmp_path) -> None:
+    path = tmp_path / "evaluation_scorecard.review.csv"
+    headers = (
+        "evaluation_version",
+        "blind_case_id",
+        "section_code",
+        "reviewer",
+        "reviewed_at",
+        "factual_accuracy",
+        "source_traceability",
+        "clause_correctness",
+        "safety_technical_completeness",
+        "current_project_consistency",
+        "professional_usability",
+        "manual_editing_effort",
+        "major_fabricated_fact",
+        "major_safety_or_technical_omission",
+        "all_numbers_have_sources",
+        "historical_entity_contamination",
+        "rag_hit_at_3",
+        "changed_character_ratio",
+        "baseline_minutes",
+        "agent_assisted_minutes",
+    )
+    row = (
+        "phase5-v1",
+        "B001",
+        "overview",
+        "技术负责人",
+        "2026-07-26 10:00",
+        "5",
+        "5",
+        "5",
+        "5",
+        "5",
+        "4",
+        "4",
+        "false",
+        "false",
+        "true",
+        "false",
+        "true",
+        "0.1",
+        "120",
+        "45",
+    )
+    path.write_bytes((",".join(headers) + "\r\n" + ",".join(row) + "\r\n").encode("gb18030"))
+
+    scorecard = load_scorecard(path)
+
+    assert len(scorecard) == 1
+    assert scorecard[0].reviewer == "技术负责人"
+
+
+def test_load_scorecard_allows_blank_timing_only_with_explicit_waiver(tmp_path) -> None:
+    path = tmp_path / "evaluation_scorecard.review.csv"
+    path.write_text(
+        (
+            "evaluation_version,blind_case_id,section_code,reviewer,reviewed_at,"
+            "factual_accuracy,source_traceability,clause_correctness,"
+            "safety_technical_completeness,current_project_consistency,"
+            "professional_usability,manual_editing_effort,major_fabricated_fact,"
+            "major_safety_or_technical_omission,all_numbers_have_sources,"
+            "historical_entity_contamination,rag_hit_at_3,changed_character_ratio,"
+            "baseline_minutes,agent_assisted_minutes\r\n"
+            "phase5-v2,B001,overview,lee,2026-07-26 18:30,5,5,5,5,5,4,4,"
+            "false,false,true,false,true,0.3,,\r\n"
+        ),
+        encoding="utf-8",
+    )
+
+    scorecard = load_scorecard(path, time_gate_waived=True)
+
+    assert scorecard[0].baseline_minutes is None
+    assert scorecard[0].agent_assisted_minutes is None

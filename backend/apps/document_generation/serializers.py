@@ -5,15 +5,29 @@ from rest_framework import serializers
 from .models import (
     BUSINESS_TYPE,
     DOCUMENT_PURPOSE,
+    ApprovalStatus,
+    ClauseBlock,
     DocumentTemplate,
     GeneratedSection,
     GenerationReview,
     GenerationSource,
     GenerationTask,
+    GenerationTraceEvent,
+    KnowledgeSection,
 )
 
 
+def document_template_display_name(template: DocumentTemplate) -> str:
+    mapped_name = template.field_mapping.get("template_name")
+    if isinstance(mapped_name, str) and mapped_name.strip():
+        return mapped_name.strip()
+    if template.client_name.strip():
+        return template.client_name.strip()
+    return template.document_version.original_filename
+
+
 class DocumentTemplateSerializer(serializers.ModelSerializer):
+    display_name = serializers.SerializerMethodField()
     document_version_id = serializers.IntegerField(read_only=True)
     filename = serializers.CharField(
         source="document_version.original_filename",
@@ -26,6 +40,7 @@ class DocumentTemplateSerializer(serializers.ModelSerializer):
             "id",
             "code",
             "client_name",
+            "display_name",
             "business_type",
             "version",
             "document_version_id",
@@ -34,6 +49,9 @@ class DocumentTemplateSerializer(serializers.ModelSerializer):
             "section_order",
             "required_fact_fields",
         ]
+
+    def get_display_name(self, obj: DocumentTemplate) -> str:
+        return document_template_display_name(obj)
 
 
 class GenerationSourceSerializer(serializers.ModelSerializer):
@@ -94,6 +112,22 @@ class GenerationReviewSerializer(serializers.ModelSerializer):
         ]
 
 
+class GenerationTraceEventSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = GenerationTraceEvent
+        fields = [
+            "sequence",
+            "stage",
+            "event_type",
+            "tool",
+            "status",
+            "title",
+            "detail",
+            "metadata",
+            "created_at",
+        ]
+
+
 class GenerationTaskSerializer(serializers.ModelSerializer):
     project_name = serializers.CharField(source="project.name", read_only=True)
     template_name = serializers.SerializerMethodField()
@@ -106,6 +140,7 @@ class GenerationTaskSerializer(serializers.ModelSerializer):
     sources = GenerationSourceSerializer(many=True, read_only=True)
     sections = GeneratedSectionSerializer(many=True, read_only=True)
     reviews = GenerationReviewSerializer(many=True, read_only=True)
+    reference_summary = serializers.SerializerMethodField()
 
     class Meta:
         model = GenerationTask
@@ -143,10 +178,31 @@ class GenerationTaskSerializer(serializers.ModelSerializer):
             "sources",
             "sections",
             "reviews",
+            "reference_summary",
         ]
 
     def get_template_name(self, obj: GenerationTask) -> str:
-        return f"{obj.template.code} {obj.template.version}"
+        return document_template_display_name(obj.template)
+
+    def get_reference_summary(self, obj: GenerationTask) -> dict[str, int]:
+        knowledge = KnowledgeSection.objects.filter(
+            business_type=obj.business_type,
+            is_active=True,
+            approval_status=ApprovalStatus.APPROVED,
+        )
+        return {
+            "project_source_files": len(obj.sources.all()),
+            "approved_rag_chunks": knowledge.count(),
+            "approved_rag_source_files": knowledge.values(
+                "source_document_version_id"
+            ).distinct().count(),
+            "approved_clause_blocks": ClauseBlock.objects.filter(
+                business_type=obj.business_type,
+                is_active=True,
+                approval_status=ApprovalStatus.APPROVED,
+            ).count(),
+            "used_rag_citations": sum(len(section.citations) for section in obj.sections.all()),
+        }
 
 
 class GenerationTaskCreateSerializer(serializers.Serializer):
@@ -166,6 +222,14 @@ class GenerationTaskCreateSerializer(serializers.Serializer):
         required=False,
         default=list,
         allow_empty=True,
+    )
+
+
+class GenerationPipelineCreateSerializer(GenerationTaskCreateSerializer):
+    document_version_ids = serializers.ListField(
+        child=serializers.IntegerField(min_value=1),
+        min_length=1,
+        max_length=50,
     )
 
 
@@ -205,3 +269,11 @@ class ReviewActionSerializer(serializers.Serializer):
 
 class ExportSerializer(serializers.Serializer):
     idempotency_key = serializers.CharField(max_length=120)
+
+
+class TraceEventQuerySerializer(serializers.Serializer):
+    after_sequence = serializers.IntegerField(
+        min_value=0,
+        required=False,
+        default=0,
+    )

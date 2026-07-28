@@ -219,6 +219,123 @@ def test_authenticated_user_can_upload_to_public_child_folder(client, tmp_path, 
 
 
 @pytest.mark.django_db
+def test_entry_material_upload_requires_project_entry_folder(client, tmp_path, settings):
+    settings.FILE_STORAGE_ROOT = tmp_path
+    admin = make_user("admin", User.Role.SYSTEM_ADMIN)
+    project = Project.objects.create(name="入场项目", code="ENTRY-001", created_by=admin)
+    entry_folder = Folder.objects.create(
+        project=project,
+        name="入场前置资料",
+        code="PUBLIC-COMPLETION",
+        created_by=admin,
+    )
+    ordinary_folder = Folder.objects.create(
+        project=project,
+        name="项目资料",
+        code="PROJECT-DOCUMENTS",
+        created_by=admin,
+    )
+    client.force_login(admin)
+
+    entry_response = client.post(
+        "/api/v1/documents/",
+        {
+            "folder": entry_folder.id,
+            "source_type": Document.SourceType.ENTRANCE_MATERIAL,
+            "file": upload_file("entry.pdf", b"entry"),
+        },
+    )
+    ordinary_to_entry_response = client.post(
+        "/api/v1/documents/",
+        {
+            "folder": entry_folder.id,
+            "file": upload_file("ordinary.pdf", b"ordinary"),
+        },
+    )
+    entry_to_ordinary_response = client.post(
+        "/api/v1/documents/",
+        {
+            "folder": ordinary_folder.id,
+            "source_type": Document.SourceType.ENTRANCE_MATERIAL,
+            "file": upload_file("wrong-entry.pdf", b"wrong"),
+        },
+    )
+
+    assert entry_response.status_code == 201
+    assert entry_response.json()["project"] == project.pk
+    assert entry_response.json()["source_type"] == Document.SourceType.ENTRANCE_MATERIAL
+    assert ordinary_to_entry_response.status_code == 400
+    assert entry_to_ordinary_response.status_code == 400
+    assert Document.objects.count() == 1
+
+
+@pytest.mark.django_db
+def test_entry_material_filter_is_project_scoped(client, tmp_path, settings):
+    settings.FILE_STORAGE_ROOT = tmp_path
+    admin = make_user("admin", User.Role.SYSTEM_ADMIN)
+    project = Project.objects.create(name="入场项目", code="ENTRY-001", created_by=admin)
+    other_project = Project.objects.create(
+        name="其他项目",
+        code="ENTRY-002",
+        created_by=admin,
+    )
+    entry_folder = Folder.objects.create(
+        project=project,
+        name="入场前置资料",
+        code="PUBLIC-COMPLETION",
+        created_by=admin,
+    )
+    other_entry_folder = Folder.objects.create(
+        project=other_project,
+        name="入场前置资料",
+        code="PUBLIC-COMPLETION",
+        created_by=admin,
+    )
+    ordinary_folder = Folder.objects.create(
+        project=project,
+        name="项目资料",
+        code="PROJECT-DOCUMENTS",
+        created_by=admin,
+    )
+    client.force_login(admin)
+
+    entry = client.post(
+        "/api/v1/documents/",
+        {
+            "folder": entry_folder.id,
+            "source_type": Document.SourceType.ENTRANCE_MATERIAL,
+            "file": upload_file("entry.pdf", b"entry"),
+        },
+    ).json()
+    client.post(
+        "/api/v1/documents/",
+        {
+            "folder": ordinary_folder.id,
+            "file": upload_file("ordinary.pdf", b"ordinary"),
+        },
+    )
+    client.post(
+        "/api/v1/documents/",
+        {
+            "folder": other_entry_folder.id,
+            "source_type": Document.SourceType.ENTRANCE_MATERIAL,
+            "file": upload_file("other-entry.pdf", b"other-entry"),
+        },
+    )
+
+    response = client.get(
+        "/api/v1/documents/",
+        {
+            "project": project.pk,
+            "source_type": Document.SourceType.ENTRANCE_MATERIAL,
+        },
+    )
+
+    assert response.status_code == 200
+    assert [item["id"] for item in response.json()["results"]] == [entry["id"]]
+
+
+@pytest.mark.django_db
 def test_upload_rejects_same_name_and_duplicate_content_in_same_folder(
     client,
     tmp_path,

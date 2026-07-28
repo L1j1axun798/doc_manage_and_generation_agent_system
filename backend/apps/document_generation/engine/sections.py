@@ -5,6 +5,9 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from .contracts import (
+    ENTRY_PLAN_SECTION_BLUEPRINTS,
+    ENTRY_PLAN_SECTION_MIN_CHARACTERS,
+    ENTRY_PLAN_SECTION_TITLES,
     ClauseSelection,
     ConfirmedFact,
     GeneratedSection,
@@ -29,9 +32,24 @@ class SectionContextBuilder:
     ) -> SectionContext:
         if retrieval.query.section_code != section_code:
             raise AgentError("SECTION_CONTEXT_INVALID", "检索结果章节与目标章节不一致")
+        title = ENTRY_PLAN_SECTION_TITLES.get(section_code, section_code)
+        topics = ENTRY_PLAN_SECTION_BLUEPRINTS.get(section_code, ())
+        minimum_characters = ENTRY_PLAN_SECTION_MIN_CHARACTERS.get(section_code)
+        quality_parts = [
+            f"编写入场四措两案的“{title}”章节",
+            "不得重复堆砌项目概况",
+        ]
+        if topics:
+            quality_parts.append(f"必须覆盖：{'；'.join(topics)}")
+        if minimum_characters is not None:
+            quality_parts.append(
+                f"写作目标不少于{minimum_characters * 5 // 4}个中文字符，"
+                f"确定性最低门禁为{minimum_characters}个中文字符"
+            )
+        quality_parts.append("资料不足时必须登记缺项，不得编造")
         return SectionContext(
             section_code=section_code,
-            objective=f"编写入场四措两案的{section_code}章节",
+            objective="质量结构要求：" + "；".join(quality_parts),
             confirmed_facts=tuple(confirmed_facts),
             risk_profile=risk_profile,
             clauses=tuple(clauses),

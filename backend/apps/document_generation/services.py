@@ -14,10 +14,12 @@ from rest_framework.exceptions import PermissionDenied
 from apps.audit.services import audit_log
 from apps.documents.models import Document, DocumentVersion
 from apps.documents.services import create_document
+from apps.folders.defaults import ENTRY_PREPARATION_ROOT_CODE
 from apps.folders.models import Folder
 from apps.projects.models import Project
 from common.storage import LocalDocumentStorage
 
+from .engine.canonical_facts import REQUIRED_FACT_LABELS, validate_required_fact_value
 from .engine.contracts import (
     FORBIDDEN_FACT_FIELD_PARTS,
     ConfirmedFact,
@@ -41,10 +43,10 @@ from .models import (
 )
 from .permissions import can_review_generation, can_use_generation
 from .selectors import visible_source_version_for_user
+from .workflow_events import TaskWorkflowRecorder
 
 TECH_SOLUTION_CODE = "PUBLIC-TECH-SOLUTION"
 BLOCKED_SOURCE_FOLDER_CODES = {
-    "PUBLIC-COMPLETION",
     "PUBLIC-REPORT-TEMPLATE",
     "PUBLIC-ARCHIVE",
 }
@@ -280,14 +282,28 @@ def add_generation_sources(
 
 def _ensure_entry_source(version: DocumentVersion) -> None:
     document = version.document
+    if document.source_type != Document.SourceType.ENTRANCE_MATERIAL:
+        raise DocumentGenerationError(
+            "SOURCE_PURPOSE_MISMATCH",
+            "只能选择当前项目“入场前置资料”中的文件",
+        )
+
     folder: Folder | None = document.folder
+    is_entry_preparation_folder = False
     while folder is not None:
+        if folder.code == ENTRY_PREPARATION_ROOT_CODE:
+            is_entry_preparation_folder = True
         if folder.code in BLOCKED_SOURCE_FOLDER_CODES or folder.code.startswith("PROJECT-ARCHIVE-"):
             raise DocumentGenerationError(
                 "SOURCE_PURPOSE_MISMATCH",
                 "报告模板、竣工资料或归档资料不能作为四措两案生成来源",
             )
         folder = folder.parent
+    if not is_entry_preparation_folder:
+        raise DocumentGenerationError(
+            "SOURCE_PURPOSE_MISMATCH",
+            "入场前置资料的目录归属不正确",
+        )
     names = f"{document.title} {version.original_filename}"
     if any(marker in names for marker in BLOCKED_SOURCE_MARKERS):
         raise DocumentGenerationError(
@@ -318,6 +334,14 @@ def prepare_fact_confirmation(
         locked.operation = GenerationTask.Operation.EXTRACT
         locked.progress = 10
         locked.save(update_fields=["status", "operation", "progress", "updated_at"])
+        source_count = locked.sources.count()
+        TaskWorkflowRecorder(str(locked.pk)).emit(
+            stage="initialized",
+            tool="queue_fact_extraction",
+            status="succeeded",
+            detail=f"已选择{source_count}份当前项目入场前置资料",
+            metadata={"source_count": source_count},
+        )
         transaction.on_commit(lambda: queue_generation_task(str(locked.pk)))
         audit_log(
             user=actor,
@@ -329,6 +353,46 @@ def prepare_fact_confirmation(
             after_data=_task_snapshot(locked),
         )
     return locked
+
+
+@transaction.atomic
+def start_compilation_pipeline(
+    *,
+    actor: Any,
+    project: Project,
+    template: DocumentTemplate,
+    document_version_ids: list[int],
+    document_purpose: str,
+    business_type: str,
+    idempotency_key: str,
+    initial_facts: list[dict[str, Any]],
+    request: Any = None,
+) -> tuple[GenerationTask, bool]:
+    """Create, bind sources and queue extraction as one database operation."""
+    task, created = create_generation_task(
+        actor=actor,
+        project=project,
+        template=template,
+        document_purpose=document_purpose,
+        business_type=business_type,
+        idempotency_key=idempotency_key,
+        initial_facts=initial_facts,
+        request=request,
+    )
+    if not created and task.status != GenerationTask.Status.DRAFT:
+        return task, False
+    task = add_generation_sources(
+        actor=actor,
+        task=task,
+        document_version_ids=document_version_ids,
+        request=request,
+    )
+    prepared = prepare_fact_confirmation(
+        actor=actor,
+        task=task,
+        request=request,
+    )
+    return prepared, created
 
 
 @transaction.atomic
@@ -378,9 +442,21 @@ def confirm_generation_facts(
     fields = {fact.field for fact in confirmed}
     missing = [field for field in locked.template.required_fact_fields if field not in fields]
     if missing:
+        missing_labels = [REQUIRED_FACT_LABELS.get(field, field) for field in missing]
         raise DocumentGenerationError(
             "FACTS_INCOMPLETE",
-            f"缺少必填事实：{', '.join(missing)}",
+            f"缺少必填事实：{'、'.join(missing_labels)}",
+        )
+    invalid_messages = [
+        message
+        for fact in confirmed
+        if fact.field in locked.template.required_fact_fields
+        if (message := validate_required_fact_value(fact.field, fact.value)) is not None
+    ]
+    if invalid_messages:
+        raise DocumentGenerationError(
+            "FACTS_INVALID",
+            "；".join(invalid_messages),
         )
     before = _task_snapshot(locked)
     locked.facts_snapshot = [fact.model_dump(mode="json") for fact in confirmed]
@@ -417,6 +493,27 @@ def confirm_generation_facts(
         after_data=_task_snapshot(locked),
     )
     return locked
+
+
+@transaction.atomic
+def confirm_and_request_generation(
+    *,
+    actor: Any,
+    task: GenerationTask,
+    facts: list[dict[str, Any]],
+    request: Any = None,
+) -> GenerationTask:
+    confirmed = confirm_generation_facts(
+        actor=actor,
+        task=task,
+        facts=facts,
+        request=request,
+    )
+    return request_generation(
+        actor=actor,
+        task=confirmed,
+        request=request,
+    )
 
 
 def _risk_profile_from_facts(facts: list[ConfirmedFact]) -> dict[str, Any]:
@@ -462,6 +559,7 @@ def request_generation(
         locked.status = GenerationTask.Status.QUEUED
         locked.operation = GenerationTask.Operation.GENERATE
         locked.progress = 35
+        locked.completed_at = None
         locked.error_code = ""
         locked.error_message = ""
         locked.save(
@@ -469,6 +567,7 @@ def request_generation(
                 "status",
                 "operation",
                 "progress",
+                "completed_at",
                 "error_code",
                 "error_message",
                 "updated_at",
@@ -516,12 +615,14 @@ def retry_generation_task(
             else GenerationTask.Status.QUEUED
         )
         locked.progress = 10 if locked.operation == GenerationTask.Operation.EXTRACT else 35
+        locked.completed_at = None
         locked.error_code = ""
         locked.error_message = ""
         locked.save(
             update_fields=[
                 "status",
                 "progress",
+                "completed_at",
                 "error_code",
                 "error_message",
                 "updated_at",
@@ -696,6 +797,49 @@ def request_section_regeneration(
 
 
 @transaction.atomic
+def lock_all_valid_sections(
+    *,
+    actor: Any,
+    task: GenerationTask,
+    request: Any = None,
+) -> GenerationTask:
+    locked = GenerationTask.objects.select_for_update().select_related("project").get(pk=task.pk)
+    _ensure_task_user(actor, locked)
+    _ensure_status(locked, {GenerationTask.Status.REVIEW_REQUIRED})
+    sections = list(locked.sections.select_for_update())
+    blocking = [
+        section.title
+        for section in sections
+        if any(
+            isinstance(issue, dict) and issue.get("severity") == "error"
+            for issue in section.validation_issues
+        )
+    ]
+    if blocking:
+        raise DocumentGenerationError(
+            "SECTION_VALIDATION_FAILED",
+            f"以下章节仍有阻断错误：{'、'.join(blocking)}",
+            status_code=409,
+        )
+    GeneratedSection.objects.filter(task=locked).update(is_locked=True)
+    GenerationReview.objects.create(
+        task=locked,
+        action=GenerationReview.Action.SECTION_LOCKED,
+        actor=actor,
+        metadata={"section_codes": [section.section_code for section in sections]},
+    )
+    audit_log(
+        user=actor,
+        action="document_generation.sections.lock_all",
+        resource=locked,
+        result="success",
+        request=request,
+        after_data={"section_count": len(sections)},
+    )
+    return locked
+
+
+@transaction.atomic
 def submit_generation_review(
     *,
     actor: Any,
@@ -703,9 +847,24 @@ def submit_generation_review(
     comment: str = "",
     request: Any = None,
 ) -> GenerationTask:
-    locked = GenerationTask.objects.select_for_update().select_related("project").get(pk=task.pk)
+    locked = (
+        GenerationTask.objects.select_for_update()
+        .select_related("project", "template")
+        .get(pk=task.pk)
+    )
     _ensure_task_user(actor, locked)
+    _ensure_active_project(locked.project)
     _ensure_status(locked, {GenerationTask.Status.REVIEW_REQUIRED})
+    sections = list(locked.sections.all())
+    expected = set(locked.template.section_order)
+    actual = {section.section_code for section in sections}
+    if expected != actual or any(not section.is_locked for section in sections):
+        raise DocumentGenerationError(
+            "REVIEW_INCOMPLETE",
+            "请先确认并锁定全部章节，再提交技术负责人批准",
+        )
+    locked.status = GenerationTask.Status.PENDING_APPROVAL
+    locked.save(update_fields=["status", "updated_at"])
     GenerationReview.objects.create(
         task=locked,
         action=GenerationReview.Action.SUBMITTED,
@@ -738,7 +897,7 @@ def approve_generation_task(
     )
     _ensure_review_user(actor, locked)
     _ensure_active_project(locked.project)
-    _ensure_status(locked, {GenerationTask.Status.REVIEW_REQUIRED})
+    _ensure_status(locked, {GenerationTask.Status.PENDING_APPROVAL})
     sections = list(locked.sections.all())
     expected = set(locked.template.section_order)
     actual = {section.section_code for section in sections}

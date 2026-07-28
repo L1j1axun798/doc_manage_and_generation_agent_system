@@ -73,6 +73,13 @@ class FactMergeService:
         merged: list[MergedFactCandidate] = []
         conflicts: list[FactConflict] = []
         for field in sorted(grouped):
+            if field in {
+                "inspection_component_codes",
+                "inspection_method_codes",
+                "risk_evidence_items",
+            }:
+                merged.append(self._merge_multi_value_field(field, grouped[field]))
+                continue
             by_value: dict[str, list[FactCandidate]] = defaultdict(list)
             for candidate in grouped[field]:
                 key = f"{candidate.value_type}:{_canonical_json(candidate.value)}"
@@ -91,6 +98,54 @@ class FactMergeService:
             merged=tuple(merged),
             conflicts=tuple(conflicts),
             rejected=tuple(rejected),
+        )
+
+    @staticmethod
+    def _merge_multi_value_field(
+        field: str,
+        candidates: Sequence[FactCandidate],
+    ) -> MergedFactCandidate:
+        evidence_by_key: dict[str, FactEvidence] = {}
+        values_by_key: dict[str, JsonValue] = {}
+        risk_evidence: dict[str, list[str]] = defaultdict(list)
+        for candidate in candidates:
+            evidence = FactEvidence(
+                source_document_version_id=candidate.source_document_version_id,
+                locator=candidate.locator,
+                confidence=candidate.confidence,
+            )
+            evidence_by_key.setdefault(
+                f"{candidate.source_document_version_id}:{candidate.locator.model_dump_json()}",
+                evidence,
+            )
+            if not isinstance(candidate.value, list):
+                continue
+            for value in candidate.value:
+                if field == "risk_evidence_items" and isinstance(value, dict):
+                    risk_code = str(value.get("risk_code", "")).strip()
+                    explanation = str(value.get("evidence", "")).strip()
+                    if risk_code and explanation and explanation not in risk_evidence[risk_code]:
+                        risk_evidence[risk_code].append(explanation)
+                    continue
+                values_by_key.setdefault(_canonical_json(value), value)
+        merged_value: list[JsonValue]
+        if field == "risk_evidence_items":
+            merged_value = [
+                {
+                    "risk_code": risk_code,
+                    "evidence": "；".join(risk_evidence[risk_code]),
+                }
+                for risk_code in sorted(risk_evidence)
+            ]
+        else:
+            merged_value = [values_by_key[key] for key in sorted(values_by_key)]
+        first = candidates[0]
+        return MergedFactCandidate(
+            field=field,
+            value=merged_value,
+            value_type=first.value_type,
+            evidence=tuple(evidence_by_key[key] for key in sorted(evidence_by_key)),
+            confidence=max(candidate.confidence for candidate in candidates),
         )
 
     @staticmethod

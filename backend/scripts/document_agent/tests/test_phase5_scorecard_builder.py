@@ -70,4 +70,7 @@ def test_review_scorecard_builder_prefills_only_objective_review_context(tmp_pat
     assert [row["section_code"] for row in rows] == list(ENTRY_PLAN_SECTION_CODES)
     assert rows[0]["retrieved_reference_count"] == "1"
     assert rows[0]["factual_accuracy"] == ""
-    assert rows[0]["major_fabricated_fact"] == "false"
+    assert rows[0]["major_fabricated_fact"] == ""
+    assert rows[0]["major_safety_or_technical_omission"] == ""
+    assert rows[0]["all_numbers_have_sources"] == ""
+    assert rows[0]["historical_entity_contamination"] == ""

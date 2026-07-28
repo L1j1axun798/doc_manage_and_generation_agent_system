@@ -14,6 +14,7 @@ Phase 7 已接入单一 `document-generation` RQ 队列。Web 请求只落库并
 - Redis 不可用时只把当前生成任务标记为失败，原资料管理系统继续工作；
 - Worker 启动命令先恢复遗留的 `extracting`、`queued` 和超时 `generating` 任务。
 - `run_document_generation_worker --burst` 可在部署前验证真实Redis连接和Worker启动，
+  该命令在 Windows 自动使用 `SimpleWorker`，并启用调度器处理延迟重试；
   处理完当前队列后正常退出。
 
 LLM和Embedding适配器也有独立的限时与有上限瞬时故障重试；Embedding按服务限制每批

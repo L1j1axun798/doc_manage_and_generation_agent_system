@@ -3,10 +3,8 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
-import { featureFlags } from '@/config/feature-flags'
 import { getErrorMessage } from '@/core/http/error-normalizer'
 import { useAuthStore } from '@/modules/auth/stores/auth.store'
-import DocumentGenerationPanel from '@/modules/document-generation/components/DocumentGenerationPanel.vue'
 import DocumentExplorer from '@/modules/documents/components/DocumentExplorer.vue'
 import { formatDateTime } from '@/shared/utils/format'
 import {
@@ -241,15 +239,12 @@ async function deleteCurrentProject(): Promise<void> {
       </el-tab-pane>
 
       <el-tab-pane label="项目资料" name="documents">
-        <DocumentExplorer :project-id="project.id" scope="project" :show-folder-navigation="false" />
-      </el-tab-pane>
-
-      <el-tab-pane
-        v-if="featureFlags.documentAgent"
-        label="入场资料编制（四措两案）"
-        name="document-generation"
-      >
-        <DocumentGenerationPanel :project="project" />
+        <DocumentExplorer
+          :project-id="project.id"
+          scope="project"
+          :show-folder-navigation="false"
+          :excluded-mutation-folder-codes="['PUBLIC-COMPLETION']"
+        />
       </el-tab-pane>
 
       <el-tab-pane label="归档信息" name="archive">

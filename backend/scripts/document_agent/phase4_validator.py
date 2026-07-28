@@ -31,15 +31,15 @@ def validate_phase4(repository_root: Path) -> list[str]:
     freeze = manifest.get("freeze", {})
     checks = {
         "fact_extraction_prompt": (
-            "backend/apps/document_generation/prompts/fact_extraction/v1.md",
+            "backend/apps/document_generation/prompts/fact_extraction/v2.md",
             freeze.get("fact_extraction_prompt", {}).get("sha256"),
         ),
         "section_generation_prompt": (
-            "backend/apps/document_generation/prompts/section_generation/v1.md",
+            "backend/apps/document_generation/prompts/section_generation/v2.md",
             freeze.get("section_generation_prompt", {}).get("sha256"),
         ),
         "section_revision_prompt": (
-            "backend/apps/document_generation/prompts/section_revision/v1.md",
+            "backend/apps/document_generation/prompts/section_revision/v2.md",
             freeze.get("section_revision_prompt", {}).get("sha256"),
         ),
         "schema_repair_prompt": (
@@ -89,6 +89,10 @@ def validate_phase4(repository_root: Path) -> list[str]:
         "facts_implementation": (
             "backend/apps/document_generation/engine/facts.py",
             freeze.get("facts_implementation_sha256"),
+        ),
+        "canonical_facts_implementation": (
+            "backend/apps/document_generation/engine/canonical_facts.py",
+            freeze.get("canonical_facts_implementation_sha256"),
         ),
         "parsing_implementation": (
             "backend/apps/document_generation/engine/parsing.py",

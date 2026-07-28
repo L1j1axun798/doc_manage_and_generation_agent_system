@@ -1,9 +1,9 @@
 evaluation_version,blind_case_id,answer_sample_id,input_json_path,output_directory,input_bundle_status,generation_provider,generation_status,review_status,notes
-phase5-v1,B001,S009,docs/document_agent/phase5/private/B001/input.json,docs/document_agent/phase5/private/B001/output,ready,real,completed,not_started,妙香山合同及脱敏后的人员设备资料已完成真实模型生成；确定性校验和实现指纹通过；盲测答案未作为输入
-phase5-v1,B002,S010,,,awaiting_input,,not_started,not_started,盲测答案仅供独立评审；不得作为生成输入
-phase5-v1,B003,S011,,,awaiting_input,,not_started,not_started,盲测答案仅供独立评审；不得作为生成输入
-phase5-v1,B004,S012,,,awaiting_input,,not_started,not_started,盲测答案仅供独立评审；不得作为生成输入
-phase5-v1,B005,S015,docs/document_agent/phase5/private/B005/input.json,docs/document_agent/phase5/private/B005/output,ready,real,completed,not_started,19台塔筒部件超声波检测委托单已完成真实模型生成；确定性校验和实现指纹通过；盲测答案未作为输入
-phase5-v1,B006,S016,,,awaiting_input,,not_started,not_started,盲测答案仅供独立评审；不得作为生成输入
-phase5-v1,B007,S017,,,awaiting_input,,not_started,not_started,盲测答案仅供独立评审；不得作为生成输入
-phase5-v1,B008,S018,docs/document_agent/phase5/private/B008/input.json,docs/document_agent/phase5/private/B008/output,ready,real,completed,not_started,天镇10号机组叶片螺栓探伤合同已完成真实模型生成；确定性校验和实现指纹通过；盲测答案未作为输入
+phase5-v2,B001,S009,docs/document_agent/phase5/private/B001/input.json,docs/document_agent/phase5/private/B001/output-v2,ready,real,completed,completed,qwen3.6-plus新版已完成8章真实生成；有效字符18021；A4纵向；确定性校验、事实引用和实现指纹通过；盲测答案未作为输入；phase5-v2技术负责人评审完成
+phase5-v2,B002,S010,,,awaiting_input,,not_started,not_started,盲测答案仅供独立评审；不得作为生成输入
+phase5-v2,B003,S011,,,awaiting_input,,not_started,not_started,盲测答案仅供独立评审；不得作为生成输入
+phase5-v2,B004,S012,,,awaiting_input,,not_started,not_started,盲测答案仅供独立评审；不得作为生成输入
+phase5-v2,B005,S015,docs/document_agent/phase5/private/B005/input.json,docs/document_agent/phase5/private/B005/output-v2,ready,real,completed,completed,qwen3.6-plus新版已完成8章真实生成；有效字符21608；A4纵向；确定性校验、事实引用和实现指纹通过；盲测答案未作为输入；phase5-v2技术负责人评审完成
+phase5-v2,B006,S016,,,awaiting_input,,not_started,not_started,盲测答案仅供独立评审；不得作为生成输入
+phase5-v2,B007,S017,,,awaiting_input,,not_started,not_started,盲测答案仅供独立评审；不得作为生成输入
+phase5-v2,B008,S018,docs/document_agent/phase5/private/B008/input.json,docs/document_agent/phase5/private/B008/output-v2,ready,real,completed,completed,qwen3.6-plus新版已完成8章真实生成；有效字符21262；A4纵向；确定性校验、事实引用和实现指纹通过；盲测答案未作为输入；phase5-v2技术负责人评审完成

@@ -7,6 +7,8 @@ from collections.abc import Sequence
 from hashlib import sha256
 
 from .contracts import (
+    ENTRY_PLAN_SECTION_BLUEPRINTS,
+    ENTRY_PLAN_SECTION_MIN_CHARACTERS,
     ClauseSelection,
     ConfirmedFact,
     FactCandidate,
@@ -38,6 +40,7 @@ DEFAULT_SECTION_TITLES = {
     "emergency_plan": "应急预案",
     "environmental_measures": "环境保护措施",
 }
+_CHINESE_ORDINALS = ("一", "二", "三", "四", "五", "六", "七", "八")
 
 
 class FakeSourceParser:
@@ -95,6 +98,24 @@ class FakeLLMProvider:
         fact_summary = "；".join(
             f"计划{fact.field}={fact.value}" for fact in context.confirmed_facts
         )
+        paragraphs = [f"计划内容：{fact_summary}"]
+        topics = ENTRY_PLAN_SECTION_BLUEPRINTS.get(context.section_code, ())
+        minimum_characters = ENTRY_PLAN_SECTION_MIN_CHARACTERS.get(
+            context.section_code,
+            0,
+        )
+        if topics:
+            target_per_topic = minimum_characters // len(topics) + 80
+            for index, topic in enumerate(topics):
+                paragraphs.append(f"（{_CHINESE_ORDINALS[index]}）{topic}")
+                sentence = (
+                    f"围绕{topic}，本节按入场前计划明确责任分工、作业准备、"
+                    "过程检查、协同确认和记录留存要求，相关事项须在现场作业开始前核实。"
+                )
+                paragraphs.append(
+                    (sentence * (target_per_topic // len(sentence) + 1))[:target_per_topic]
+                )
+        paragraphs.extend(clause.text for clause in context.clauses)
         reference_citations = tuple(
             SourceCitation(
                 source_document_version_id=reference.source_document_version_id,
@@ -114,10 +135,7 @@ class FakeLLMProvider:
         return GeneratedSection(
             section_code=context.section_code,
             title=self._section_titles.get(context.section_code, context.section_code),
-            paragraphs=(
-                f"计划内容：{fact_summary}",
-                *(clause.text for clause in context.clauses),
-            ),
+            paragraphs=tuple(paragraphs),
             citations=(*fact_citations, *reference_citations),
             used_fact_fields=tuple(fact.field for fact in context.confirmed_facts),
             used_clause_ids=tuple(clause.clause_id for clause in context.clauses),
@@ -234,6 +252,15 @@ class BasicSectionValidator:
         context: SectionContext,
     ) -> Sequence[ValidationIssue]:
         issues: list[ValidationIssue] = []
+        if not section.paragraphs and not section.lists and not section.tables:
+            issues.append(
+                ValidationIssue(
+                    code="SECTION_CONTENT_EMPTY",
+                    message="生成章节没有正文内容",
+                    severity=ValidationSeverity.ERROR,
+                    section_code=context.section_code,
+                )
+            )
         if section.section_code != context.section_code:
             issues.append(
                 ValidationIssue(

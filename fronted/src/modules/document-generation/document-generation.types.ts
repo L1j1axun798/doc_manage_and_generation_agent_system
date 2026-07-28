@@ -9,6 +9,7 @@ export type GenerationTaskStatus =
   | 'queued'
   | 'generating'
   | 'review_required'
+  | 'pending_approval'
   | 'approved'
   | 'exported'
   | 'failed'
@@ -50,6 +51,7 @@ export interface DocumentGenerationTemplate {
   id: number
   code: string
   client_name: string
+  display_name: string
   business_type: typeof BUSINESS_TYPE
   version: string
   document_version_id: number
@@ -97,6 +99,29 @@ export interface GenerationReview {
   created_at: string
 }
 
+export type GenerationTraceEventType = 'system' | 'tool' | 'model' | 'rag'
+export type GenerationTraceStatus = 'started' | 'succeeded' | 'failed' | 'skipped'
+
+export interface GenerationTraceEvent {
+  sequence: number
+  stage: string
+  event_type: GenerationTraceEventType
+  tool: string
+  status: GenerationTraceStatus
+  title: string
+  detail: string
+  metadata: Record<string, unknown>
+  created_at: string
+}
+
+export interface GenerationReferenceSummary {
+  project_source_files: number
+  approved_rag_chunks: number
+  approved_rag_source_files: number
+  approved_clause_blocks: number
+  used_rag_citations: number
+}
+
 export interface GenerationTask {
   id: string
   project_id: number
@@ -131,6 +156,7 @@ export interface GenerationTask {
   sources: GenerationSource[]
   sections: GeneratedSection[]
   reviews: GenerationReview[]
+  reference_summary: GenerationReferenceSummary
 }
 
 export interface CreateGenerationTaskPayload {
@@ -144,4 +170,8 @@ export interface CreateGenerationTaskPayload {
     value: unknown
     value_type: string
   }>
+}
+
+export interface CreateGenerationPipelinePayload extends CreateGenerationTaskPayload {
+  document_version_ids: number[]
 }

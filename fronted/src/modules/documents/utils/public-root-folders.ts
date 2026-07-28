@@ -2,7 +2,7 @@ import type { FolderTreeNode } from '../documents.types'
 
 export type PublicRootFolderKey =
   | 'archive'
-  | 'completion'
+  | 'entryPreparation'
   | 'company'
   | 'technicalSolution'
   | 'reportTemplate'
@@ -32,9 +32,9 @@ const ARCHIVE_ROOT_DEFINITION: PublicRootFolderDefinition = {
 
 export const PUBLIC_ROOT_FOLDER_DEFINITIONS: PublicRootFolderDefinition[] = [
   {
-    key: 'completion',
-    label: '竣工资料档案',
-    matches: ['竣工', '完工', '档案'],
+    key: 'entryPreparation',
+    label: '入场前置资料',
+    matches: ['入场前置资料', '竣工资料档案', '竣工档案资料', '完工资料档案', '完工资料'],
   },
   {
     key: 'company',

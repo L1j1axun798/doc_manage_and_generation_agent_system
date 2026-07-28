@@ -21,6 +21,7 @@ from ..models import (
     GeneratedSection,
     GenerationReview,
     GenerationTask,
+    GenerationTraceEvent,
 )
 
 User = get_user_model()
@@ -54,6 +55,7 @@ def create_stored_version(
     title: str,
     filename: str,
     content: bytes,
+    source_type: str = Document.SourceType.PROJECT_UPLOAD,
 ) -> DocumentVersion:
     storage = LocalDocumentStorage(root=root)
     stored = storage.save_uploaded_file(
@@ -63,6 +65,7 @@ def create_stored_version(
         project=project,
         folder=folder,
         title=title,
+        source_type=source_type,
         created_by=actor,
     )
     version = DocumentVersion.objects.create(
@@ -103,6 +106,12 @@ def setup_generation_case(tmp_path):
         code="PUBLIC-TECH-SOLUTION",
         created_by=admin,
     )
+    entry_folder = Folder.objects.create(
+        project=project,
+        name="入场前置资料",
+        code="PUBLIC-COMPLETION",
+        created_by=admin,
+    )
     report_folder = Folder.objects.create(
         project=project,
         name="报告模板",
@@ -122,10 +131,11 @@ def setup_generation_case(tmp_path):
         root=tmp_path,
         actor=manager,
         project=project,
-        folder=technical_folder,
+        folder=entry_folder,
         title="入场任务通知",
         filename="entry-notice.docx",
         content=docx_bytes("项目名称：风场入场项目", "计划检测数量：12"),
+        source_type=Document.SourceType.ENTRANCE_MATERIAL,
     )
     report_version = create_stored_version(
         root=tmp_path,
@@ -156,6 +166,7 @@ def setup_generation_case(tmp_path):
         "source_version": source_version,
         "report_version": report_version,
         "technical_folder": technical_folder,
+        "entry_folder": entry_folder,
     }
 
 
@@ -178,6 +189,51 @@ def create_task_via_api(client, case):
     )
     assert response.status_code == 201
     return GenerationTask.objects.get(pk=response.json()["id"])
+
+
+@pytest.mark.django_db(transaction=True)
+def test_pipeline_endpoint_atomically_creates_sources_and_queues_extraction(
+    client,
+    tmp_path,
+    monkeypatch,
+):
+    case = setup_generation_case(tmp_path)
+    client.force_login(case["manager"])
+    queued_ids: list[str] = []
+    monkeypatch.setattr(
+        "apps.document_generation.queues.queue_generation_task",
+        lambda task_id: queued_ids.append(task_id),
+    )
+
+    response = client.post(
+        "/api/v1/document-generation/tasks/pipeline/",
+        {
+            "project_id": case["project"].pk,
+            "template_id": case["template"].pk,
+            "idempotency_key": "pipeline-001",
+            "document_version_ids": [case["source_version"].pk],
+            "facts": [
+                {
+                    "field": "project_name",
+                    "value": "风场入场项目",
+                    "value_type": "string",
+                }
+            ],
+        },
+        content_type="application/json",
+    )
+
+    task = GenerationTask.objects.get(pk=response.json()["id"])
+    assert response.status_code == 202
+    assert task.status == GenerationTask.Status.EXTRACTING
+    assert list(task.sources.values_list("document_version_id", flat=True)) == [
+        case["source_version"].pk
+    ]
+    assert queued_ids == [str(task.pk)]
+    assert GenerationTraceEvent.objects.filter(
+        task=task,
+        tool="queue_fact_extraction",
+    ).exists()
 
 
 @pytest.mark.django_db
@@ -255,6 +311,59 @@ def test_viewer_cannot_create_and_report_source_is_rejected(client, tmp_path):
     assert blocked.json()["code"] == "SOURCE_PURPOSE_MISMATCH"
 
 
+@pytest.mark.django_db
+def test_ordinary_and_other_project_documents_cannot_be_added_as_sources(client, tmp_path):
+    case = setup_generation_case(tmp_path)
+    ordinary_version = create_stored_version(
+        root=tmp_path,
+        actor=case["admin"],
+        project=case["project"],
+        folder=case["technical_folder"],
+        title="普通项目通知",
+        filename="ordinary-notice.docx",
+        content=docx_bytes("普通项目资料"),
+    )
+    other_project = Project.objects.create(
+        name="其他项目",
+        code="ENTRY-002",
+        created_by=case["admin"],
+    )
+    other_entry_folder = Folder.objects.create(
+        project=other_project,
+        name="入场前置资料",
+        code="PUBLIC-COMPLETION",
+        created_by=case["admin"],
+    )
+    other_entry_version = create_stored_version(
+        root=tmp_path,
+        actor=case["admin"],
+        project=other_project,
+        folder=other_entry_folder,
+        title="其他项目入场资料",
+        filename="other-entry.docx",
+        content=docx_bytes("其他项目"),
+        source_type=Document.SourceType.ENTRANCE_MATERIAL,
+    )
+    client.force_login(case["admin"])
+    task = create_task_via_api(client, case)
+
+    ordinary_response = client.post(
+        f"/api/v1/document-generation/tasks/{task.pk}/sources/",
+        {"document_version_ids": [ordinary_version.pk]},
+        content_type="application/json",
+    )
+    other_project_response = client.post(
+        f"/api/v1/document-generation/tasks/{task.pk}/sources/",
+        {"document_version_ids": [other_entry_version.pk]},
+        content_type="application/json",
+    )
+
+    assert ordinary_response.status_code == 400
+    assert ordinary_response.json()["code"] == "SOURCE_PURPOSE_MISMATCH"
+    assert other_project_response.status_code == 403
+    assert task.sources.count() == 0
+
+
 @pytest.mark.django_db(transaction=True)
 def test_full_generation_review_and_export_workflow(client, tmp_path, monkeypatch):
     case = setup_generation_case(tmp_path)
@@ -320,12 +429,18 @@ def test_full_generation_review_and_export_workflow(client, tmp_path, monkeypatc
     section = GeneratedSection.objects.get(task=task, section_code="overview")
     assert task.status == GenerationTask.Status.REVIEW_REQUIRED
     assert task.generation_attempts == 2
+    assert task.prompt_version == "section_generation/v2"
     assert section.content
     assert (tmp_path / task.draft_storage_path).is_file()
 
     lock_response = client.post(
         f"/api/v1/document-generation/tasks/{task.pk}/sections/overview/lock/",
         {"locked": True},
+        content_type="application/json",
+    )
+    submit_response = client.post(
+        f"/api/v1/document-generation/tasks/{task.pk}/submit-review/",
+        {"comment": "编制人员已复核"},
         content_type="application/json",
     )
     approve_response = client.post(
@@ -348,6 +463,8 @@ def test_full_generation_review_and_export_workflow(client, tmp_path, monkeypatc
     output = task.output_document_version.document
 
     assert lock_response.status_code == 200
+    assert submit_response.status_code == 200
+    assert submit_response.json()["status"] == GenerationTask.Status.PENDING_APPROVAL
     assert approve_response.status_code == 200
     assert export_response.status_code == 200
     assert repeated_export.status_code == 200
@@ -362,6 +479,13 @@ def test_full_generation_review_and_export_workflow(client, tmp_path, monkeypatc
         ).count()
         == 1
     )
+    events_response = client.get(
+        f"/api/v1/document-generation/tasks/{task.pk}/events/",
+        {"after_sequence": 0},
+    )
+    assert events_response.status_code == 200
+    assert any(event["event_type"] == "rag" for event in events_response.json())
+    assert any(event["tool"] == "render_word_document" for event in events_response.json())
 
 
 @pytest.mark.django_db

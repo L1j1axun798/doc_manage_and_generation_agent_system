@@ -183,15 +183,21 @@ def validate_phase8(root: Path) -> list[str]:
         "fronted/src/modules/document-generation/components/DocumentGenerationPanel.vue",
         [
             "不生成检测报告、实测结论或完工报告",
-            "这里不会新增合同上传入口",
+            "只读取当前项目且你有权查看的入场前置资料",
             "逐章人工审核",
         ],
         issues,
     )
     _require_text(
         root,
-        "fronted/src/modules/projects/pages/ProjectDetailPage.vue",
-        ["入场资料编制（四措两案）", "featureFlags.documentAgent"],
+        "fronted/src/modules/document-generation/pages/DocumentGenerationPage.vue",
+        ["DocumentGenerationPanel", "project.name", "project.code"],
+        issues,
+    )
+    _require_text(
+        root,
+        "fronted/src/core/router/menu-builder.ts",
+        ["featureFlags.documentAgent", "/document-generation"],
         issues,
     )
     return issues

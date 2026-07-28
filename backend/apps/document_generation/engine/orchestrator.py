@@ -49,10 +49,17 @@ T = TypeVar("T")
 
 
 class _TraceBuilder:
-    def __init__(self, request: GenerationRequest, llm_alias: str, embedding_alias: str) -> None:
+    def __init__(
+        self,
+        request: GenerationRequest,
+        llm_alias: str,
+        embedding_alias: str,
+        event_sink: Callable[[TraceEvent], None] | None = None,
+    ) -> None:
         self.request = request
         self.llm_alias = llm_alias
         self.embedding_alias = embedding_alias
+        self.event_sink = event_sink
         self.events: list[TraceEvent] = []
 
     def add(
@@ -62,28 +69,46 @@ class _TraceBuilder:
         status: TraceStatus,
         detail: str | None = None,
     ) -> None:
-        self.events.append(
-            TraceEvent(
-                sequence=len(self.events) + 1,
-                stage=stage,
-                tool=tool,
-                status=status,
-                detail=detail,
-            )
+        event = TraceEvent(
+            sequence=len(self.events) + 1,
+            stage=stage,
+            tool=tool,
+            status=status,
+            detail=detail,
         )
+        self.events.append(event)
+        if self.event_sink is not None:
+            self.event_sink(event)
 
     def invoke(
         self,
         stage: WorkflowStage,
         tool: str,
         function: Callable[[], T],
+        *,
+        detail: str | None = None,
     ) -> T:
+        if self.event_sink is not None:
+            self.event_sink(
+                TraceEvent(
+                    sequence=len(self.events) + 1,
+                    stage=stage,
+                    tool=tool,
+                    status=TraceStatus.STARTED,
+                    detail=detail,
+                )
+            )
         try:
             result = function()
         except Exception as exc:
-            self.add(stage, tool, TraceStatus.FAILED, type(exc).__name__)
+            failed_detail = (
+                f"{detail}:{type(exc).__name__}"
+                if detail
+                else type(exc).__name__
+            )
+            self.add(stage, tool, TraceStatus.FAILED, failed_detail)
             raise
-        self.add(stage, tool, TraceStatus.SUCCEEDED)
+        self.add(stage, tool, TraceStatus.SUCCEEDED, detail)
         return result
 
     def build(self) -> GenerationTrace:
@@ -111,6 +136,7 @@ class GenerationOrchestrator:
         storage: ArtifactStorage,
         section_repository: SectionRepository | None = None,
         context_builder: SectionContextBuilder | None = None,
+        event_sink: Callable[[TraceEvent], None] | None = None,
     ) -> None:
         self.parser = parser
         self.llm_provider = llm_provider
@@ -122,6 +148,7 @@ class GenerationOrchestrator:
         self.storage = storage
         self.section_repository = section_repository
         self.context_builder = context_builder or SectionContextBuilder()
+        self.event_sink = event_sink
         self.fact_gate = RequiredFactGate()
         self.fact_evidence_gate = FactEvidenceGate()
         self._completed: dict[str, tuple[str, GenerationResult]] = {}
@@ -139,6 +166,7 @@ class GenerationOrchestrator:
             request,
             self.llm_provider.model_alias,
             self.retriever.embedding_model_alias,
+            self.event_sink,
         )
         trace.add(
             WorkflowStage.INITIALIZED,
@@ -176,12 +204,20 @@ class GenerationOrchestrator:
                     WorkflowStage.SELECTING_CLAUSES,
                     "select_clause_blocks",
                     partial(self._select_clauses, risk_profile, section_code),
+                    detail=section_code,
                 )
                 query = self._build_query(request, section_code, confirmed_facts)
                 retrieval = trace.invoke(
                     WorkflowStage.RETRIEVING_REFERENCES,
                     "retrieve_reference_sections",
                     partial(self.retriever.retrieve, query),
+                    detail=section_code,
+                )
+                trace.add(
+                    WorkflowStage.RETRIEVING_REFERENCES,
+                    "rag_context_ready",
+                    TraceStatus.SUCCEEDED,
+                    f"{section_code}:命中{len(retrieval.sections)}段/候选{len(retrieval.trace)}段",
                 )
                 context = trace.invoke(
                     WorkflowStage.GENERATING_SECTIONS,
@@ -194,6 +230,7 @@ class GenerationOrchestrator:
                         clauses,
                         retrieval,
                     ),
+                    detail=section_code,
                 )
                 if (
                     persisted is not None
@@ -274,16 +311,19 @@ class GenerationOrchestrator:
                     WorkflowStage.GENERATING_SECTIONS,
                     "draft_document_section",
                     partial(self.llm_provider.draft_section, context),
+                    detail=section_code,
                 )
                 section = trace.invoke(
                     WorkflowStage.VALIDATING_SECTIONS,
                     "normalize_section_provenance",
                     partial(normalize_section_provenance, section, context),
+                    detail=section_code,
                 )
                 issues = trace.invoke(
                     WorkflowStage.VALIDATING_SECTIONS,
                     "validate_document_section",
                     partial(self._validate_section, section, context),
+                    detail=section_code,
                 )
                 blocking_issues = tuple(
                     issue for issue in issues if issue.severity == ValidationSeverity.ERROR
@@ -298,16 +338,19 @@ class GenerationOrchestrator:
                             section,
                             blocking_issues,
                         ),
+                        detail=section_code,
                     )
                     section = trace.invoke(
                         WorkflowStage.VALIDATING_SECTIONS,
                         "normalize_revised_section_provenance",
                         partial(normalize_section_provenance, section, context),
+                        detail=section_code,
                     )
                     issues = trace.invoke(
                         WorkflowStage.VALIDATING_SECTIONS,
                         "revalidate_document_section",
                         partial(self._validate_section, section, context),
+                        detail=section_code,
                     )
                     blocking_issues = tuple(
                         issue for issue in issues if issue.severity == ValidationSeverity.ERROR
@@ -333,6 +376,7 @@ class GenerationOrchestrator:
                             section,
                             issues,
                         ),
+                        detail=section_code,
                     )
                 generated_sections.append(section)
             artifact = trace.invoke(
@@ -432,10 +476,39 @@ class GenerationOrchestrator:
         facts: Sequence[ConfirmedFact],
     ) -> RetrievalQuery:
         fact_text = " ".join(f"{fact.field} {fact.value}" for fact in facts)
+        values = {fact.field: fact.value for fact in facts}
+        component_tags = values.get("inspection_component_codes")
+        method_tags = values.get("inspection_method_codes")
+        risk_items = values.get("risk_evidence_items")
+        risk_tags = (
+            tuple(
+                str(item["risk_code"])
+                for item in risk_items
+                if isinstance(item, dict) and item.get("risk_code")
+            )
+            if isinstance(risk_items, list)
+            else ()
+        )
         return RetrievalQuery(
             business_type=request.business_type,
             section_code=section_code,
             query_text=f"{section_code} {fact_text}".strip(),
+            client_code=(
+                str(values["client_code"]).strip()
+                if values.get("client_code")
+                else None
+            ),
+            component_tags=(
+                tuple(str(value) for value in component_tags)
+                if isinstance(component_tags, list)
+                else ()
+            ),
+            method_tags=(
+                tuple(str(value) for value in method_tags)
+                if isinstance(method_tags, list)
+                else ()
+            ),
+            risk_tags=risk_tags,
         )
 
     @staticmethod

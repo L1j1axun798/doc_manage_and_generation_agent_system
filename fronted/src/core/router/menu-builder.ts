@@ -11,6 +11,7 @@ import {
 } from '@element-plus/icons-vue'
 import type { Component } from 'vue'
 
+import { featureFlags } from '@/config/feature-flags'
 import type { UserRole } from '@/modules/auth'
 
 export interface AppMenuItem {
@@ -18,6 +19,7 @@ export interface AppMenuItem {
   title: string
   icon: Component
   disabled?: boolean
+  requiresDocumentAgent?: boolean
   roles: UserRole[]
 }
 
@@ -33,6 +35,13 @@ const MENU_ITEMS: AppMenuItem[] = [
     roles: ALL_ROLES,
   },
   {
+    index: '/document-generation',
+    title: '四措两案Agent V1.0',
+    icon: Files,
+    requiresDocumentAgent: true,
+    roles: ALL_ROLES,
+  },
+  {
     index: '/access/internal',
     title: '授权管理',
     icon: Lock,
@@ -45,10 +54,17 @@ const MENU_ITEMS: AppMenuItem[] = [
   { index: '/notifications', title: '通知中心', icon: Bell, roles: ALL_ROLES },
 ]
 
-export function buildMainMenu(role: UserRole | undefined): AppMenuItem[] {
+export function buildMainMenu(
+  role: UserRole | undefined,
+  documentAgentEnabled = featureFlags.documentAgent,
+): AppMenuItem[] {
   if (!role) {
     return []
   }
 
-  return MENU_ITEMS.filter((item) => item.roles.includes(role))
+  return MENU_ITEMS.filter(
+    (item) =>
+      item.roles.includes(role)
+      && (!item.requiresDocumentAgent || documentAgentEnabled),
+  )
 }

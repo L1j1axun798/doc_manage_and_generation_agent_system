@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 
+ENTRY_PREPARATION_ROOT_CODE = "PUBLIC-COMPLETION"
+
 
 @dataclass(frozen=True)
 class StandardFolderDefinition:
@@ -15,10 +17,11 @@ class StandardFolderDefinition:
 
 STANDARD_PUBLIC_ROOTS = [
     StandardFolderDefinition(
-        code="PUBLIC-COMPLETION",
-        name="竣工资料档案",
+        code=ENTRY_PREPARATION_ROOT_CODE,
+        name="入场前置资料",
         sort_order=1,
         aliases=(
+            "竣工资料档案",
             "竣工档案资料",
             "完工资料档案",
             "完工资料",

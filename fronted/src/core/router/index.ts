@@ -86,6 +86,16 @@ export const routes: RouteRecordRaw[] = [
         },
       },
       {
+        path: 'document-generation',
+        name: 'document-generation',
+        component: () => import('@/modules/document-generation/pages/DocumentGenerationPage.vue'),
+        meta: {
+          title: '入场资料Agent V1.0',
+          requiresAuth: true,
+          layout: 'main',
+        },
+      },
+      {
         path: 'access/internal',
         name: 'access-management',
         component: () => import('@/modules/access/pages/AccessManagementPage.vue'),

@@ -7,6 +7,10 @@ class Document(models.Model):
         INTERNAL = "internal", "内部"
         RESTRICTED = "restricted", "受限"
 
+    class SourceType(models.TextChoices):
+        PROJECT_UPLOAD = "project_upload", "普通项目资料"
+        ENTRANCE_MATERIAL = "entrance_material", "入场前置资料"
+
     project = models.ForeignKey(
         "projects.Project",
         null=True,
@@ -28,6 +32,13 @@ class Document(models.Model):
         max_length=20,
         choices=AccessLevel.choices,
         default=AccessLevel.INTERNAL,
+    )
+    source_type = models.CharField(
+        "资料来源类型",
+        max_length=32,
+        choices=SourceType.choices,
+        default=SourceType.PROJECT_UPLOAD,
+        db_index=True,
     )
     current_version = models.ForeignKey(
         "documents.DocumentVersion",

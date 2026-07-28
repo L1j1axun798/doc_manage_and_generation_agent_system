@@ -90,10 +90,6 @@ def build_review_scorecard(
                     "evaluation_version": case.evaluation_version,
                     "blind_case_id": case.blind_case_id,
                     "section_code": section_code,
-                    "major_fabricated_fact": "false",
-                    "major_safety_or_technical_omission": "false",
-                    "all_numbers_have_sources": "true",
-                    "historical_entity_contamination": "false",
                     "generated_section_title": (
                         generated.get("title", "") if isinstance(generated, Mapping) else ""
                     ),

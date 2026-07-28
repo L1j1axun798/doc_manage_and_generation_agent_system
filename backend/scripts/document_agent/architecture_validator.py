@@ -71,18 +71,27 @@ def validate_architecture(root: Path) -> list[str]:
     project_page = (
         root / "fronted/src/modules/projects/pages/ProjectDetailPage.vue"
     ).read_text(encoding="utf-8")
-    allowed_integration = (
-        "@/modules/document-generation/components/DocumentGenerationPanel.vue"
-    )
     agent_imports = [
         line
         for line in project_page.splitlines()
         if "modules/document-generation/" in line
     ]
-    if agent_imports != [
-        f"import DocumentGenerationPanel from '{allowed_integration}'"
-    ]:
+    if agent_imports:
         issues.append("FRONTEND_PROJECT_PAGE_OVERCOUPLED")
+
+    generation_page = (
+        root / "fronted/src/modules/document-generation/pages/DocumentGenerationPage.vue"
+    ).read_text(encoding="utf-8")
+    generation_page_imports = [
+        line
+        for line in generation_page.splitlines()
+        if "modules/document-generation/" in line
+        or "../components/DocumentGenerationPanel.vue" in line
+    ]
+    if generation_page_imports != [
+        "import DocumentGenerationPanel from '../components/DocumentGenerationPanel.vue'"
+    ]:
+        issues.append("FRONTEND_AGENT_PAGE_INTEGRATION_INVALID")
     return issues
 
 

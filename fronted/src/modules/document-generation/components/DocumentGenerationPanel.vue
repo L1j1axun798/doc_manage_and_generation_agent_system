@@ -9,19 +9,19 @@ import type { DocumentItem } from '@/modules/documents/documents.types'
 import type { Project } from '@/modules/projects/projects.types'
 import { formatDateTime } from '@/shared/utils/format'
 import {
-  addGenerationSources,
   approveGenerationTask,
-  confirmGenerationFacts,
-  createGenerationTask,
+  confirmAndGenerate,
   exportGenerationTask,
-  extractGenerationFacts,
+  fetchGenerationEvents,
   fetchGenerationTask,
   fetchGenerationTasks,
   fetchGenerationTemplates,
   generateEntryPlan,
+  lockAllGeneratedSections,
   regenerateSection,
   retryGenerationTask,
   setGeneratedSectionLock,
+  startGenerationPipeline,
   submitGenerationReview,
   updateGeneratedSection,
 } from '../api/document-generation.api'
@@ -34,11 +34,15 @@ import {
   type GeneratedSection,
   type GenerationTask,
   type GenerationTaskStatus,
+  type GenerationTraceEvent,
   type SourceLocator,
 } from '../document-generation.types'
+import GenerationWorkflowTrace from './GenerationWorkflowTrace.vue'
 import {
+  factFieldDefinition,
   GENERATION_POLL_INTERVAL_MS,
   isEligibleEntrySource,
+  missingRequiredFactFields,
   shouldPollGenerationTask,
 } from '../workflow'
 
@@ -51,6 +55,10 @@ interface FactDraft {
   locator: SourceLocator
   textQuote: string
   confidence: number
+  codeValues: string[]
+  riskEvidence: Record<string, string>
+  isRequired: boolean
+  isManual: boolean
 }
 
 const props = defineProps<{
@@ -65,6 +73,7 @@ const templates = ref<DocumentGenerationTemplate[]>([])
 const documents = ref<DocumentItem[]>([])
 const tasks = ref<GenerationTask[]>([])
 const selectedTask = ref<GenerationTask | null>(null)
+const workflowEvents = ref<GenerationTraceEvent[]>([])
 const factDrafts = ref<FactDraft[]>([])
 const sectionDrafts = reactive<Record<string, string>>({})
 const createForm = reactive<{
@@ -77,6 +86,8 @@ const createForm = reactive<{
 let pollTimer: number | undefined
 
 const eligibleDocuments = computed(() => documents.value.filter(isEligibleEntrySource))
+const criticalFactDrafts = computed(() => factDrafts.value.filter((fact) => fact.isRequired))
+const supplementalFactDrafts = computed(() => factDrafts.value.filter((fact) => !fact.isRequired))
 const isProjectActive = computed(() => props.project.status === 'active')
 const canApprove = computed(
   () =>
@@ -88,6 +99,9 @@ const allSectionsLocked = computed(
     Boolean(selectedTask.value?.sections.length)
     && selectedTask.value?.sections.every((section) => section.is_locked),
 )
+const selectedTemplate = computed(
+  () => templates.value.find((template) => template.id === selectedTask.value?.template_id) || null,
+)
 
 const statusLabels: Record<GenerationTaskStatus, string> = {
   draft: '待选择资料',
@@ -97,6 +111,7 @@ const statusLabels: Record<GenerationTaskStatus, string> = {
   queued: '已进入生成队列',
   generating: '正在生成',
   review_required: '待人工审核',
+  pending_approval: '已提交，待技术负责人批准',
   approved: '已批准，待导出',
   exported: '已导出',
   failed: '执行失败',
@@ -132,6 +147,7 @@ async function fetchAllProjectDocuments(): Promise<DocumentItem[]> {
   while (page <= 50) {
     const response = await fetchDocuments({
       project: props.project.id,
+      source_type: 'entrance_material',
       page,
       ordering: 'title',
     })
@@ -151,6 +167,7 @@ async function refreshTasks(): Promise<void> {
 
 async function selectTask(task: GenerationTask): Promise<void> {
   selectedTask.value = await fetchGenerationTask(task.id)
+  workflowEvents.value = await fetchGenerationEvents(task.id)
   hydrateTaskDrafts()
   configurePolling()
 }
@@ -160,7 +177,15 @@ async function refreshSelectedTask(): Promise<void> {
     return
   }
   const previousStatus = selectedTask.value.status
-  selectedTask.value = await fetchGenerationTask(selectedTask.value.id)
+  const [task, newEvents] = await Promise.all([
+    fetchGenerationTask(selectedTask.value.id),
+    fetchGenerationEvents(
+      selectedTask.value.id,
+      workflowEvents.value.at(-1)?.sequence || 0,
+    ),
+  ])
+  selectedTask.value = task
+  workflowEvents.value.push(...newEvents)
   if (
     selectedTask.value.status !== previousStatus
     || selectedTask.value.status === 'review_required'
@@ -177,8 +202,42 @@ function hydrateTaskDrafts(): void {
     return
   }
   if (task.status === 'needs_confirmation') {
-    factDrafts.value = (task.facts_snapshot as FactProposal[]).map((proposal) => {
+    const proposalFields = new Set(
+      (task.facts_snapshot as FactProposal[]).map((proposal) => proposal.field),
+    )
+    const conflictDefaults = task.fact_conflicts.flatMap((conflict) => {
+      const field = typeof conflict.field === 'string' ? conflict.field : ''
+      const candidates = Array.isArray(conflict.candidates)
+        ? conflict.candidates as FactProposal[]
+        : []
+      const preferred = [...candidates].sort(
+        (left, right) => Number(right.confidence || 0) - Number(left.confidence || 0),
+      )[0]
+      return field && preferred && !proposalFields.has(field)
+        ? [{ ...preferred, field }]
+        : []
+    })
+    const proposals = [
+      ...(task.facts_snapshot as FactProposal[]),
+      ...conflictDefaults,
+    ]
+    const requiredFields = selectedTemplate.value?.required_fact_fields || []
+    const requiredSet = new Set(requiredFields)
+    const drafts = proposals.map((proposal) => {
       const evidence = proposal.evidence?.[0]
+      const values = Array.isArray(proposal.value) ? proposal.value : []
+      const codeValues = values.filter((value): value is string => typeof value === 'string')
+      const riskEvidence = Object.fromEntries(
+        values
+          .filter(
+            (value): value is { risk_code: string, evidence: string } =>
+              typeof value === 'object'
+              && value !== null
+              && typeof (value as Record<string, unknown>).risk_code === 'string'
+              && typeof (value as Record<string, unknown>).evidence === 'string',
+          )
+          .map((value) => [value.risk_code, value.evidence]),
+      )
       return {
         selected: true,
         field: proposal.field,
@@ -188,8 +247,32 @@ function hydrateTaskDrafts(): void {
         locator: { ...(evidence?.locator || {}) },
         textQuote: evidence?.locator.text_quote || '',
         confidence: proposal.confidence ?? evidence?.confidence ?? 1,
+        codeValues: proposal.field === 'risk_evidence_items'
+          ? Object.keys(riskEvidence)
+          : codeValues,
+        riskEvidence,
+        isRequired: requiredSet.has(proposal.field),
+        isManual: false,
       }
     })
+    for (const field of missingRequiredFactFields(requiredFields, proposals)) {
+      const definition = factFieldDefinition(field)
+      drafts.push({
+        selected: true,
+        field,
+        valueText: '',
+        valueType: definition.valueType,
+        sourceDocumentVersionId: task.sources[0]?.document_version_id ?? null,
+        locator: {},
+        textQuote: '',
+        confidence: 1,
+        codeValues: [],
+        riskEvidence: {},
+        isRequired: true,
+        isManual: false,
+      })
+    }
+    factDrafts.value = drafts
   }
   if (task.status === 'review_required') {
     for (const section of task.sections) {
@@ -220,20 +303,23 @@ function stopPolling(): void {
 
 function openCreateDialog(): void {
   createForm.templateId = templates.value[0]?.id ?? null
-  createForm.sourceVersionIds = []
+  createForm.sourceVersionIds = eligibleDocuments.value
+    .map((document) => document.current_version?.id)
+    .filter((id): id is number => typeof id === 'number')
   createDialogVisible.value = true
 }
 
 async function createAndExtract(): Promise<void> {
   if (!createForm.templateId || createForm.sourceVersionIds.length === 0) {
-    ElMessage.warning('请选择模板和至少一份已有项目资料')
+    ElMessage.warning('请选择模板和至少一份当前项目的入场前置资料')
     return
   }
   actionLoading.value = true
   try {
-    let task = await createGenerationTask({
+    const task = await startGenerationPipeline({
       project_id: props.project.id,
       template_id: createForm.templateId,
+      document_version_ids: createForm.sourceVersionIds,
       document_purpose: DOCUMENT_PURPOSE,
       business_type: BUSINESS_TYPE,
       idempotency_key: window.crypto.randomUUID(),
@@ -242,10 +328,9 @@ async function createAndExtract(): Promise<void> {
         { field: 'project_code', value: props.project.code, value_type: 'string' },
       ],
     })
-    task = await addGenerationSources(task.id, createForm.sourceVersionIds)
-    task = await extractGenerationFacts(task.id)
     createDialogVisible.value = false
     selectedTask.value = task
+    workflowEvents.value = await fetchGenerationEvents(task.id)
     await refreshTasks()
     configurePolling()
     ElMessage.success('已提交事实提取，页面会自动刷新进度')
@@ -266,6 +351,10 @@ function addManualFact(): void {
     locator: {},
     textQuote: '',
     confidence: 1,
+    codeValues: [],
+    riskEvidence: {},
+    isRequired: false,
+    isManual: true,
   })
 }
 
@@ -278,6 +367,13 @@ async function confirmFacts(): Promise<void> {
     ElMessage.warning('至少确认一个事实')
     return
   }
+  const missingRequired = (selectedTemplate.value?.required_fact_fields || [])
+    .filter((field) => !selected.some((fact) => fact.field === field))
+    .map((field) => factFieldDefinition(field).label)
+  if (missingRequired.length) {
+    ElMessage.warning(`请先确认必填事实：${missingRequired.join('、')}`)
+    return
+  }
   let payload: ConfirmedFactPayload[]
   try {
     payload = selected.map(toConfirmedFact)
@@ -286,9 +382,10 @@ async function confirmFacts(): Promise<void> {
     return
   }
   await runAction(async () => {
-    selectedTask.value = await confirmGenerationFacts(selectedTask.value!.id, payload)
+    selectedTask.value = await confirmAndGenerate(selectedTask.value!.id, payload)
     await refreshTasks()
-    ElMessage.success('事实已确认，可以开始生成')
+    configurePolling()
+    ElMessage.success('关键事实已确认，Agent已开始逐章编制')
   })
 }
 
@@ -310,12 +407,40 @@ function toConfirmedFact(draft: FactDraft): ConfirmedFactPayload {
   }
   return {
     field: draft.field.trim(),
-    value: parseFactValue(draft.valueText, draft.valueType),
+    value: draftFactValue(draft),
     value_type: draft.valueType,
     source_document_version_id: draft.sourceDocumentVersionId,
     locator,
     confidence: draft.confidence,
   }
+}
+
+function draftFactValue(draft: FactDraft): unknown {
+  if (draft.field === 'inspection_component_codes' || draft.field === 'inspection_method_codes') {
+    if (draft.codeValues.length === 0) {
+      throw new Error(`${factFieldDefinition(draft.field).label}至少选择一项`)
+    }
+    return draft.codeValues
+  }
+  if (draft.field === 'risk_evidence_items') {
+    return draft.codeValues.map((riskCode) => {
+      const evidence = draft.riskEvidence[riskCode]?.trim()
+      if (!evidence) {
+        throw new Error(`${riskOptionLabel(riskCode)}缺少事实依据`)
+      }
+      return { risk_code: riskCode, evidence }
+    })
+  }
+  const value = parseFactValue(draft.valueText, draft.valueType)
+  if (draft.isRequired && typeof value === 'string' && !value) {
+    throw new Error(`${factFieldDefinition(draft.field).label}不能为空`)
+  }
+  return value
+}
+
+function riskOptionLabel(code: string): string {
+  return factFieldDefinition('risk_evidence_items').options
+    ?.find((option) => option.value === code)?.label || code
 }
 
 function parseFactValue(value: string, valueType: string): unknown {
@@ -344,6 +469,17 @@ function parseFactValue(value: string, valueType: string): unknown {
 
 function serializeFactValue(value: unknown): string {
   return typeof value === 'string' ? value : JSON.stringify(value, null, 2)
+}
+
+function templateHint(template: DocumentGenerationTemplate): string {
+  const name = `${template.display_name} ${template.filename}`
+  if (name.includes('扫塔') || name.includes('塔筒')) {
+    return '适用于扫塔、塔筒焊缝或塔筒部件探伤的Word版式'
+  }
+  if (name.includes('主机')) {
+    return '适用于主机设备出质保检测的Word版式'
+  }
+  return '适用于风电机组质保期满综合检测的Word版式'
 }
 
 async function startGeneration(): Promise<void> {
@@ -382,6 +518,14 @@ async function toggleSectionLock(section: GeneratedSection): Promise<void> {
     )
     await refreshSelectedTask()
     ElMessage.success(section.is_locked ? '章节已解锁' : '章节已锁定')
+  })
+}
+
+async function lockAllSections(): Promise<void> {
+  await runAction(async () => {
+    selectedTask.value = await lockAllGeneratedSections(selectedTask.value!.id)
+    await refreshSelectedTask()
+    ElMessage.success('所有无阻断错误的章节已确认并锁定')
   })
 }
 
@@ -528,48 +672,141 @@ async function runAction(action: () => Promise<void>): Promise<void> {
         show-icon
       />
 
+      <GenerationWorkflowTrace :task="selectedTask" :events="workflowEvents" />
+
       <template v-if="selectedTask.status === 'needs_confirmation'">
-        <h3>确认Agent提取的项目事实</h3>
+        <h3>快速核对5项关键事实</h3>
+        <el-alert
+          title="通常只需核对下列内容，然后点一次“确认并开始编制”。来源定位和其他识别信息已收进折叠项。"
+          type="info"
+          :closable="false"
+          show-icon
+        />
         <el-alert
           v-if="selectedTask.fact_conflicts.length"
-          title="存在来源冲突，请核对后只保留正确值。"
+          title="不同资料存在同名事实冲突。系统已预填置信度较高的候选值，请重点核对下列项目。"
           type="warning"
           :closable="false"
         />
-        <el-table :data="factDrafts" row-key="field">
-          <el-table-column label="采用" width="65">
-            <template #default="{ row }"><el-checkbox v-model="row.selected" /></template>
-          </el-table-column>
-          <el-table-column label="字段" min-width="150">
-            <template #default="{ row }"><el-input v-model="row.field" /></template>
-          </el-table-column>
-          <el-table-column label="值" min-width="220">
+        <el-table :data="criticalFactDrafts" row-key="field">
+          <el-table-column label="关键项目事实" min-width="180">
             <template #default="{ row }">
-              <el-input v-model="row.valueText" type="textarea" :rows="2" />
+              <div class="doc-agent__fact-name">
+                <span>{{ factFieldDefinition(row.field).label }}</span>
+                <el-tag size="small" type="danger">需确认</el-tag>
+              </div>
             </template>
           </el-table-column>
-          <el-table-column label="来源" min-width="190">
+          <el-table-column label="Agent识别结果（可直接修改）" min-width="520">
             <template #default="{ row }">
-              <el-select v-model="row.sourceDocumentVersionId" style="width: 100%">
-                <el-option
-                  v-for="source in selectedTask.sources"
-                  :key="source.document_version_id"
-                  :label="source.document_title"
-                  :value="source.document_version_id"
+              <template
+                v-if="
+                  row.field === 'inspection_component_codes'
+                  || row.field === 'inspection_method_codes'
+                "
+              >
+                <el-select
+                  v-model="row.codeValues"
+                  multiple
+                  filterable
+                  :placeholder="`请选择${factFieldDefinition(row.field).label}`"
+                  style="width: 100%"
+                >
+                  <el-option
+                    v-for="option in factFieldDefinition(row.field).options"
+                    :key="option.value"
+                    :label="option.label"
+                    :value="option.value"
+                  />
+                </el-select>
+              </template>
+              <template v-else-if="row.field === 'risk_evidence_items'">
+                <el-select
+                  v-model="row.codeValues"
+                  multiple
+                  filterable
+                  placeholder="选择资料明确支持的风险；没有可不选"
+                  style="width: 100%"
+                >
+                  <el-option
+                    v-for="option in factFieldDefinition(row.field).options"
+                    :key="option.value"
+                    :label="option.label"
+                    :value="option.value"
+                  />
+                </el-select>
+                <el-input
+                  v-for="riskCode in row.codeValues"
+                  :key="riskCode"
+                  v-model="row.riskEvidence[riskCode]"
+                  class="doc-agent__risk-evidence"
+                  :placeholder="`${riskOptionLabel(riskCode)}的来源依据`"
+                >
+                  <template #prepend>{{ riskOptionLabel(riskCode) }}</template>
+                </el-input>
+              </template>
+              <el-input v-else v-model="row.valueText" type="textarea" :rows="2" />
+              <div class="doc-agent__field-help">
+                {{ factFieldDefinition(row.field).help }}
+              </div>
+              <details class="doc-agent__provenance">
+                <summary>查看或修正来源依据</summary>
+                <el-select v-model="row.sourceDocumentVersionId" style="width: 100%">
+                  <el-option
+                    v-for="source in selectedTask.sources"
+                    :key="source.document_version_id"
+                    :label="source.document_title"
+                    :value="source.document_version_id"
+                  />
+                </el-select>
+                <el-input
+                  v-model="row.textQuote"
+                  placeholder="Agent提取的来源原文；仅在识别不完整时需要修正"
                 />
-              </el-select>
-            </template>
-          </el-table-column>
-          <el-table-column label="来源原文" min-width="240">
-            <template #default="{ row }">
-              <el-input v-model="row.textQuote" placeholder="Agent自动给出；人工补充时请粘贴原文" />
+              </details>
             </template>
           </el-table-column>
         </el-table>
+
+        <el-collapse v-if="supplementalFactDrafts.length" class="doc-agent__advanced">
+          <el-collapse-item
+            :title="`其他已识别信息（${supplementalFactDrafts.length}项，默认一并采用）`"
+            name="supplemental-facts"
+          >
+            <el-table :data="supplementalFactDrafts">
+              <el-table-column label="采用" width="65">
+                <template #default="{ row }"><el-checkbox v-model="row.selected" /></template>
+              </el-table-column>
+              <el-table-column label="信息项" min-width="180">
+                <template #default="{ row }">
+                  <el-input v-if="row.isManual" v-model="row.field" placeholder="补充事实名称" />
+                  <span v-else>{{ factFieldDefinition(row.field).label }}</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="内容" min-width="380">
+                <template #default="{ row }">
+                  <el-input v-model="row.valueText" type="textarea" :rows="2" />
+                  <details class="doc-agent__provenance">
+                    <summary>来源依据</summary>
+                    <el-select v-model="row.sourceDocumentVersionId" style="width: 100%">
+                      <el-option
+                        v-for="source in selectedTask.sources"
+                        :key="source.document_version_id"
+                        :label="source.document_title"
+                        :value="source.document_version_id"
+                      />
+                    </el-select>
+                    <el-input v-model="row.textQuote" placeholder="来源原文" />
+                  </details>
+                </template>
+              </el-table-column>
+            </el-table>
+          </el-collapse-item>
+        </el-collapse>
         <div class="doc-agent__actions">
-          <el-button @click="addManualFact">补充事实</el-button>
+          <el-button @click="addManualFact">高级：补充其他事实</el-button>
           <el-button type="primary" :loading="actionLoading" @click="confirmFacts">
-            确认事实
+            确认并开始编制
           </el-button>
         </div>
       </template>
@@ -651,18 +888,36 @@ async function runAction(action: () => Promise<void>): Promise<void> {
           </el-collapse-item>
         </el-collapse>
         <div class="doc-agent__actions">
-          <el-button :loading="actionLoading" @click="submitReview">记录提交审核</el-button>
+          <el-button
+            :disabled="allSectionsLocked"
+            :loading="actionLoading"
+            @click="lockAllSections"
+          >
+            一键确认全部无错误章节
+          </el-button>
+          <el-button
+            type="primary"
+            :disabled="!allSectionsLocked"
+            :loading="actionLoading"
+            @click="submitReview"
+          >
+            提交技术负责人批准
+          </el-button>
+        </div>
+      </template>
+
+      <div v-if="selectedTask.status === 'pending_approval'" class="doc-agent__actions">
+        <span>初稿已完成人工复核，等待技术负责人批准。</span>
           <el-button
             v-if="canApprove"
             type="primary"
-            :disabled="!allSectionsLocked || !isProjectActive"
+            :disabled="!isProjectActive"
             :loading="actionLoading"
             @click="approveTask"
           >
             技术负责人批准
           </el-button>
-        </div>
-      </template>
+      </div>
 
       <div v-if="selectedTask.status === 'approved'" class="doc-agent__actions">
         <el-button
@@ -688,25 +943,16 @@ async function runAction(action: () => Promise<void>): Promise<void> {
       </div>
     </el-card>
 
-    <el-dialog v-model="createDialogVisible" title="新建四措两案编制任务" width="680px">
+    <el-dialog v-model="createDialogVisible" title="开始编制四措两案" width="720px">
       <el-form label-position="top">
-        <el-form-item label="四措两案模板">
-          <el-select v-model="createForm.templateId" style="width: 100%">
-            <el-option
-              v-for="template in templates"
-              :key="template.id"
-              :label="`${template.client_name || '通用'} / ${template.code} ${template.version}`"
-              :value="template.id"
-            />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="已有项目资料（可多选）">
+        <el-form-item label="当前项目的入场前置资料">
           <el-select
             v-model="createForm.sourceVersionIds"
             multiple
             filterable
             style="width: 100%"
-            placeholder="选择任务通知、技术要求等已有资料"
+            placeholder="选择合同、任务通知、技术要求等入场前置资料"
+            :disabled="eligibleDocuments.length === 0"
           >
             <el-option
               v-for="document in eligibleDocuments"
@@ -715,17 +961,54 @@ async function runAction(action: () => Promise<void>): Promise<void> {
               :value="document.current_version!.id"
             />
           </el-select>
+          <div v-if="eligibleDocuments.length" class="doc-agent__field-help">
+            已自动全选 {{ eligibleDocuments.length }} 份合格资料；无需逐份添加，可取消明显无关的文件。
+          </div>
+          <el-alert
+            v-if="eligibleDocuments.length === 0"
+            title="该项目暂无入场前置资料，请先到“资料中心 → 入场前置资料”上传。"
+            type="warning"
+            :closable="false"
+            show-icon
+          />
         </el-form-item>
+        <el-collapse class="doc-agent__advanced">
+          <el-collapse-item title="高级设置：Word版式（通常无需修改）" name="layout">
+            <el-form-item label="输出版式">
+              <el-select v-model="createForm.templateId" style="width: 100%">
+                <el-option
+                  v-for="template in templates"
+                  :key="template.id"
+                  :label="template.display_name"
+                  :value="template.id"
+                >
+                  <div class="doc-agent__template-option">
+                    <strong>{{ template.display_name }}</strong>
+                    <small>{{ templateHint(template) }}</small>
+                  </div>
+                </el-option>
+              </el-select>
+              <div class="doc-agent__field-help">
+                这里选择的是Word页面和样式基线，不决定四措两案的业务内容。
+              </div>
+            </el-form-item>
+          </el-collapse-item>
+        </el-collapse>
         <el-alert
-          title="这里不会新增合同上传入口；只读取你本来就有权查看的项目资料。"
+          title="Agent会同时使用两层参考：当前项目资料用于确定事实；系统内已批准的条款和RAG案例用于组织专业正文。"
           type="info"
           :closable="false"
         />
       </el-form>
       <template #footer>
         <el-button @click="createDialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="actionLoading" @click="createAndExtract">
-          创建并自动提取事实
+        <el-button
+          type="primary"
+          :loading="actionLoading"
+          :disabled="eligibleDocuments.length === 0"
+          @click="createAndExtract"
+        >
+          一键开始分析
         </el-button>
       </template>
     </el-dialog>
@@ -782,6 +1065,57 @@ async function runAction(action: () => Promise<void>): Promise<void> {
   display: grid;
   gap: 8px;
   margin-top: 12px;
+}
+
+.doc-agent__field-help {
+  margin-top: 6px;
+  color: var(--el-text-color-secondary);
+  font-size: 13px;
+}
+
+.doc-agent__fact-name {
+  display: grid;
+  align-items: center;
+  gap: 4px 8px;
+  grid-template-columns: minmax(0, max-content) max-content;
+}
+
+.doc-agent__fact-name small {
+  overflow: hidden;
+  color: var(--el-text-color-secondary);
+  grid-column: 1 / -1;
+  text-overflow: ellipsis;
+}
+
+.doc-agent__risk-evidence {
+  margin-top: 8px;
+}
+
+.doc-agent__advanced {
+  margin-top: 14px;
+}
+
+.doc-agent__provenance {
+  margin-top: 10px;
+}
+
+.doc-agent__provenance summary {
+  margin-bottom: 8px;
+  color: var(--el-color-primary);
+  cursor: pointer;
+}
+
+.doc-agent__provenance .el-input {
+  margin-top: 8px;
+}
+
+.doc-agent__template-option {
+  display: grid;
+  line-height: 1.35;
+}
+
+.doc-agent__template-option small {
+  color: var(--el-text-color-secondary);
 }
 
 details {

@@ -35,6 +35,79 @@ ENTRY_PLAN_SECTION_TITLES: Final[dict[str, str]] = {
     "emergency_plan": "应急预案",
     "environmental_measures": "环境保护与文明施工措施",
 }
+ENTRY_PLAN_SECTION_BLUEPRINTS: Final[dict[str, tuple[str, ...]]] = {
+    "overview": (
+        "项目基本信息和工作范围",
+        "检测对象数量方法及计划工期",
+        "编制依据和适用边界",
+        "人员设备及入场条件概述",
+    ),
+    "organization_measures": (
+        "组织架构和岗位职责",
+        "人员资格培训及技术安全交底",
+        "进场协调沟通和信息报告",
+        "设备工器具及防护用品管理",
+        "作业过程监督和责任落实",
+    ),
+    "construction_plan": (
+        "施工准备和进场安排",
+        "检测作业流程和工序衔接",
+        "各检测方法的实施步骤",
+        "现场配合和作业区域管理",
+        "质量记录复核及资料管理",
+        "退场和现场恢复安排",
+    ),
+    "technical_measures": (
+        "技术依据和方法适用范围",
+        "仪器设备状态及校准核验",
+        "检测前技术准备",
+        "检测过程技术控制",
+        "质量复核和记录要求",
+        "异常情况的技术处置边界",
+    ),
+    "safety_measures": (
+        "安全责任和入场教育",
+        "个人防护及工器具安全",
+        "作业许可和现场隔离",
+        "已识别风险的逐项预控",
+        "高风险作业监护和停止作业条件",
+        "班前班后检查及安全记录",
+    ),
+    "risk_identification": (
+        "风险辨识方法和责任",
+        "已确认危险源逐项分析",
+        "风险预防控制措施",
+        "动态风险复核和升级报告",
+        "措施落实检查和闭环要求",
+    ),
+    "emergency_plan": (
+        "应急组织和岗位职责",
+        "信息报告及联络机制",
+        "现场警戒疏散和先期处置",
+        "已识别风险的专项处置",
+        "外部救援衔接和人员转运",
+        "应急终止复工及记录要求",
+    ),
+    "environmental_measures": (
+        "环境保护责任和现场文明要求",
+        "废弃物废液及污染预防",
+        "生态噪声消防和交通影响控制",
+        "现场清理恢复和检查记录",
+    ),
+}
+# The technical owner recorded that a usable eight-section plan normally contains
+# at least about 15,000 Chinese characters. The distribution prevents one long
+# chapter from hiding major omissions in another chapter.
+ENTRY_PLAN_SECTION_MIN_CHARACTERS: Final[dict[str, int]] = {
+    "overview": 1200,
+    "organization_measures": 1600,
+    "construction_plan": 2800,
+    "technical_measures": 2500,
+    "safety_measures": 2600,
+    "risk_identification": 1600,
+    "emergency_plan": 1800,
+    "environmental_measures": 1000,
+}
 NonBlankString = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 Sha256String = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
 
@@ -264,7 +337,7 @@ class RetrievalQuery(ContractModel):
     component_tags: tuple[str, ...] = ()
     method_tags: tuple[str, ...] = ()
     risk_tags: tuple[str, ...] = ()
-    top_k: int = Field(default=3, ge=1, le=3)
+    top_k: int = Field(default=5, ge=1, le=8)
     min_similarity: float = Field(default=0.2, ge=-1, le=1)
 
 

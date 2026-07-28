@@ -1,9 +1,10 @@
 from django.conf import settings
 from django.contrib import admin
 from django.urls import include, path
+from django.urls.resolvers import URLPattern, URLResolver
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
-urlpatterns = [
+urlpatterns: list[URLPattern | URLResolver] = [
     path("api/v1/", include("config.api_urls")),
 ]
 

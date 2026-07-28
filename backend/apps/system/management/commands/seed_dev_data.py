@@ -86,10 +86,10 @@ class Command(BaseCommand):
                 for definition in STANDARD_PUBLIC_ROOTS
                 if definition.code == "PUBLIC-COMPANY"
             )
-            completion_root = next(
+            project_documents_root = next(
                 definition
                 for definition in STANDARD_PUBLIC_ROOTS
-                if definition.code == "PUBLIC-COMPLETION"
+                if definition.code == "PUBLIC-TECH-SOLUTION"
             )
             public_root, _ = Folder.objects.update_or_create(
                 project=None,
@@ -117,10 +117,10 @@ class Command(BaseCommand):
             report_folder, _ = Folder.objects.update_or_create(
                 project=project,
                 parent=None,
-                code=completion_root.code,
+                code=project_documents_root.code,
                 defaults={
-                    "name": completion_root.name,
-                    "sort_order": completion_root.sort_order,
+                    "name": project_documents_root.name,
+                    "sort_order": project_documents_root.sort_order,
                     "created_by": admin,
                     "is_active": True,
                 },

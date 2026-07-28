@@ -18,6 +18,17 @@ it('hides administrator-only menus from data operators', () => {
   expect(menuTitles).not.toContain('人员位置')
 })
 
+it('places document generation after project management for every regular role when enabled', () => {
+  for (const role of ['system_admin', 'project_manager', 'data_operator'] as const) {
+    const menuTitles = buildMainMenu(role, true).map((item) => item.title)
+    const projectIndex = menuTitles.indexOf('项目管理')
+    const agentIndex = menuTitles.indexOf('四措两案Agent V1.0')
+
+    expect(projectIndex).toBeGreaterThanOrEqual(0)
+    expect(agentIndex).toBe(projectIndex + 1)
+  }
+})
+
 it('does not expose main menus to temporary users', () => {
   expect(buildMainMenu('temporary_user')).toEqual([])
 })

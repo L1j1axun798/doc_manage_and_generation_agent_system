@@ -6,6 +6,10 @@ from zipfile import ZipFile
 
 import pytest
 from docx import Document
+from docx.enum.section import WD_ORIENT, WD_SECTION
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.oxml.ns import qn
+from docx.shared import Pt
 
 from apps.document_generation.engine.contracts import (
     ConfirmedFact,
@@ -150,8 +154,17 @@ def test_report_template_is_rejected() -> None:
 
 def test_filled_style_baseline_does_not_leak_historical_body_or_headers() -> None:
     historical = Document()
-    historical.add_heading("历史风电场项目四措两案", level=0)
-    historical.add_paragraph("历史甲方专有施工正文")
+    cover = historical.add_paragraph()
+    cover.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    cover_run = cover.add_run("历史风电场项目四措两案")
+    cover_run.font.size = Pt(22)
+    body = historical.add_paragraph("历史甲方专有施工正文")
+    body_run = body.runs[0]
+    body_run.font.size = Pt(16)
+    body_run._element.get_or_add_rPr().get_or_add_rFonts().set(
+        qn("w:eastAsia"),
+        "仿宋_GB2312",
+    )
     historical.add_picture(
         BytesIO(
             base64.b64decode(
@@ -162,6 +175,12 @@ def test_filled_style_baseline_does_not_leak_historical_body_or_headers() -> Non
     )
     historical.sections[0].header.paragraphs[0].text = "历史甲方页眉"
     historical.sections[0].footer.paragraphs[0].text = "历史项目页脚"
+    appendix = historical.add_section(WD_SECTION.NEW_PAGE)
+    appendix.orientation = WD_ORIENT.LANDSCAPE
+    appendix.page_width, appendix.page_height = (
+        appendix.page_height,
+        appendix.page_width,
+    )
     output = BytesIO()
     historical.save(output)
     template = TemplateDocument(
@@ -219,5 +238,55 @@ def test_filled_style_baseline_does_not_leak_historical_body_or_headers() -> Non
     assert "历史风电场" not in visible_text
     assert "历史甲方" not in visible_text
     assert "历史项目" not in visible_text
+    assert rendered.sections[0].orientation == WD_ORIENT.PORTRAIT
+    generated_body = next(
+        paragraph
+        for paragraph in rendered.paragraphs
+        if "当前项目计划开展入场检测" in paragraph.text
+    )
+    assert generated_body.runs[0].font.size == Pt(16)
+    assert (
+        generated_body.runs[0]._element.get_or_add_rPr().get_or_add_rFonts().get(qn("w:eastAsia"))
+        == "仿宋_GB2312"
+    )
+    assert generated_body.paragraph_format.first_line_indent == Pt(32)
     with ZipFile(BytesIO(artifact.content)) as archive:
         assert not any(name.startswith("word/media/") for name in archive.namelist())
+
+
+def test_style_only_baseline_without_english_list_or_table_styles_still_renders() -> None:
+    baseline = Document()
+    for style_name in ("List Bullet", "Table Grid"):
+        style = baseline.styles[style_name]
+        style._element.getparent().remove(style._element)
+    output = BytesIO()
+    baseline.save(output)
+    template = TemplateDocument(
+        template_id="tpl-minimal-styles",
+        filename="客户四措两案样式基线.docx",
+        content=output.getvalue(),
+    )
+
+    artifact = DocxTemplateRenderer().render(
+        RenderRequest(
+            template=template,
+            facts=_facts()[:1],
+            sections=(
+                GeneratedSection(
+                    section_code="safety_measures",
+                    title="安全措施",
+                    lists=(("核验人员资质",),),
+                    tables=(
+                        GeneratedTable(
+                            headers=("风险", "措施"),
+                            rows=(("高处作业", "使用双钩安全带"),),
+                        ),
+                    ),
+                ),
+            ),
+        )
+    )
+
+    rendered = Document(BytesIO(artifact.content))
+    assert "• 核验人员资质" in [paragraph.text for paragraph in rendered.paragraphs]
+    assert rendered.tables[-1].rows[1].cells[1].text == "使用双钩安全带"

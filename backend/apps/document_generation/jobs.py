@@ -14,6 +14,7 @@ from apps.audit.services import audit_log
 from common.storage import LocalDocumentStorage
 
 from .artifacts import TaskDraftArtifactStorage
+from .engine.canonical_facts import enrich_required_fact_candidates
 from .engine.contracts import (
     ConfirmedFact,
     FactCandidate,
@@ -22,7 +23,7 @@ from .engine.contracts import (
     SourceDocument,
     TemplateDocument,
 )
-from .engine.errors import AgentError
+from .engine.errors import AgentError, WorkflowExecutionError
 from .engine.facts import FactMergeService
 from .engine.fakes import (
     FakeLLMProvider,
@@ -39,6 +40,7 @@ from .providers.embedding import OpenAICompatibleEmbeddingProvider
 from .providers.llm import OpenAICompatibleLLMProvider
 from .repositories import ORMClauseRepository, ORMKnowledgeRepository, ORMSectionRepository
 from .risk import ORMRiskProfiler
+from .workflow_events import TaskWorkflowRecorder
 
 
 def run_generation_task(task_id: str) -> str:
@@ -118,7 +120,7 @@ def _run_document_generation(task_id: str) -> str:
         task.progress = 90
         task.provider_alias = provider_alias
         task.model_alias = model_alias
-        task.prompt_version = "section_generation/v1"
+        task.prompt_version = "section_generation/v2"
         task.chunk_rule_version = "phase3-v1"
         task.pending_section_codes = []
         task.completed_at = timezone.now()
@@ -188,11 +190,38 @@ def _run_fact_extraction(task_id: str) -> str:
             ]
         )
         initial_facts = list(task.facts_snapshot)
+    recorder = TaskWorkflowRecorder(task_id)
     try:
+        recorder.emit(
+            stage="parsing",
+            tool="load_source_documents",
+            status="started",
+        )
         source_documents = _load_source_documents(task_id)
+        recorder.emit(
+            stage="parsing",
+            tool="load_source_documents",
+            status="succeeded",
+            detail=f"已读取{len(source_documents)}份当前项目资料",
+            metadata={"source_count": len(source_documents)},
+        )
         parser = EntrySourceParser()
         parsed_documents = tuple(parser.parse(source) for source in source_documents)
+        recorder.emit(
+            stage="parsing",
+            tool="parse_source_document",
+            status="succeeded",
+            detail=f"已解析{len(parsed_documents)}份资料",
+            metadata={"document_count": len(parsed_documents)},
+        )
         llm_provider, provider_alias = _build_llm_provider()
+        recorder.emit(
+            stage="extracting_facts",
+            tool="extract_fact_candidates",
+            status="started",
+            detail=f"模型：{llm_provider.model_alias}",
+            metadata={"model_alias": llm_provider.model_alias},
+        )
         if settings.DOCUMENT_AGENT_ALLOW_FAKE_PROVIDER:
             candidates = _fake_candidates(initial_facts, parsed_documents)
         else:
@@ -200,8 +229,33 @@ def _run_fact_extraction(task_id: str) -> str:
                 *llm_provider.extract_facts(parsed_documents),
                 *_anchored_initial_candidates(initial_facts, parsed_documents),
             )
+        recorder.emit(
+            stage="extracting_facts",
+            tool="extract_fact_candidates",
+            status="succeeded",
+            detail=f"识别到{len(candidates)}条候选事实",
+            metadata={"candidate_count": len(candidates)},
+        )
+        candidates = enrich_required_fact_candidates(candidates, parsed_documents)
         merged = FactMergeService().merge(candidates)
+        recorder.emit(
+            stage="validating_facts",
+            tool="merge_fact_candidates",
+            status="succeeded",
+            detail=f"保留{len(merged.merged)}条事实，发现{len(merged.conflicts)}组冲突",
+            metadata={
+                "fact_count": len(merged.merged),
+                "conflict_count": len(merged.conflicts),
+                "rejected_count": len(merged.rejected),
+            },
+        )
     except Exception as exc:
+        recorder.emit(
+            stage="failed",
+            tool="stop_workflow",
+            status="failed",
+            detail=_public_failure_message(exc),
+        )
         _record_failure(task_id, exc)
         raise
     proposals = [
@@ -229,7 +283,7 @@ def _run_fact_extraction(task_id: str) -> str:
         task.progress = 20
         task.provider_alias = provider_alias
         task.model_alias = llm_provider.model_alias
-        task.prompt_version = "fact_extraction/v1"
+        task.prompt_version = "fact_extraction/v2"
         task.completed_at = timezone.now()
         task.save(
             update_fields=[
@@ -259,6 +313,16 @@ def _run_fact_extraction(task_id: str) -> str:
                 "rejected_count": len(merged.rejected),
             },
         )
+    recorder.emit(
+        stage="completed",
+        tool="wait_for_fact_confirmation",
+        status="succeeded",
+        detail="关键事实已整理，等待用户核对后开始逐章编制",
+        metadata={
+            "fact_count": len(proposals),
+            "conflict_count": len(merged.conflicts),
+        },
+    )
     return "extracted"
 
 
@@ -388,6 +452,7 @@ def _build_orchestrator(
         renderer=DocxTemplateRenderer(),
         storage=TaskDraftArtifactStorage(task_id=task_id),
         section_repository=ORMSectionRepository(),
+        event_sink=TaskWorkflowRecorder(task_id),
     )
     return orchestrator, provider_alias, llm_provider.model_alias
 
@@ -428,7 +493,7 @@ def _record_failure(task_id: str, exc: Exception) -> None:
     current_job = get_current_job()
     retries_left = int(getattr(current_job, "retries_left", 0) or 0)
     error_code = exc.code if isinstance(exc, AgentError) else "GENERATION_FAILED"
-    message = str(exc)[:500] or "生成任务失败"
+    message = _public_failure_message(exc)
     with transaction.atomic():
         task = (
             GenerationTask.objects.select_for_update().select_related("created_by").get(pk=task_id)
@@ -468,6 +533,33 @@ def _record_failure(task_id: str, exc: Exception) -> None:
             error_message=f"{error_code}: {message}",
             after_data={"will_retry": retries_left > 0},
         )
+
+
+def _public_failure_message(exc: Exception) -> str:
+    if isinstance(exc, WorkflowExecutionError):
+        failed_stage = next(
+            (
+                event.stage.value
+                for event in reversed(exc.trace.events)
+                if event.status.value == "failed"
+            ),
+            "",
+        )
+        stage_messages = {
+            "parsing": "入场前置资料解析失败，请检查文件是否完整且格式受支持",
+            "validating_facts": "已确认事实未通过来源校验，请重新核对项目事实",
+            "building_risk_profile": "当前项目风险画像构建失败，请重试",
+            "selecting_clauses": "已批准条款匹配失败，请重试",
+            "retrieving_references": "RAG参考资料检索失败，请检查模型服务后重试",
+            "generating_sections": "模型编写章节失败，请检查模型服务后重试",
+            "validating_sections": "生成章节未通过确定性校验，请查看工作流详情",
+            "rendering": "Word版式渲染失败，请更换模板或联系管理员",
+            "storing": "Word草稿保存失败，请检查文件存储后重试",
+        }
+        return stage_messages.get(failed_stage, exc.message)[:500]
+    if isinstance(exc, AgentError):
+        return exc.message[:500]
+    return "编制任务发生未预期错误，请查看工作流详情或联系管理员"
 
 
 def _content_type(filename: str) -> str:

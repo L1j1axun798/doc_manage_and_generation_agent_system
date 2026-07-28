@@ -2,10 +2,12 @@ import { apiClient } from '@/core/http/client'
 import type { ApiPage } from '@/shared/types/api.types'
 import type {
   ConfirmedFactPayload,
+  CreateGenerationPipelinePayload,
   CreateGenerationTaskPayload,
   DocumentGenerationTemplate,
   GeneratedSection,
   GenerationTask,
+  GenerationTraceEvent,
 } from '../document-generation.types'
 
 const TASKS = '/document-generation/tasks'
@@ -36,6 +38,13 @@ export async function createGenerationTask(
   return response.data
 }
 
+export async function startGenerationPipeline(
+  payload: CreateGenerationPipelinePayload,
+): Promise<GenerationTask> {
+  const response = await apiClient.post<GenerationTask>(`${TASKS}/pipeline/`, payload)
+  return response.data
+}
+
 export async function addGenerationSources(
   taskId: string,
   documentVersionIds: number[],
@@ -57,6 +66,27 @@ export async function confirmGenerationFacts(
 ): Promise<GenerationTask> {
   const response = await apiClient.put<GenerationTask>(`${TASKS}/${taskId}/facts/confirm/`, {
     facts,
+  })
+  return response.data
+}
+
+export async function confirmAndGenerate(
+  taskId: string,
+  facts: ConfirmedFactPayload[],
+): Promise<GenerationTask> {
+  const response = await apiClient.put<GenerationTask>(
+    `${TASKS}/${taskId}/facts/confirm-and-generate/`,
+    { facts },
+  )
+  return response.data
+}
+
+export async function fetchGenerationEvents(
+  taskId: string,
+  afterSequence = 0,
+): Promise<GenerationTraceEvent[]> {
+  const response = await apiClient.get<GenerationTraceEvent[]>(`${TASKS}/${taskId}/events/`, {
+    params: { after_sequence: afterSequence },
   })
   return response.data
 }
@@ -92,6 +122,13 @@ export async function setGeneratedSectionLock(
   const response = await apiClient.post<GeneratedSection>(
     `${TASKS}/${taskId}/sections/${sectionCode}/lock/`,
     { locked },
+  )
+  return response.data
+}
+
+export async function lockAllGeneratedSections(taskId: string): Promise<GenerationTask> {
+  const response = await apiClient.post<GenerationTask>(
+    `${TASKS}/${taskId}/sections/lock-all/`,
   )
   return response.data
 }

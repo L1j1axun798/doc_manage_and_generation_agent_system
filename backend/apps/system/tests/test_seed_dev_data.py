@@ -23,7 +23,7 @@ def test_seed_dev_data_creates_idempotent_frontend_fixture(settings, tmp_path):
     assert Project.objects.filter(code="DEMO-FRONTEND").count() == 1
     project = Project.objects.get(code="DEMO-FRONTEND")
     assert ProjectMember.objects.filter(project=project).count() == 3
-    assert Folder.objects.filter(project=project, name="竣工资料档案").count() == 1
+    assert Folder.objects.filter(project=project, name="入场前置资料").count() == 1
     assert Document.objects.filter(title="机组叶片检测报告").count() == 1
     assert Document.objects.filter(title="缺陷复核记录").count() == 1
     assert DocumentGrant.objects.filter(document__title="缺陷复核记录").count() == 1

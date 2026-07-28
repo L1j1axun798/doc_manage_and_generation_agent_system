@@ -1,8 +1,16 @@
+import sys
+
 from django.core.management import call_command
 from django.core.management.base import BaseCommand
 
 from apps.document_generation.queues import QUEUE_NAME
 from apps.document_generation.recovery import recover_generation_tasks
+
+
+def worker_class_for_platform(platform: str = sys.platform) -> str:
+    if platform == "win32":
+        return "rq.worker.SimpleWorker"
+    return "rq.worker.Worker"
 
 
 class Command(BaseCommand):
@@ -17,7 +25,15 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         result = recover_generation_tasks()
+        worker_class = worker_class_for_platform()
         self.stdout.write(
             "recovered={recovered} queued={queued} queue_failures={queue_failures}".format(**result)
         )
-        call_command("rqworker", QUEUE_NAME, burst=options["burst"])
+        self.stdout.write(f"worker_class={worker_class} scheduler=enabled")
+        call_command(
+            "rqworker",
+            QUEUE_NAME,
+            burst=options["burst"],
+            with_scheduler=True,
+            worker_class=worker_class,
+        )

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import io
 import json
 import sys
 from collections import defaultdict
@@ -63,8 +64,8 @@ class ScoreRow:
     historical_entity_contamination: bool
     rag_hit_at_3: bool
     changed_character_ratio: float
-    baseline_minutes: float
-    agent_assisted_minutes: float
+    baseline_minutes: float | None
+    agent_assisted_minutes: float | None
 
 
 def _required(row: Mapping[str, str], field: str) -> str:
@@ -104,9 +105,27 @@ def _minutes(row: Mapping[str, str], field: str) -> float:
     return value
 
 
+def _optional_minutes(row: Mapping[str, str], field: str) -> float | None:
+    if not row.get(field, "").strip():
+        return None
+    return _minutes(row, field)
+
+
+def _read_csv_rows(path: Path) -> tuple[dict[str, str], ...]:
+    encoded = path.read_bytes()
+    try:
+        text = encoded.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        try:
+            text = encoded.decode("gb18030")
+        except UnicodeDecodeError as exc:
+            raise ValueError(f"{path.name} must use UTF-8 or GB18030 encoding") from exc
+    with io.StringIO(text, newline="") as source:
+        return tuple(csv.DictReader(source))
+
+
 def load_cases(path: Path) -> tuple[EvaluationCase, ...]:
-    with path.open(encoding="utf-8-sig", newline="") as source:
-        rows = tuple(csv.DictReader(source))
+    rows = _read_csv_rows(path)
     return tuple(
         EvaluationCase(
             evaluation_version=_required(row, "evaluation_version"),
@@ -123,9 +142,12 @@ def load_cases(path: Path) -> tuple[EvaluationCase, ...]:
     )
 
 
-def load_scorecard(path: Path) -> tuple[ScoreRow, ...]:
-    with path.open(encoding="utf-8-sig", newline="") as source:
-        rows = tuple(csv.DictReader(source))
+def load_scorecard(
+    path: Path,
+    *,
+    time_gate_waived: bool = False,
+) -> tuple[ScoreRow, ...]:
+    rows = _read_csv_rows(path)
     return tuple(
         ScoreRow(
             evaluation_version=_required(row, "evaluation_version"),
@@ -146,8 +168,16 @@ def load_scorecard(path: Path) -> tuple[ScoreRow, ...]:
             ),
             rag_hit_at_3=_boolean(row, "rag_hit_at_3"),
             changed_character_ratio=_ratio(row, "changed_character_ratio"),
-            baseline_minutes=_minutes(row, "baseline_minutes"),
-            agent_assisted_minutes=_minutes(row, "agent_assisted_minutes"),
+            baseline_minutes=(
+                _optional_minutes(row, "baseline_minutes")
+                if time_gate_waived
+                else _minutes(row, "baseline_minutes")
+            ),
+            agent_assisted_minutes=(
+                _optional_minutes(row, "agent_assisted_minutes")
+                if time_gate_waived
+                else _minutes(row, "agent_assisted_minutes")
+            ),
         )
         for row in rows
     )
@@ -188,12 +218,18 @@ def _review_sections(payload: Mapping[str, Any]) -> dict[str, Mapping[str, Any]]
     return indexed
 
 
-def _case_time(rows: Sequence[ScoreRow]) -> tuple[float, float]:
+def _case_time(rows: Sequence[ScoreRow]) -> tuple[float, float] | None:
     baselines = {row.baseline_minutes for row in rows}
     assisted = {row.agent_assisted_minutes for row in rows}
     if len(baselines) != 1 or len(assisted) != 1:
         raise ValueError("project timing must be identical on every section row")
-    return next(iter(baselines)), next(iter(assisted))
+    baseline = next(iter(baselines))
+    agent_assisted = next(iter(assisted))
+    if baseline is None and agent_assisted is None:
+        return None
+    if baseline is None or agent_assisted is None:
+        raise ValueError("project timing must provide both values or neither")
+    return baseline, agent_assisted
 
 
 def _resolve(repository_root: Path, value: str) -> Path:
@@ -257,6 +293,7 @@ def evaluate_phase5(
     repository_root: Path,
     blind_answer_version_ids: set[int] | None = None,
     expected_blind_case_samples: Mapping[str, str] | None = None,
+    time_gate_waived: bool = False,
 ) -> dict[str, Any]:
     issues: list[str] = []
     current_implementation_fingerprint = compute_implementation_fingerprint()
@@ -358,10 +395,7 @@ def evaluate_phase5(
         except (OSError, ValueError, json.JSONDecodeError) as exc:
             issues.append(f"REVIEW_BUNDLE_UNAVAILABLE:{case.blind_case_id}:{type(exc).__name__}")
             continue
-        if (
-            review_bundle.get("implementation_fingerprint")
-            != current_implementation_fingerprint
-        ):
+        if review_bundle.get("implementation_fingerprint") != current_implementation_fingerprint:
             issues.append(f"IMPLEMENTATION_FINGERPRINT_MISMATCH:{case.blind_case_id}")
         if tuple(review_sections) != ENTRY_PLAN_SECTION_CODES:
             issues.append(f"REVIEW_SECTION_SET_INVALID:{case.blind_case_id}")
@@ -371,12 +405,18 @@ def evaluate_phase5(
             if row.rag_hit_at_3 and (not isinstance(references, list) or not references):
                 issues.append(f"RAG_HIT_WITHOUT_RETRIEVAL:{case.blind_case_id}:{row.section_code}")
         try:
-            baseline, assisted = _case_time(rows)
+            timing = _case_time(rows)
         except ValueError:
             issues.append(f"INCONSISTENT_PROJECT_TIMING:{case.blind_case_id}")
             continue
-        total_baseline += baseline
-        total_assisted += assisted
+        if timing is None:
+            if not time_gate_waived:
+                issues.append(f"PROJECT_TIMING_MISSING:{case.blind_case_id}")
+                continue
+        elif not time_gate_waived:
+            baseline, assisted = timing
+            total_baseline += baseline
+            total_assisted += assisted
         accepted_rows.extend(rows)
 
     if any(row.major_fabricated_fact for row in accepted_rows):
@@ -404,7 +444,11 @@ def evaluate_phase5(
     changed_character_ratio = (
         sum(row.changed_character_ratio for row in accepted_rows) / row_count if row_count else 0.0
     )
-    time_reduction = 1 - total_assisted / total_baseline if total_baseline > 0 else 0.0
+    time_reduction = (
+        None
+        if time_gate_waived
+        else (1 - total_assisted / total_baseline if total_baseline > 0 else 0.0)
+    )
     factual_error_section_count = sum(row.scores["factual_accuracy"] < 5 for row in accepted_rows)
     clause_error_section_count = sum(row.scores["clause_correctness"] < 5 for row in accepted_rows)
     if hit_at_3 < MIN_HIT_AT_3:
@@ -413,7 +457,7 @@ def evaluate_phase5(
         issues.append(f"MINOR_EDIT_RATIO_BELOW_GATE:{minor_edit_ratio:.3f}")
     if usability_score < MIN_USABILITY_SCORE:
         issues.append(f"USABILITY_SCORE_BELOW_GATE:{usability_score:.3f}")
-    if time_reduction < MIN_TIME_REDUCTION:
+    if time_reduction is not None and time_reduction < MIN_TIME_REDUCTION:
         issues.append(f"TIME_REDUCTION_BELOW_GATE:{time_reduction:.3f}")
 
     return {
@@ -427,7 +471,12 @@ def evaluate_phase5(
         "factual_error_section_count": factual_error_section_count,
         "clause_error_section_count": clause_error_section_count,
         "professional_usability_average": round(usability_score, 6),
-        "time_reduction_ratio": round(time_reduction, 6),
+        "time_reduction_ratio": (
+            round(time_reduction, 6) if time_reduction is not None else None
+        ),
+        "time_gate_status": (
+            "waived_by_project_owner" if time_gate_waived else "evaluated"
+        ),
         "hard_gate_issue_count": len(issues),
         "issues": issues,
     }
@@ -447,14 +496,26 @@ def main(argv: list[str] | None = None) -> int:
         default=repository_root / "docs" / "document_agent" / "phase5" / "evaluation_scorecard.csv",
     )
     parser.add_argument("--output", type=Path)
+    parser.add_argument(
+        "--waive-time-gate",
+        action="store_true",
+        help=(
+            "Apply an explicit project-owner waiver when baseline and "
+            "Agent-assisted time cannot be estimated reliably."
+        ),
+    )
     args = parser.parse_args(argv)
     try:
         summary = evaluate_phase5(
             load_cases(args.cases),
-            load_scorecard(args.scorecard),
+            load_scorecard(
+                args.scorecard,
+                time_gate_waived=args.waive_time_gate,
+            ),
             repository_root=repository_root,
             blind_answer_version_ids=load_blind_answer_version_ids(repository_root),
             expected_blind_case_samples=load_expected_blind_case_samples(repository_root),
+            time_gate_waived=args.waive_time_gate,
         )
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         summary = {

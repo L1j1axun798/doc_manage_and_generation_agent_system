@@ -3,6 +3,11 @@ from __future__ import annotations
 from collections.abc import Sequence
 from uuid import UUID
 
+from .engine.canonical_facts import (
+    infer_component_codes,
+    infer_method_codes,
+    infer_risk_codes,
+)
 from .engine.contracts import (
     ClauseSelection,
     KnowledgeChunk,
@@ -63,6 +68,17 @@ class ORMKnowledgeRepository:
             is_active=True,
             approval_status=ApprovalStatus.APPROVED,
         )
+        if not rows.exists() and query.section_code == "risk_identification":
+            rows = KnowledgeSection.objects.filter(
+                business_type=query.business_type,
+                section_code__in=[
+                    "safety_measures",
+                    "emergency_plan",
+                    "construction_plan",
+                ],
+                is_active=True,
+                approval_status=ApprovalStatus.APPROVED,
+            )
         if query.client_code:
             rows = rows.filter(client_code__in=["", query.client_code])
         return tuple(
@@ -76,9 +92,9 @@ class ORMKnowledgeRepository:
                 paragraph_start=row.paragraph_start,
                 paragraph_end=row.paragraph_end,
                 text=row.text,
-                component_tags=tuple(row.component_tags),
-                method_tags=tuple(row.method_tags),
-                risk_tags=tuple(row.risk_tags),
+                component_tags=tuple(row.component_tags) or infer_component_codes(row.text),
+                method_tags=tuple(row.method_tags) or infer_method_codes(row.text),
+                risk_tags=tuple(row.risk_tags) or infer_risk_codes(row.text),
                 approval_status="approved",
                 content_sha256=row.content_sha256,
                 embedding=tuple(float(value) for value in row.embedding),

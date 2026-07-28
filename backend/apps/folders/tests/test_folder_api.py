@@ -283,7 +283,7 @@ def test_init_public_folders_command_creates_default_roots():
         == 11
     )
     assert {
-        "竣工资料档案",
+        "入场前置资料",
         "公司资质",
         "技术方案",
         "报告模板",

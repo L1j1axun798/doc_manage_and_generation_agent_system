@@ -37,6 +37,9 @@ export async function uploadDocument(payload: SingleDocumentUploadPayload): Prom
   formData.append('title', payload.title || '')
   formData.append('description', payload.description || '')
   formData.append('access_level', payload.access_level)
+  if (payload.source_type) {
+    formData.append('source_type', payload.source_type)
+  }
 
   const response = await apiClient.post<DocumentItem>('/documents/', formData)
   return response.data

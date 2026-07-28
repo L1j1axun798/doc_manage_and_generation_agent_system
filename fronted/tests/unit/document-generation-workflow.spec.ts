@@ -1,6 +1,8 @@
 import type { DocumentItem } from '@/modules/documents/documents.types'
 import {
+  factFieldDefinition,
   isEligibleEntrySource,
+  missingRequiredFactFields,
   proposalToConfirmedFact,
   shouldPollGenerationTask,
 } from '@/modules/document-generation/workflow'
@@ -11,10 +13,11 @@ function documentItem(overrides: Partial<DocumentItem> = {}): DocumentItem {
     project: 1,
     project_name: '项目',
     folder: 1,
-    folder_name: '技术方案',
+    folder_name: '入场前置资料',
     title: '入场任务通知',
     description: '',
     access_level: 'internal',
+    source_type: 'entrance_material',
     current_version: {
       id: 11,
       document: 1,
@@ -52,8 +55,11 @@ it('polls only while extraction or generation is running', () => {
   expect(shouldPollGenerationTask('failed')).toBe(false)
 })
 
-it('filters report and completion documents from source selection', () => {
+it('only accepts current entry-material documents as generation sources', () => {
   expect(isEligibleEntrySource(documentItem())).toBe(true)
+  expect(
+    isEligibleEntrySource(documentItem({ source_type: 'project_upload' })),
+  ).toBe(false)
   expect(
     isEligibleEntrySource(documentItem({ folder_name: '报告模板' })),
   ).toBe(false)
@@ -88,4 +94,22 @@ it('uses the first model evidence when confirming a proposed fact', () => {
     locator: { paragraph_index: 0, text_quote: '项目名称：示例项目' },
     confidence: 0.95,
   })
+})
+
+it('shows required canonical facts with Chinese labels and reports missing fields', () => {
+  expect(factFieldDefinition('inspection_component_codes').label).toBe('检测部件')
+  expect(factFieldDefinition('inspection_method_codes').options).toContainEqual({
+    value: 'PAUT',
+    label: '相控阵超声检测（PAUT）',
+  })
+  expect(
+    missingRequiredFactFields(
+      ['project_name', 'work_scope', 'risk_evidence_items'],
+      [{
+        field: 'project_name',
+        value: '项目',
+        value_type: 'string',
+      }],
+    ),
+  ).toEqual(['work_scope', 'risk_evidence_items'])
 })

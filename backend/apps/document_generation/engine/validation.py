@@ -5,6 +5,8 @@ import re
 from collections.abc import Sequence
 
 from .contracts import (
+    ENTRY_PLAN_SECTION_BLUEPRINTS,
+    ENTRY_PLAN_SECTION_MIN_CHARACTERS,
     ENTRY_PLAN_SECTION_TITLES,
     ConfirmedFact,
     GeneratedSection,
@@ -36,6 +38,18 @@ PLANNED_VALUE_FIELDS = frozenset(
     }
 )
 NUMBER_RE = re.compile(r"(?<![A-Za-z])\d+(?:\.\d+)?")
+SUBHEADING_RE = re.compile(r"^(?:[（(][一二三四五六七八九十]+[）)]|[一二三四五六七八九十]+、)")
+INTERNAL_CODE_LABELS = {
+    "tower_weld": "塔筒焊缝",
+    "high_strength_bolt": "高强度螺栓",
+    "pitch_bearing": "变桨轴承",
+    "blade_bolt": "叶片螺栓",
+    "tower_component": "塔筒部件",
+    "high_altitude": "高处作业",
+    "climbing_tower": "攀爬塔筒",
+    "mechanical_injury": "机械伤害",
+    "vehicle_traffic": "车辆交通",
+}
 
 
 def section_text(section: GeneratedSection) -> str:
@@ -45,6 +59,35 @@ def section_text(section: GeneratedSection) -> str:
         cell for table in section.tables for row in (table.headers, *table.rows) for cell in row
     )
     return "\n".join(parts)
+
+
+def _humanize_internal_codes(section: GeneratedSection) -> GeneratedSection:
+    def humanize(text: str) -> str:
+        for code, label in INTERNAL_CODE_LABELS.items():
+            text = text.replace(f"（{code}）", "").replace(f"({code})", "")
+            text = re.sub(
+                rf"(?<![A-Za-z0-9_]){re.escape(code)}(?![A-Za-z0-9_])",
+                label,
+                text,
+            )
+        return text
+
+    return section.model_copy(
+        update={
+            "title": humanize(section.title),
+            "paragraphs": tuple(humanize(paragraph) for paragraph in section.paragraphs),
+            "lists": tuple(tuple(humanize(item) for item in items) for items in section.lists),
+            "tables": tuple(
+                table.model_copy(
+                    update={
+                        "headers": tuple(humanize(header) for header in table.headers),
+                        "rows": tuple(tuple(humanize(cell) for cell in row) for row in table.rows),
+                    }
+                )
+                for table in section.tables
+            ),
+        }
+    )
 
 
 def _value_text(fact: ConfirmedFact) -> str:
@@ -65,6 +108,17 @@ def _strip_unsupported_numeric_sentences(
     for sentence in re.split(r"(?<=[。；！？\n])", text):
         unsupported = set(NUMBER_RE.findall(sentence)) - allowed_numbers
         if unsupported:
+            removed = True
+            continue
+        kept.append(sentence)
+    return "".join(kept).strip(), removed
+
+
+def _strip_forbidden_sentences(text: str) -> tuple[str, bool]:
+    removed = False
+    kept: list[str] = []
+    for sentence in re.split(r"(?<=[。；！？\n])", text):
+        if any(marker in sentence for marker in FORBIDDEN_OUTPUT_MARKERS):
             removed = True
             continue
         kept.append(sentence)
@@ -95,6 +149,7 @@ def normalize_section_provenance(
     context: SectionContext,
 ) -> GeneratedSection:
     """Deterministically ground declared scalar facts and register exact fact provenance."""
+    section = _humanize_internal_codes(section)
     facts_by_field = {fact.field: fact for fact in context.confirmed_facts}
     used_fields = list(dict.fromkeys(section.used_fact_fields))
     initial_text = section_text(section)
@@ -117,41 +172,68 @@ def normalize_section_provenance(
     )
     allowed_numbers = set(NUMBER_RE.findall(allowed_number_text))
     numeric_content_removed = False
+    forbidden_content_removed = False
     paragraphs: list[str] = []
     for paragraph in section.paragraphs:
-        cleaned, removed = _strip_unsupported_numeric_sentences(
-            paragraph,
+        cleaned, forbidden_removed = _strip_forbidden_sentences(paragraph)
+        cleaned, numeric_removed = _strip_unsupported_numeric_sentences(
+            cleaned,
             allowed_numbers=allowed_numbers,
         )
-        numeric_content_removed = numeric_content_removed or removed
+        forbidden_content_removed = forbidden_content_removed or forbidden_removed
+        numeric_content_removed = numeric_content_removed or numeric_removed
         if cleaned:
             paragraphs.append(cleaned)
     generated_lists: list[tuple[str, ...]] = []
     for items in section.lists:
+        forbidden_items = {
+            item for item in items if any(marker in item for marker in FORBIDDEN_OUTPUT_MARKERS)
+        }
+        unsupported_numeric_items = {
+            item
+            for item in items
+            if item not in forbidden_items and bool(set(NUMBER_RE.findall(item)) - allowed_numbers)
+        }
         kept_items = tuple(
             item
             for item in items
-            if not (set(NUMBER_RE.findall(item)) - allowed_numbers)
+            if item not in forbidden_items and item not in unsupported_numeric_items
         )
-        numeric_content_removed = numeric_content_removed or len(kept_items) != len(items)
+        forbidden_content_removed = forbidden_content_removed or bool(forbidden_items)
+        numeric_content_removed = numeric_content_removed or bool(unsupported_numeric_items)
         if kept_items:
             generated_lists.append(kept_items)
     generated_tables = []
     for table in section.tables:
+        if any(
+            any(marker in header for marker in FORBIDDEN_OUTPUT_MARKERS) for header in table.headers
+        ):
+            forbidden_content_removed = True
+            continue
         if any(set(NUMBER_RE.findall(header)) - allowed_numbers for header in table.headers):
             numeric_content_removed = True
             continue
+        forbidden_rows = {
+            row
+            for row in table.rows
+            if any(any(marker in cell for marker in FORBIDDEN_OUTPUT_MARKERS) for cell in row)
+        }
+        unsupported_numeric_rows = {
+            row
+            for row in table.rows
+            if row not in forbidden_rows
+            and any(set(NUMBER_RE.findall(cell)) - allowed_numbers for cell in row)
+        }
         kept_rows = tuple(
             row
             for row in table.rows
-            if not any(set(NUMBER_RE.findall(cell)) - allowed_numbers for cell in row)
+            if row not in forbidden_rows and row not in unsupported_numeric_rows
         )
-        numeric_content_removed = numeric_content_removed or len(kept_rows) != len(table.rows)
+        forbidden_content_removed = forbidden_content_removed or bool(forbidden_rows)
+        numeric_content_removed = numeric_content_removed or bool(unsupported_numeric_rows)
         generated_tables.append(table.model_copy(update={"rows": kept_rows}))
     planned_facts = tuple(
-        fact
-        for fact in context.confirmed_facts
-        if fact.field in PLANNED_VALUE_FIELDS
+        fact for fact in context.confirmed_facts if fact.field in PLANNED_VALUE_FIELDS
     )
     planning_language_added = False
     planned_paragraphs: list[str] = []
@@ -224,6 +306,13 @@ def normalize_section_provenance(
         if warning not in warnings:
             warnings.append(warning)
         missing = "被移除数值的当前项目依据需由技术负责人补充确认"
+        if missing not in missing_items:
+            missing_items.append(missing)
+    if forbidden_content_removed:
+        warning = "已确定性移除不属于入场计划的完工或报告语义"
+        if warning not in warnings:
+            warnings.append(warning)
+        missing = "被移除内容如涉及入场计划，应由技术负责人按入场语义重新表述"
         if missing not in missing_items:
             missing_items.append(missing)
     if planning_language_added:
@@ -313,12 +402,45 @@ class ControlledSectionValidator:
         if section.section_code != context.section_code:
             issues.append(self._error("SECTION_CODE_MISMATCH", "章节编码与上下文不一致", context))
 
+        if context.objective.startswith("质量结构要求："):
+            minimum_characters = ENTRY_PLAN_SECTION_MIN_CHARACTERS.get(context.section_code)
+            content_character_count = len(re.sub(r"\s+", "", text))
+            if minimum_characters is not None and content_character_count < minimum_characters:
+                issues.append(
+                    self._error(
+                        "SECTION_CONTENT_TOO_SHORT",
+                        (
+                            f"章节有效内容仅{content_character_count}字，"
+                            f"最低完整度要求为{minimum_characters}字"
+                        ),
+                        context,
+                    )
+                )
+            expected_topic_count = len(ENTRY_PLAN_SECTION_BLUEPRINTS.get(context.section_code, ()))
+            subheading_count = sum(
+                bool(SUBHEADING_RE.match(paragraph.strip())) for paragraph in section.paragraphs
+            )
+            if expected_topic_count and subheading_count < expected_topic_count:
+                issues.append(
+                    self._error(
+                        "SECTION_STRUCTURE_INCOMPLETE",
+                        (
+                            f"章节仅包含{subheading_count}个规范小节标题，"
+                            f"应覆盖{expected_topic_count}个章节要点"
+                        ),
+                        context,
+                    )
+                )
+
         for marker in FORBIDDEN_OUTPUT_MARKERS:
             if marker in text:
                 issues.append(
                     self._error(
                         "RESULT_CONTENT_FORBIDDEN",
-                        "入场四措两案不得包含完工结果、检测结论或报告语义",
+                        (
+                            f"章节正文命中禁用词“{marker}”；"
+                            "必须删除包含该词的整句，仅保留入场前计划内容"
+                        ),
                         context,
                     )
                 )

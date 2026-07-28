@@ -23,24 +23,30 @@ from .serializers import (
     GeneratedSectionSerializer,
     GeneratedSectionUpdateSerializer,
     GenerationFactConfirmSerializer,
+    GenerationPipelineCreateSerializer,
     GenerationSourceAddSerializer,
     GenerationTaskCreateSerializer,
     GenerationTaskSerializer,
+    GenerationTraceEventSerializer,
     ReviewActionSerializer,
     SectionLockSerializer,
+    TraceEventQuerySerializer,
 )
 from .services import (
     add_generation_sources,
     approve_generation_task,
+    confirm_and_request_generation,
     confirm_generation_facts,
     create_generation_task,
     edit_generated_section,
     export_generation_task,
+    lock_all_valid_sections,
     prepare_fact_confirmation,
     request_generation,
     request_section_regeneration,
     retry_generation_task,
     set_section_lock,
+    start_compilation_pipeline,
     submit_generation_review,
 )
 
@@ -94,14 +100,48 @@ class GenerationTaskViewSet(
     def get_serializer_class(self):
         return {
             "create": GenerationTaskCreateSerializer,
+            "pipeline": GenerationPipelineCreateSerializer,
             "sources": GenerationSourceAddSerializer,
             "confirm_facts": GenerationFactConfirmSerializer,
+            "confirm_and_generate": GenerationFactConfirmSerializer,
             "update_section": GeneratedSectionUpdateSerializer,
             "lock_section": SectionLockSerializer,
             "submit_review": ReviewActionSerializer,
             "approve": ReviewActionSerializer,
             "export": ExportSerializer,
         }.get(self.action, GenerationTaskSerializer)
+
+    @extend_schema(
+        request=GenerationPipelineCreateSerializer,
+        responses=GenerationTaskSerializer,
+    )
+    @action(detail=False, methods=["post"], url_path="pipeline")
+    def pipeline(self, request):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        project = writable_project_for_user(request.user, data["project_id"])
+        if project is None:
+            return Response(
+                {"detail": "项目不存在或当前用户无权编制入场资料"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        template = get_object_or_404(available_templates(), pk=data["template_id"])
+        task, created = start_compilation_pipeline(
+            actor=request.user,
+            project=project,
+            template=template,
+            document_version_ids=data["document_version_ids"],
+            document_purpose=data["document_purpose"],
+            business_type=data["business_type"],
+            idempotency_key=data["idempotency_key"],
+            initial_facts=data["facts"],
+            request=request,
+        )
+        return Response(
+            GenerationTaskSerializer(task, context=self.get_serializer_context()).data,
+            status=status.HTTP_202_ACCEPTED if created else status.HTTP_200_OK,
+        )
 
     @extend_schema(
         request=GenerationTaskCreateSerializer,
@@ -177,6 +217,49 @@ class GenerationTaskViewSet(
             request=request,
         )
         return Response(GenerationTaskSerializer(task).data)
+
+    @extend_schema(
+        request=GenerationFactConfirmSerializer,
+        responses=GenerationTaskSerializer,
+    )
+    @action(detail=True, methods=["put"], url_path="facts/confirm-and-generate")
+    def confirm_and_generate(self, request, pk=None):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        task = confirm_and_request_generation(
+            actor=request.user,
+            task=self.get_object(),
+            facts=serializer.validated_data["facts"],
+            request=request,
+        )
+        return Response(
+            GenerationTaskSerializer(task).data,
+            status=status.HTTP_202_ACCEPTED,
+        )
+
+    @extend_schema(request=None, responses=GenerationTaskSerializer)
+    @action(detail=True, methods=["post"], url_path="sections/lock-all")
+    def lock_all_sections(self, request, pk=None):
+        task = lock_all_valid_sections(
+            actor=request.user,
+            task=self.get_object(),
+            request=request,
+        )
+        return Response(GenerationTaskSerializer(task).data)
+
+    @extend_schema(
+        parameters=[TraceEventQuerySerializer],
+        responses=GenerationTraceEventSerializer(many=True),
+    )
+    @action(detail=True, methods=["get"], url_path="events")
+    def events(self, request, pk=None):
+        task = self.get_object()
+        query = TraceEventQuerySerializer(data=request.query_params)
+        query.is_valid(raise_exception=True)
+        rows = task.workflow_events.filter(
+            sequence__gt=query.validated_data["after_sequence"]
+        ).order_by("sequence")[:200]
+        return Response(GenerationTraceEventSerializer(rows, many=True).data)
 
     @extend_schema(request=None, responses=GenerationTaskSerializer)
     @action(detail=True, methods=["post"])

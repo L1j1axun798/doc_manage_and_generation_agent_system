@@ -11,7 +11,12 @@ from django.utils import timezone
 from rest_framework.exceptions import APIException, PermissionDenied, ValidationError
 
 from apps.audit.services import audit_log
-from apps.folders.defaults import ARCHIVE_ROOT, standard_root_for_code, standard_root_for_name
+from apps.folders.defaults import (
+    ARCHIVE_ROOT,
+    ENTRY_PREPARATION_ROOT_CODE,
+    standard_root_for_code,
+    standard_root_for_name,
+)
 from apps.folders.models import Folder
 from apps.projects.models import Project
 from common.storage import LocalDocumentStorage, StoredFile
@@ -58,6 +63,7 @@ def create_document(
     title: str = "",
     description: str = "",
     access_level: str = Document.AccessLevel.INTERNAL,
+    source_type: str = Document.SourceType.PROJECT_UPLOAD,
     request: Any = None,
     storage: LocalDocumentStorage | None = None,
 ) -> Document:
@@ -73,6 +79,7 @@ def create_document(
                 Project.objects.select_for_update().get(pk=folder.project_id)
             locked_folder = Folder.objects.select_for_update().get(pk=folder.pk)
             _ensure_upload_allowed(actor=actor, folder=locked_folder)
+            _ensure_source_type_matches_folder(source_type=source_type, folder=locked_folder)
             _ensure_folder_accepts_document(
                 folder=locked_folder,
                 title=document_title,
@@ -85,6 +92,7 @@ def create_document(
                 title=document_title,
                 description=description,
                 access_level=access_level,
+                source_type=source_type,
                 created_by=actor,
             )
             version = _create_version(
@@ -290,6 +298,10 @@ def move_document(
     if not can_update_document(actor, locked_document):
         raise PermissionDenied("无权移动该文档")
     _validate_target_folder(document=locked_document, folder=folder)
+    _ensure_source_type_matches_folder(
+        source_type=locked_document.source_type,
+        folder=folder,
+    )
     current_version = locked_document.current_version
     _ensure_folder_accepts_document(
         folder=folder,
@@ -497,6 +509,33 @@ def _ensure_upload_allowed(*, actor: Any, folder: Folder) -> None:
         raise PermissionDenied("无权上传文件")
 
 
+def _folder_is_within_root(folder: Folder, root_code: str) -> bool:
+    current: Folder | None = folder
+    visited: set[int] = set()
+    while current is not None and current.pk not in visited:
+        if current.code == root_code:
+            return True
+        visited.add(current.pk)
+        current = current.parent
+    return False
+
+
+def _ensure_source_type_matches_folder(*, source_type: str, folder: Folder) -> None:
+    is_entry_preparation_folder = _folder_is_within_root(
+        folder,
+        ENTRY_PREPARATION_ROOT_CODE,
+    )
+    if source_type == Document.SourceType.ENTRANCE_MATERIAL:
+        if folder.project_id is None or not is_entry_preparation_folder:
+            raise ValidationError(
+                "入场前置资料必须上传到当前项目的“入场前置资料”目录"
+            )
+        return
+
+    if is_entry_preparation_folder:
+        raise ValidationError("普通项目资料不能上传到“入场前置资料”目录")
+
+
 def _locked_document(document: Document) -> Document:
     return (
         Document.objects.select_for_update()
@@ -654,6 +693,7 @@ def document_snapshot(document: Document) -> dict[str, Any]:
         "title": document.title,
         "description": document.description,
         "access_level": document.access_level,
+        "source_type": document.source_type,
         "current_version_id": document.current_version_id,
         "lock_version": document.lock_version,
         "deleted_at": document.deleted_at.isoformat() if document.deleted_at else None,

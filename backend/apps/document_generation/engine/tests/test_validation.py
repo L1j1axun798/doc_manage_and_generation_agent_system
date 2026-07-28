@@ -12,6 +12,7 @@ from apps.document_generation.engine.contracts import (
     SourceLocator,
     ValidationSeverity,
 )
+from apps.document_generation.engine.sections import SectionContextBuilder
 from apps.document_generation.engine.validation import (
     ControlledSectionValidator,
     fact_citation_coverage,
@@ -210,6 +211,24 @@ def test_normalizer_removes_unsourced_numeric_threshold_and_records_gap() -> Non
     assert "UNSOURCED_NUMBER" not in _error_codes(normalized)
 
 
+def test_normalizer_removes_forbidden_result_sentence_before_validation() -> None:
+    section = _valid_section().model_copy(
+        update={
+            "paragraphs": (
+                "本次入场计划在当前风电场开展工作，计划涉及12项检测。",
+                "本章不形成检测结论。",
+                _clause().text,
+            )
+        }
+    )
+
+    normalized = normalize_section_provenance(section, _context())
+
+    assert all("检测结论" not in paragraph for paragraph in normalized.paragraphs)
+    assert any("确定性移除" in warning for warning in normalized.warnings)
+    assert "RESULT_CONTENT_FORBIDDEN" not in _error_codes(normalized)
+
+
 def test_normalizer_marks_every_confirmed_quantity_use_as_planned() -> None:
     section = _valid_section().model_copy(
         update={
@@ -233,6 +252,26 @@ def test_normalizer_uses_controlled_entry_plan_section_title() -> None:
     normalized = normalize_section_provenance(section, _context())
 
     assert normalized.title == "安全措施"
+
+
+def test_normalizer_humanizes_internal_component_and_risk_codes() -> None:
+    section = _valid_section().model_copy(
+        update={
+            "paragraphs": (
+                "塔筒焊缝（tower_weld）采用计划控制。",
+                "high_altitude与climbing_tower风险应落实监护。",
+            ),
+        }
+    )
+
+    normalized = normalize_section_provenance(section, _context())
+    text = "\n".join(normalized.paragraphs)
+
+    assert "tower_weld" not in text
+    assert "high_altitude" not in text
+    assert "climbing_tower" not in text
+    assert "塔筒焊缝" in text
+    assert "高处作业与攀爬塔筒" in text
 
 
 def test_planned_integer_does_not_match_digits_inside_another_number() -> None:
@@ -271,8 +310,41 @@ def test_validator_rejects_historical_entity_result_language_and_completed_quant
         }
     )
 
-    codes = _error_codes(section, blacklist=("历史风电场",))
+    validator = ControlledSectionValidator(historical_entity_blacklist=("历史风电场",))
+    issues = validator.validate(section, _context())
+    codes = {issue.code for issue in issues if issue.severity == ValidationSeverity.ERROR}
 
     assert "HISTORICAL_ENTITY_LEAKAGE" in codes
     assert "RESULT_CONTENT_FORBIDDEN" in codes
     assert "PLANNING_LANGUAGE_REQUIRED" in codes
+    result_issue = next(issue for issue in issues if issue.code == "RESULT_CONTENT_FORBIDDEN")
+    assert "经检测发现" in result_issue.message
+
+
+def test_quality_context_rejects_short_and_unstructured_section() -> None:
+    base_context = _context()
+    retrieval = RetrievalResult(
+        query=RetrievalQuery(
+            business_type="wind_turbine_inspection_four_measures_two_plans",
+            section_code="safety_measures",
+            query_text="安全措施",
+        ),
+        embedding_model_alias="fake",
+        embedding_dimension=1,
+    )
+    quality_context = SectionContextBuilder().build(
+        section_code="safety_measures",
+        confirmed_facts=base_context.confirmed_facts,
+        risk_profile=base_context.risk_profile,
+        clauses=base_context.clauses,
+        retrieval=retrieval,
+    )
+
+    issues = ControlledSectionValidator().validate(_valid_section(), quality_context)
+    codes = {issue.code for issue in issues if issue.severity == ValidationSeverity.ERROR}
+
+    assert "必须覆盖：" in quality_context.objective
+    assert "写作目标不少于3250个中文字符" in quality_context.objective
+    assert "确定性最低门禁为2600个中文字符" in quality_context.objective
+    assert "SECTION_CONTENT_TOO_SHORT" in codes
+    assert "SECTION_STRUCTURE_INCOMPLETE" in codes

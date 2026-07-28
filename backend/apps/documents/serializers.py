@@ -55,6 +55,7 @@ class DocumentSerializer(serializers.ModelSerializer):
             "title",
             "description",
             "access_level",
+            "source_type",
             "current_version",
             "can_download",
             "can_update",
@@ -134,6 +135,10 @@ class DocumentUploadSerializer(serializers.Serializer):
     access_level = serializers.ChoiceField(
         choices=Document.AccessLevel.choices,
         default=Document.AccessLevel.INTERNAL,
+    )
+    source_type = serializers.ChoiceField(
+        choices=Document.SourceType.choices,
+        default=Document.SourceType.PROJECT_UPLOAD,
     )
 
     def validate_file(self, uploaded_file):

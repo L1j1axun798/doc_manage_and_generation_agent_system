@@ -80,6 +80,27 @@ def test_conflicting_fact_values_are_not_automatically_selected() -> None:
     }
 
 
+def test_canonical_multi_value_facts_are_combined_instead_of_reported_as_conflicts() -> None:
+    result = FactMergeService().merge(
+        (
+            _candidate(
+                field="inspection_method_codes",
+                value=["UT"],
+                version_id=1,
+            ),
+            _candidate(
+                field="inspection_method_codes",
+                value=["PAUT", "UT"],
+                version_id=2,
+            ),
+        )
+    )
+
+    assert result.conflicts == ()
+    assert result.merged[0].value == ["PAUT", "UT"]
+    assert {item.source_document_version_id for item in result.merged[0].evidence} == {1, 2}
+
+
 def test_completion_result_candidate_is_rejected_instead_of_promoted() -> None:
     result = FactMergeService().merge(
         (

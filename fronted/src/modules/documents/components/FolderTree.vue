@@ -156,7 +156,7 @@ function getFolderIcon(name: string): Component {
     return FirstAidKit
   }
 
-  if (definition?.key === 'completion') {
+  if (definition?.key === 'entryPreparation') {
     return FolderChecked
   }
 

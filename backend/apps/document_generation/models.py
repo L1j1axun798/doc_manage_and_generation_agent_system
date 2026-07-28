@@ -201,6 +201,7 @@ class GenerationTask(models.Model):
         QUEUED = "queued", "已排队"
         GENERATING = "generating", "生成中"
         REVIEW_REQUIRED = "review_required", "待审核"
+        PENDING_APPROVAL = "pending_approval", "待批准"
         APPROVED = "approved", "已批准"
         EXPORTED = "exported", "已导出"
         FAILED = "failed", "失败"
@@ -308,6 +309,55 @@ class GenerationTask(models.Model):
 
     def __str__(self) -> str:
         return f"{self.project_id}:{self.id}:{self.status}"
+
+
+class GenerationTraceEvent(models.Model):
+    class EventType(models.TextChoices):
+        SYSTEM = "system", "系统"
+        TOOL = "tool", "工具"
+        MODEL = "model", "模型"
+        RAG = "rag", "RAG"
+
+    task = models.ForeignKey(
+        GenerationTask,
+        on_delete=models.CASCADE,
+        related_name="workflow_events",
+        verbose_name="生成任务",
+    )
+    sequence = models.PositiveIntegerField("序号")
+    stage = models.CharField("业务阶段", max_length=50)
+    event_type = models.CharField(
+        "事件类型",
+        max_length=20,
+        choices=EventType.choices,
+        default=EventType.SYSTEM,
+    )
+    tool = models.CharField("工具", max_length=100)
+    status = models.CharField("状态", max_length=20)
+    title = models.CharField("标题", max_length=160)
+    detail = models.TextField("说明", blank=True)
+    metadata = models.JSONField("结构化信息", default=dict, blank=True)
+    created_at = models.DateTimeField("发生时间", auto_now_add=True)
+
+    class Meta:
+        ordering = ["sequence", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["task", "sequence"],
+                name="docgen_trace_task_seq_uq",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["task", "sequence"],
+                name="docgen_trace_task_idx",
+            ),
+        ]
+        verbose_name = "四措两案工作流事件"
+        verbose_name_plural = "四措两案工作流事件"
+
+    def __str__(self) -> str:
+        return f"{self.task_id}:{self.sequence}:{self.tool}:{self.status}"
 
 
 class GenerationSource(models.Model):

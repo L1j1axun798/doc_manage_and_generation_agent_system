@@ -18,6 +18,7 @@ from apps.document_generation.engine.errors import AgentError
 from apps.document_generation.providers.llm import (
     LLMProviderConfig,
     OpenAICompatibleLLMProvider,
+    PromptCatalog,
 )
 
 
@@ -64,9 +65,29 @@ def test_environment_defaults_match_deployment_examples() -> None:
         }
     )
 
-    assert provider.config.model_alias == "qwen3.7-plus"
+    assert provider.config.model_alias == "qwen3.6-plus"
     assert provider.config.max_attempts == 3
     assert provider.config.retry_wait_seconds == 0.5
+
+
+def test_nested_provider_error_details_are_preserved_for_diagnosis() -> None:
+    details = OpenAICompatibleLLMProvider._provider_error_details(
+        403,
+        {
+            "request_id": "request-403",
+            "error": {
+                "code": "AllocationQuota.FreeTierOnly",
+                "message": "Free quota is exhausted",
+            },
+        },
+    )
+
+    assert details == {
+        "status": 403,
+        "provider_code": "AllocationQuota.FreeTierOnly",
+        "request_id": "request-403",
+        "provider_message": "Free quota is exhausted",
+    }
 
 
 def test_section_schema_is_repaired_at_most_once_and_usage_is_recorded() -> None:
@@ -97,6 +118,8 @@ def test_section_schema_is_repaired_at_most_once_and_usage_is_recorded() -> None
     assert calls[0]["enable_thinking"] is False
     assert calls[0]["max_tokens"] == 4096
     assert calls[0]["temperature"] == 0
+    assert "原输出的校验错误" in str(calls[1]["messages"])
+    assert "title" in str(calls[1]["messages"])
     assert [record.purpose for record in provider.usage_records] == [
         ModelCallPurpose.SECTION_GENERATION,
         ModelCallPurpose.SCHEMA_REPAIR,
@@ -143,6 +166,120 @@ def test_flat_section_list_is_safely_normalized_without_second_model_call() -> N
     section = provider.draft_section(_context())
 
     assert section.lists == (("入场前确认作业条件", "组织安全交底"),)
+    assert call_count == 1
+
+
+def test_duplicate_provenance_is_safely_normalized_without_rewriting_body() -> None:
+    call_count = 0
+    body = "入场前技术准备正文不得被结构修复缩短。" * 200
+
+    def transport(endpoint, headers, payload, timeout):
+        nonlocal call_count
+        call_count += 1
+        return (
+            _response(
+                {
+                    "section_code": "technical_measures",
+                    "title": "技术措施",
+                    "paragraphs": [body],
+                    "used_fact_fields": ["site_name", "site_name"],
+                    "used_clause_ids": ["clause-1", "clause-1"],
+                }
+            ),
+            "duplicate-provenance-request",
+        )
+
+    provider = OpenAICompatibleLLMProvider(_config(), transport=transport)
+
+    section = provider.draft_section(_context())
+
+    assert section.paragraphs == (body,)
+    assert section.used_fact_fields == ("site_name",)
+    assert section.used_clause_ids == ("clause-1",)
+    assert call_count == 1
+
+
+def test_harmless_extra_schema_fields_are_removed_without_rewriting_body() -> None:
+    call_count = 0
+    body = "入场前计划正文必须原样保留。" * 200
+
+    def transport(endpoint, headers, payload, timeout):
+        nonlocal call_count
+        call_count += 1
+        return (
+            _response(
+                {
+                    "section_code": "overview",
+                    "title": "工程概况",
+                    "paragraphs": [body],
+                    "unexpected_summary": "不得进入契约",
+                    "citations": [
+                        {
+                            "source_document_version_id": 134,
+                            "locator": {
+                                "paragraph_index": 1,
+                                "text_quote": "依据" * 150,
+                                "unexpected_locator": "ignored",
+                            },
+                            "unexpected_citation": "ignored",
+                        }
+                    ],
+                }
+            ),
+            "extra-fields-request",
+        )
+
+    provider = OpenAICompatibleLLMProvider(_config(), transport=transport)
+
+    section = provider.draft_section(_context())
+
+    assert section.paragraphs == (body,)
+    assert len(section.citations[0].locator.text_quote or "") == 200
+    assert call_count == 1
+
+
+def test_qwen_object_arrays_are_normalized_without_model_rewrite() -> None:
+    call_count = 0
+    body = "入场前计划正文必须完整保留。" * 200
+
+    def transport(endpoint, headers, payload, timeout):
+        nonlocal call_count
+        call_count += 1
+        return (
+            _response(
+                {
+                    "section_code": "overview",
+                    "title": "工程概况",
+                    "paragraphs": [
+                        {"content": "（一）项目基本信息和工作范围"},
+                        {"content": body},
+                    ],
+                    "lists": None,
+                    "tables": None,
+                    "citations": None,
+                    "used_fact_fields": [
+                        {
+                            "field": "project_name",
+                            "value": "当前项目",
+                            "fact_field": "project_name",
+                        }
+                    ],
+                    "used_clause_ids": None,
+                    "missing_items": None,
+                    "warnings": None,
+                }
+            ),
+            "qwen-object-arrays-request",
+        )
+
+    provider = OpenAICompatibleLLMProvider(_config(), transport=transport)
+
+    section = provider.draft_section(_context())
+
+    assert section.paragraphs == ("（一）项目基本信息和工作范围", body)
+    assert section.used_fact_fields == ("project_name",)
+    assert section.lists == ()
+    assert section.citations == ()
     assert call_count == 1
 
 
@@ -214,6 +351,16 @@ def test_fact_extraction_uses_structured_schema() -> None:
 
     assert len(facts) == 1
     assert facts[0].field == "site_name"
+
+
+def test_fact_extraction_prompt_declares_canonical_required_fields() -> None:
+    version, prompt = PromptCatalog().fact_extraction()
+
+    assert version == "fact_extraction/v2"
+    assert "work_scope" in prompt
+    assert "inspection_component_codes" in prompt
+    assert "inspection_method_codes" in prompt
+    assert "risk_evidence_items" in prompt
 
 
 def test_fact_extraction_rejects_source_version_not_in_current_document() -> None:

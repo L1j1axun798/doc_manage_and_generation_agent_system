@@ -76,13 +76,13 @@ class PromptCatalog:
         self.root = root or Path(__file__).resolve().parents[1] / "prompts"
 
     def fact_extraction(self) -> tuple[str, str]:
-        return "fact_extraction/v1", self._read("fact_extraction/v1.md")
+        return "fact_extraction/v2", self._read("fact_extraction/v2.md")
 
     def section_generation(self) -> tuple[str, str]:
-        return "section_generation/v1", self._read("section_generation/v1.md")
+        return "section_generation/v2", self._read("section_generation/v2.md")
 
     def section_revision(self) -> tuple[str, str]:
-        return "section_revision/v1", self._read("section_revision/v1.md")
+        return "section_revision/v2", self._read("section_revision/v2.md")
 
     def schema_repair(self) -> tuple[str, str]:
         return "schema_repair/v1", self._read("schema_repair/v1.md")
@@ -122,7 +122,7 @@ class OpenAICompatibleLLMProvider:
             LLMProviderConfig(
                 base_url=values.get("LLM_BASE_URL", ""),
                 api_key=values.get("LLM_API_KEY", ""),
-                model_alias=values.get("LLM_MODEL", "qwen3.7-plus"),
+                model_alias=values.get("LLM_MODEL", "qwen3.6-plus"),
                 timeout_seconds=float(values.get("LLM_TIMEOUT_SECONDS", "60")),
                 max_attempts=int(values.get("LLM_MAX_ATTEMPTS", "3")),
                 retry_wait_seconds=float(values.get("LLM_RETRY_WAIT_SECONDS", "0.5")),
@@ -261,18 +261,26 @@ class OpenAICompatibleLLMProvider:
         )
         try:
             return self._validate_schema_output(raw_output, schema)
-        except (ValidationError, ValueError):
-            return self._repair_once(raw_output, schema)
+        except (ValidationError, ValueError) as exc:
+            return self._repair_once(
+                raw_output,
+                schema,
+                validation_error=str(exc),
+            )
 
     def _repair_once(
         self,
         raw_output: str,
         schema: type[SchemaModel],
+        *,
+        validation_error: str | None = None,
     ) -> SchemaModel:
         version, instructions = self.prompt_catalog.schema_repair()
+        error_context = f"\n\n原输出的校验错误：\n{validation_error}" if validation_error else ""
         prompt = (
             f"{instructions}\n\n目标Schema：\n"
             f"{json.dumps(schema.model_json_schema(), ensure_ascii=False, sort_keys=True)}"
+            f"{error_context}"
             f"\n\n待修复输出：\n{raw_output}"
         )
         repaired = self._chat(
@@ -292,13 +300,107 @@ class OpenAICompatibleLLMProvider:
     ) -> SchemaModel:
         payload = json.loads(raw_output)
         if schema is GeneratedSection and isinstance(payload, dict):
+            allowed_fields = set(GeneratedSection.model_fields)
+            payload = {key: value for key, value in payload.items() if key in allowed_fields}
+            for field_name, candidate_keys in {
+                "paragraphs": ("content", "text", "paragraph"),
+                "used_fact_fields": ("field", "fact_field", "value"),
+                "used_clause_ids": ("clause_id", "id", "value"),
+                "missing_items": ("content", "text", "item"),
+                "warnings": ("content", "text", "warning"),
+            }.items():
+                values = payload.get(field_name)
+                if values is None:
+                    payload[field_name] = []
+                    continue
+                if not isinstance(values, list):
+                    continue
+                normalized_values: list[object] = []
+                for item in values:
+                    if isinstance(item, str):
+                        normalized_values.append(item)
+                        continue
+                    if not isinstance(item, Mapping):
+                        normalized_values.append(item)
+                        continue
+                    for key in candidate_keys:
+                        candidate = item.get(key)
+                        if isinstance(candidate, str) and candidate.strip():
+                            normalized_values.append(candidate)
+                            break
+                    else:
+                        normalized_values.append(item)
+                payload[field_name] = normalized_values
+            for field_name in ("tables", "citations"):
+                if payload.get(field_name) is None:
+                    payload[field_name] = []
             list_groups = payload.get("lists")
+            if list_groups is None:
+                payload["lists"] = []
+                list_groups = []
             if (
                 isinstance(list_groups, list)
                 and list_groups
                 and all(isinstance(item, str) for item in list_groups)
             ):
                 payload = {**payload, "lists": [list_groups]}
+            elif isinstance(list_groups, list):
+                payload["lists"] = [
+                    group.get("items")
+                    if isinstance(group, Mapping) and isinstance(group.get("items"), list)
+                    else group
+                    for group in list_groups
+                ]
+            for field_name in ("used_fact_fields", "used_clause_ids"):
+                values = payload.get(field_name)
+                if isinstance(values, list) and all(isinstance(item, str) for item in values):
+                    # Duplicate provenance identifiers are a common harmless model
+                    # formatting error. Repairing them deterministically preserves
+                    # the complete generated body instead of asking the model to
+                    # rewrite (and potentially shorten) the whole section.
+                    payload[field_name] = list(dict.fromkeys(values))
+            citations = payload.get("citations")
+            if isinstance(citations, list):
+                citation_fields = {
+                    "source_document_version_id",
+                    "locator",
+                    "chunk_id",
+                    "fact_field",
+                }
+                locator_fields = {
+                    "heading_path",
+                    "paragraph_index",
+                    "page",
+                    "table_index",
+                    "text_quote",
+                }
+                normalized_citations = []
+                for citation in citations:
+                    if not isinstance(citation, dict):
+                        normalized_citations.append(citation)
+                        continue
+                    normalized_citation = {
+                        key: value for key, value in citation.items() if key in citation_fields
+                    }
+                    locator = normalized_citation.get("locator")
+                    if isinstance(locator, dict):
+                        normalized_locator = {
+                            key: value for key, value in locator.items() if key in locator_fields
+                        }
+                        quote = normalized_locator.get("text_quote")
+                        if isinstance(quote, str):
+                            normalized_locator["text_quote"] = quote[:200]
+                        normalized_citation["locator"] = normalized_locator
+                    normalized_citations.append(normalized_citation)
+                payload["citations"] = normalized_citations
+            tables = payload.get("tables")
+            if isinstance(tables, list):
+                payload["tables"] = [
+                    {key: value for key, value in table.items() if key in {"headers", "rows"}}
+                    if isinstance(table, dict)
+                    else table
+                    for table in tables
+                ]
         return schema.model_validate(payload)
 
     def _chat(
@@ -416,6 +518,27 @@ class OpenAICompatibleLLMProvider:
         return prompt_tokens, completion_tokens
 
     @staticmethod
+    def _provider_error_details(
+        status: int,
+        error_payload: object,
+    ) -> dict[str, object]:
+        details: dict[str, object] = {"status": status}
+        if not isinstance(error_payload, Mapping):
+            return details
+        nested_error = error_payload.get("error")
+        error = nested_error if isinstance(nested_error, Mapping) else error_payload
+        provider_code = error.get("code")
+        request_id = error_payload.get("request_id") or error.get("request_id")
+        provider_message = error.get("message")
+        if isinstance(provider_code, str):
+            details["provider_code"] = provider_code
+        if isinstance(request_id, str):
+            details["request_id"] = request_id
+        if isinstance(provider_message, str):
+            details["provider_message"] = provider_message[:300]
+        return details
+
+    @staticmethod
     def _urllib_transport(
         endpoint: str,
         headers: Mapping[str, str],
@@ -442,13 +565,10 @@ class OpenAICompatibleLLMProvider:
             details: dict[str, object] = {"status": exc.code}
             try:
                 error_payload = json.loads(exc.read())
-                if isinstance(error_payload, Mapping):
-                    provider_code = error_payload.get("code")
-                    request_id = error_payload.get("request_id")
-                    if isinstance(provider_code, str):
-                        details["provider_code"] = provider_code
-                    if isinstance(request_id, str):
-                        details["request_id"] = request_id
+                details = OpenAICompatibleLLMProvider._provider_error_details(
+                    exc.code,
+                    error_payload,
+                )
             except (json.JSONDecodeError, UnicodeDecodeError):
                 pass
             raise AgentError(code, "模型服务返回错误", details=details) from exc

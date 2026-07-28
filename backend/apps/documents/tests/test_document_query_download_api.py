@@ -38,14 +38,18 @@ def create_document_via_api(
     folder: Folder,
     title: str,
     content: bytes,
+    source_type: str | None = None,
 ):
+    payload = {
+        "folder": folder.id,
+        "title": title,
+        "file": upload_file(f"{title}.pdf", content),
+    }
+    if source_type is not None:
+        payload["source_type"] = source_type
     response = client.post(
         "/api/v1/documents/",
-        {
-            "folder": folder.id,
-            "title": title,
-            "file": upload_file(f"{title}.pdf", content),
-        },
+        payload,
     )
     assert response.status_code == 201
     return response.json()
@@ -308,7 +312,13 @@ def test_public_root_folder_filter_includes_matching_project_folders(client, tmp
         created_by=admin,
     )
     client.force_login(admin)
-    create_document_via_api(client, folder=project_root, title="标准目录报告", content=b"standard")
+    create_document_via_api(
+        client,
+        folder=project_root,
+        title="标准目录报告",
+        content=b"standard",
+        source_type=Document.SourceType.ENTRANCE_MATERIAL,
+    )
     create_document_via_api(
         client,
         folder=legacy_project_folder,

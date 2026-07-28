@@ -46,6 +46,7 @@ def test_fake_pipeline_runs_in_deterministic_tool_order(
         "build_risk_profile",
         "select_clause_blocks",
         "retrieve_reference_sections",
+        "rag_context_ready",
         "build_section_context",
         "draft_document_section",
         "normalize_section_provenance",

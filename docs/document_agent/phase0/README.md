@@ -78,7 +78,7 @@
 
 ## 模型选型
 
-- LLM：阿里云百炼 `qwen3.7-plus`，显式 `enable_thinking=false`，使用 JSON Mode，
+- LLM：阿里云百炼 `qwen3.6-plus`，显式 `enable_thinking=false`，使用 JSON Mode，
   单章最多4096输出Token；
 - Embedding：阿里云百炼 `text-embedding-v4`，固定 1024 维；
 - 地域：华北 2（北京）`cn-beijing`；

@@ -23,6 +23,8 @@ export interface DocumentVersion {
   created_at: string
 }
 
+export type DocumentSourceType = 'project_upload' | 'entrance_material'
+
 export interface DocumentItem {
   id: number
   project: number | null
@@ -32,6 +34,7 @@ export interface DocumentItem {
   title: string
   description: string
   access_level: 'internal' | 'restricted'
+  source_type: DocumentSourceType
   current_version: DocumentVersion | null
   can_download: boolean
   can_update: boolean
@@ -54,6 +57,7 @@ export interface DocumentListQuery {
   ordering?: string
   project?: number
   folder?: number
+  source_type?: DocumentSourceType
 }
 
 export interface DocumentUploadPayload {
@@ -62,6 +66,7 @@ export interface DocumentUploadPayload {
   title?: string
   description?: string
   access_level: 'internal' | 'restricted'
+  source_type?: DocumentSourceType
 }
 
 export interface SingleDocumentUploadPayload {
@@ -70,6 +75,7 @@ export interface SingleDocumentUploadPayload {
   title?: string
   description?: string
   access_level: 'internal' | 'restricted'
+  source_type?: DocumentSourceType
 }
 
 export interface DocumentUpdatePayload {

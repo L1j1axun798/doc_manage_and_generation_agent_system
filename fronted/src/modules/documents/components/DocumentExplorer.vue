@@ -25,6 +25,7 @@ import type {
   DocumentMovePayload,
   DocumentUpdatePayload,
   DocumentUploadPayload,
+  DocumentSourceType,
   FolderTreeNode,
 } from '../documents.types'
 import DocumentDetailDrawer from './DocumentDetailDrawer.vue'
@@ -49,6 +50,9 @@ const props = withDefaults(
     scope?: 'all' | 'public' | 'project'
     syncSearchQuery?: boolean
     projectId?: number
+    fixedFolderCode?: string
+    sourceType?: DocumentSourceType
+    excludedMutationFolderCodes?: string[]
   }>(),
   {
     folderLayout: 'side',
@@ -57,6 +61,7 @@ const props = withDefaults(
     showFolderNavigation: true,
     scope: 'all',
     syncSearchQuery: false,
+    excludedMutationFolderCodes: () => [],
   },
 )
 
@@ -106,6 +111,16 @@ const shouldMoveToPublicRootsOnly = computed(
 const publicRootNodes = computed(() =>
   isTopPublicFolderMode.value ? getPublicRootFolderNodes(folderTree.value) : [],
 )
+const fixedFolderNode = computed(() =>
+  props.fixedFolderCode ? findFolderByCode(folderTree.value, props.fixedFolderCode) : undefined,
+)
+const effectiveFolderId = computed(() => fixedFolderNode.value?.id ?? selectedFolderId.value)
+const mutationFolderTree = computed(() => {
+  if (fixedFolderNode.value) {
+    return [fixedFolderNode.value]
+  }
+  return excludeFolderCodes(folderTree.value, new Set(props.excludedMutationFolderCodes))
+})
 const selectedPublicRootNode = computed<PublicRootFolderNode | undefined>(() => {
   const folderId = selectedFolderId.value
   if (!isTopPublicFolderMode.value || folderId === undefined) {
@@ -116,6 +131,9 @@ const selectedPublicRootNode = computed<PublicRootFolderNode | undefined>(() => 
     (node) => node.id === folderId || hasDescendant(node, folderId),
   )
 })
+const isEntryPreparationSelection = computed(
+  () => selectedPublicRootNode.value?.publicRootKey === 'entryPreparation',
+)
 const subfolderPanelRoot = computed(() => {
   const root = selectedPublicRootNode.value
   if (!root || !['company', 'staff'].includes(root.publicRootKey)) {
@@ -192,16 +210,22 @@ const subfolderCreateButtonText = computed(() => (isStaffRoot.value ? '添加用
 
 onMounted(async () => {
   applyRouteSearch(false)
-  await Promise.all([props.showFolders ? loadFolderTree() : Promise.resolve(), loadDocuments()])
+  await reloadExplorer()
 })
 
 watch(
-  () => [props.showFolders, props.scope, props.projectId] as const,
+  () => [
+    props.showFolders,
+    props.scope,
+    props.projectId,
+    props.fixedFolderCode,
+    props.sourceType,
+  ] as const,
   () => {
     selectedFolderId.value = undefined
     page.value = 1
     folderTree.value = []
-    void Promise.all([props.showFolders ? loadFolderTree() : Promise.resolve(), loadDocuments()])
+    void reloadExplorer()
   },
 )
 
@@ -259,12 +283,22 @@ async function loadFolderTree(): Promise<void> {
 
   try {
     folderTree.value = await fetchFolderTree(resolveFolderTreeParam())
+    if (fixedFolderNode.value) {
+      selectedFolderId.value = fixedFolderNode.value.id
+    }
     syncTopFolderSelection()
   } catch (error) {
     ElMessage.error(getErrorMessage(error))
   } finally {
     treeLoading.value = false
   }
+}
+
+async function reloadExplorer(): Promise<void> {
+  if (props.showFolders) {
+    await loadFolderTree()
+  }
+  await loadDocuments()
 }
 
 function syncTopFolderSelection(): void {
@@ -289,6 +323,28 @@ function syncTopFolderSelection(): void {
   if (!selectedFolderExists) {
     selectedFolderId.value = publicRootNodes.value[0].id
   }
+}
+
+function findFolderByCode(nodes: FolderTreeNode[], code: string): FolderTreeNode | undefined {
+  for (const node of nodes) {
+    if (node.code === code) {
+      return node
+    }
+    const child = findFolderByCode(node.children, code)
+    if (child) {
+      return child
+    }
+  }
+  return undefined
+}
+
+function excludeFolderCodes(nodes: FolderTreeNode[], excludedCodes: Set<string>): FolderTreeNode[] {
+  return nodes
+    .filter((node) => !excludedCodes.has(node.code))
+    .map((node) => ({
+      ...node,
+      children: excludeFolderCodes(node.children, excludedCodes),
+    }))
 }
 
 function hasDescendant(node: FolderTreeNode, folderId: number): boolean {
@@ -414,6 +470,13 @@ async function deleteSubfolder(item: FolderTreeNode): Promise<void> {
 }
 
 async function loadDocuments(): Promise<void> {
+  if (props.fixedFolderCode && !fixedFolderNode.value) {
+    documents.value = []
+    total.value = 0
+    listLoading.value = false
+    return
+  }
+
   if (isTopPublicFolderMode.value && selectedFolderId.value === undefined && !search.value.trim()) {
     documents.value = []
     total.value = 0
@@ -428,6 +491,16 @@ async function loadDocuments(): Promise<void> {
     return
   }
 
+  if (
+    selectedPublicRootNode.value?.publicRootKey === 'entryPreparation'
+    && selectedFolderId.value === selectedPublicRootNode.value.id
+  ) {
+    documents.value = []
+    total.value = 0
+    listLoading.value = false
+    return
+  }
+
   listLoading.value = true
 
   try {
@@ -436,7 +509,12 @@ async function loadDocuments(): Promise<void> {
       search: search.value,
       ordering: ordering.value,
       project: props.scope === 'project' ? props.projectId : undefined,
-      folder: shouldShowFolderNavigation.value ? selectedFolderId.value : undefined,
+      folder: props.fixedFolderCode
+        ? effectiveFolderId.value
+        : shouldShowFolderNavigation.value
+          ? selectedFolderId.value
+          : undefined,
+      source_type: props.sourceType,
     }
     const response: ApiPage<DocumentItem> = isTrashMode.value
       ? await fetchTrashDocuments(query)
@@ -495,6 +573,7 @@ async function handleUpload(payload: DocumentUploadPayload): Promise<void> {
           title: payload.files.length === 1 ? payload.title : '',
           description: payload.description,
           access_level: payload.access_level,
+          source_type: props.sourceType,
         })
         successCount += 1
       } catch (error) {
@@ -687,9 +766,10 @@ async function handleRestore(document: DocumentItem): Promise<void> {
 
     <div class="document-explorer__workspace">
       <slot name="header" />
+      <slot v-if="isEntryPreparationSelection" name="entry-preparation" />
 
       <section
-        v-if="subfolderPanelRoot"
+        v-if="!isEntryPreparationSelection && subfolderPanelRoot"
         class="document-subfolder-panel"
         :class="{
           'document-subfolder-panel--company': subfolderPanelRoot?.publicRootKey === 'company',
@@ -756,7 +836,10 @@ async function handleRestore(document: DocumentItem): Promise<void> {
         />
       </section>
 
-      <div v-if="shouldShowDocumentResults" class="document-explorer__actions">
+      <div
+        v-if="!isEntryPreparationSelection && shouldShowDocumentResults"
+        class="document-explorer__actions"
+      >
         <DocumentSearchPanel
           v-model:ordering="ordering"
           v-model:search="search"
@@ -789,7 +872,7 @@ async function handleRestore(document: DocumentItem): Promise<void> {
       </div>
 
       <DocumentTable
-        v-if="shouldShowDocumentResults"
+        v-if="!isEntryPreparationSelection && shouldShowDocumentResults"
         :documents="documents"
         :fixed-actions="folderLayout !== 'top'"
         :height="folderLayout === 'top' ? 480 : undefined"
@@ -807,11 +890,19 @@ async function handleRestore(document: DocumentItem): Promise<void> {
       />
 
       <el-empty
-        v-if="shouldShowDocumentResults && isEmpty && folderLayout !== 'top'"
+        v-if="
+          !isEntryPreparationSelection
+          && shouldShowDocumentResults
+          && isEmpty
+          && folderLayout !== 'top'
+        "
         description="暂无资料"
       />
 
-      <footer v-if="shouldShowDocumentResults" class="document-explorer__pagination">
+      <footer
+        v-if="!isEntryPreparationSelection && shouldShowDocumentResults"
+        class="document-explorer__pagination"
+      >
         <el-pagination
           background
           layout="prev, pager, next, total"
@@ -832,8 +923,8 @@ async function handleRestore(document: DocumentItem): Promise<void> {
     <DocumentUploadDialog
       v-if="!isTrashMode"
       v-model="uploadVisible"
-      :folders="folderTree"
-      :initial-folder-id="selectedFolderId"
+      :folders="mutationFolderTree"
+      :initial-folder-id="effectiveFolderId"
       :loading="mutationLoading"
       @submit="handleUpload"
     />
@@ -848,7 +939,7 @@ async function handleRestore(document: DocumentItem): Promise<void> {
     <DocumentMoveDialog
       v-model="moveVisible"
       :document="actionDocument"
-      :folders="folderTree"
+      :folders="mutationFolderTree"
       :loading="mutationLoading"
       :public-root-only="shouldMoveToPublicRootsOnly"
       @submit="handleMove"

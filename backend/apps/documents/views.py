@@ -52,7 +52,7 @@ class DocumentViewSet(
     serializer_class = DocumentSerializer
     parser_classes = [MultiPartParser, FormParser, JSONParser]
     permission_classes = [IsAuthenticated]
-    filterset_fields = ["project"]
+    filterset_fields = ["project", "source_type"]
     search_fields = [
         "title",
         "description",
@@ -112,6 +112,7 @@ class DocumentViewSet(
             title=serializer.validated_data.get("title", ""),
             description=serializer.validated_data.get("description", ""),
             access_level=serializer.validated_data["access_level"],
+            source_type=serializer.validated_data["source_type"],
             request=request,
         )
         return Response(

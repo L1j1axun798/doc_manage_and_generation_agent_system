@@ -44,7 +44,7 @@ it('keeps only requested public root folders in fixed display order', () => {
   ])
 
   expect(nodes.map((node) => node.displayName)).toEqual([
-    '竣工资料档案',
+    '入场前置资料',
     '公司资质',
     '技术方案',
     '报告模板',
@@ -80,7 +80,7 @@ it('uses real archive root with archive years as child folders', () => {
     }),
   ])
 
-  expect(nodes.map((node) => node.displayName)).toEqual(['竣工资料档案', '已归档文件'])
+  expect(nodes.map((node) => node.displayName)).toEqual(['入场前置资料', '已归档文件'])
   expect(nodes.at(-1)?.id).toBe(9)
   expect(nodes.at(-1)?.children.map((node) => node.name)).toEqual([
     '2026年归档资料',
