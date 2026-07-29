@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Mapping
 from pathlib import Path
 from typing import cast
 
@@ -19,6 +20,9 @@ from .engine.contracts import (
     ConfirmedFact,
     FactCandidate,
     GenerationRequest,
+    KnowledgeChunk,
+    KnowledgeChunkDraft,
+    KnowledgeSectionInput,
     ParsedDocument,
     SourceDocument,
     TemplateDocument,
@@ -32,15 +36,107 @@ from .engine.fakes import (
 from .engine.orchestrator import GenerationOrchestrator
 from .engine.parsing import EntrySourceParser
 from .engine.ports import EmbeddingProvider, LLMProvider
-from .engine.rag import RagRetriever
+from .engine.rag import RagRetriever, SectionChunker
 from .engine.rendering import DocxTemplateRenderer
 from .engine.validation import ControlledSectionValidator
-from .models import GenerationSource, GenerationTask
+from .knowledge_sections import blocks_for_section
+from .models import (
+    ApprovalStatus,
+    GenerationSource,
+    GenerationTask,
+    KnowledgeCorpusUpload,
+    KnowledgeSection,
+)
 from .providers.embedding import OpenAICompatibleEmbeddingProvider
 from .providers.llm import OpenAICompatibleLLMProvider
 from .repositories import ORMClauseRepository, ORMKnowledgeRepository, ORMSectionRepository
 from .risk import ORMRiskProfiler
 from .workflow_events import TaskWorkflowRecorder
+
+
+def run_knowledge_corpus_upload(upload_id: str) -> str:
+    with transaction.atomic():
+        upload = (
+            KnowledgeCorpusUpload.objects.select_for_update()
+            .select_related("source_document_version", "created_by")
+            .get(pk=upload_id)
+        )
+        if upload.status not in {
+            KnowledgeCorpusUpload.Status.QUEUED,
+            KnowledgeCorpusUpload.Status.FAILED,
+        }:
+            return "skipped"
+        upload.status = KnowledgeCorpusUpload.Status.PROCESSING
+        upload.started_at = timezone.now()
+        upload.completed_at = None
+        upload.error_code = ""
+        upload.error_message = ""
+        upload.save(
+            update_fields=[
+                "status",
+                "started_at",
+                "completed_at",
+                "error_code",
+                "error_message",
+                "updated_at",
+            ]
+        )
+    try:
+        source = _load_corpus_source(upload_id)
+        upload = KnowledgeCorpusUpload.objects.get(pk=upload_id)
+        parsed = EntrySourceParser().parse(source)
+        section_codes = upload.section_codes or [upload.section_code]
+        indexed_section_codes: list[str] = []
+        skipped_section_codes: list[str] = []
+        drafts: list[KnowledgeChunkDraft] = []
+        chunker = SectionChunker()
+        for section_code in section_codes:
+            section_blocks = blocks_for_section(parsed.blocks, section_code)
+            if not section_blocks and upload.fallback_to_full_document:
+                section_blocks = parsed.blocks
+            if not section_blocks:
+                skipped_section_codes.append(section_code)
+                continue
+            drafts.extend(
+                chunker.chunk(
+                    KnowledgeSectionInput(
+                        source_document_version_id=source.document_version_id,
+                        business_type=upload.business_type,
+                        section_code=section_code,
+                        blocks=section_blocks,
+                        approval_status="approved",
+                    )
+                )
+            )
+            indexed_section_codes.append(section_code)
+        if not drafts:
+            raise AgentError(
+                "KNOWLEDGE_SECTIONS_NOT_FOUND",
+                "没有从文件标题结构中识别出所选章节",
+            )
+        embedding_provider = _build_embedding_provider()
+        vectors = tuple(embedding_provider.embed([draft.text for draft in drafts]))
+        if len(vectors) != len(drafts):
+            raise AgentError("EMBEDDING_RESPONSE_INVALID", "Embedding返回数量不一致")
+        chunks = tuple(
+            KnowledgeChunk(
+                **draft.model_dump(),
+                embedding=tuple(float(value) for value in vector),
+                embedding_model_alias=embedding_provider.model_alias,
+                embedding_dimension=embedding_provider.dimension,
+            )
+            for draft, vector in zip(drafts, vectors, strict=True)
+        )
+        _complete_corpus_upload(
+            upload_id,
+            chunks,
+            indexed_section_codes=indexed_section_codes,
+            skipped_section_codes=skipped_section_codes,
+        )
+    except Exception as exc:
+        _fail_corpus_upload(upload_id, exc)
+        raise
+    return "completed"
 
 
 def run_generation_task(task_id: str) -> str:
@@ -56,6 +152,158 @@ def run_generation_task(task_id: str) -> str:
     ):
         return _run_document_generation(task_id)
     return "skipped"
+
+
+def _load_corpus_source(upload_id: str) -> SourceDocument:
+    upload = KnowledgeCorpusUpload.objects.select_related("source_document_version").get(
+        pk=upload_id
+    )
+    version = upload.source_document_version
+    path = LocalDocumentStorage().resolve(version.storage_path)
+    if not path.is_file():
+        raise AgentError("SOURCE_PARSE_FAILED", "RAG来源文档物理文件不存在")
+    content = path.read_bytes()
+    if hashlib.sha256(content).hexdigest() != version.sha256:
+        raise AgentError("SOURCE_INTEGRITY_FAILED", "RAG来源文档完整性校验失败")
+    return SourceDocument(
+        document_version_id=version.pk,
+        filename=version.original_filename,
+        mime_type=version.content_type,
+        content=content,
+    )
+
+
+def _build_embedding_provider() -> EmbeddingProvider:
+    if settings.DOCUMENT_AGENT_ALLOW_FAKE_PROVIDER:
+        return HashingEmbeddingProvider()
+    return OpenAICompatibleEmbeddingProvider.from_env()
+
+
+def _complete_corpus_upload(
+    upload_id: str,
+    chunks: tuple[KnowledgeChunk, ...],
+    *,
+    indexed_section_codes: list[str],
+    skipped_section_codes: list[str],
+) -> None:
+    if not chunks:
+        raise AgentError("KNOWLEDGE_SECTION_EMPTY", "来源资料没有生成可用知识块")
+    now = timezone.now()
+    with transaction.atomic():
+        upload = (
+            KnowledgeCorpusUpload.objects.select_for_update()
+            .select_related("created_by")
+            .get(pk=upload_id)
+        )
+        if upload.status != KnowledgeCorpusUpload.Status.PROCESSING:
+            return
+        KnowledgeSection.objects.filter(
+            source_document_version=upload.source_document_version,
+            section_code__in=upload.section_codes or [upload.section_code],
+        ).delete()
+        KnowledgeSection.objects.bulk_create(
+            [
+                KnowledgeSection(
+                    chunk_id=chunk.chunk_id,
+                    source_document_version_id=chunk.source_document_version_id,
+                    business_type=chunk.business_type,
+                    client_code=chunk.client_code or "",
+                    section_code=chunk.section_code,
+                    heading_path=list(chunk.heading_path),
+                    paragraph_start=chunk.paragraph_start,
+                    paragraph_end=chunk.paragraph_end,
+                    locator={
+                        "heading_path": list(chunk.heading_path),
+                        "paragraph_start": chunk.paragraph_start,
+                        "paragraph_end": chunk.paragraph_end,
+                    },
+                    text=chunk.text,
+                    content_sha256=chunk.content_sha256,
+                    component_tags=list(chunk.component_tags),
+                    method_tags=list(chunk.method_tags),
+                    risk_tags=list(chunk.risk_tags),
+                    embedding=list(chunk.embedding),
+                    embedding_model_alias=chunk.embedding_model_alias,
+                    embedding_dimension=chunk.embedding_dimension,
+                    is_active=True,
+                    approval_status=ApprovalStatus.APPROVED,
+                    approved_by=upload.created_by,
+                    approved_at=now,
+                )
+                for chunk in chunks
+            ]
+        )
+        upload.status = KnowledgeCorpusUpload.Status.SUCCEEDED
+        upload.chunk_count = len(chunks)
+        upload.embedding_model_alias = chunks[0].embedding_model_alias
+        upload.embedding_dimension = chunks[0].embedding_dimension
+        upload.indexed_section_codes = indexed_section_codes
+        upload.skipped_section_codes = skipped_section_codes
+        upload.completed_at = now
+        upload.error_code = ""
+        upload.error_message = ""
+        upload.save(
+            update_fields=[
+                "status",
+                "chunk_count",
+                "embedding_model_alias",
+                "embedding_dimension",
+                "indexed_section_codes",
+                "skipped_section_codes",
+                "completed_at",
+                "error_code",
+                "error_message",
+                "updated_at",
+            ]
+        )
+        audit_log(
+            user=upload.created_by,
+            action="document_generation.corpus.index.complete",
+            resource=upload,
+            result="success",
+            after_data={
+                "chunk_count": upload.chunk_count,
+                "embedding_model_alias": upload.embedding_model_alias,
+                "embedding_dimension": upload.embedding_dimension,
+                "indexed_section_codes": upload.indexed_section_codes,
+                "skipped_section_codes": upload.skipped_section_codes,
+            },
+        )
+
+
+def _fail_corpus_upload(upload_id: str, exc: Exception) -> None:
+    error_code = exc.code if isinstance(exc, AgentError) else "CORPUS_PROCESSING_FAILED"
+    error_message = (
+        str(exc)
+        if isinstance(exc, AgentError)
+        else "RAG语料处理失败，请检查文件内容和Embedding服务后重试"
+    )
+    with transaction.atomic():
+        upload = (
+            KnowledgeCorpusUpload.objects.select_for_update()
+            .select_related("created_by")
+            .get(pk=upload_id)
+        )
+        upload.status = KnowledgeCorpusUpload.Status.FAILED
+        upload.error_code = error_code[:80]
+        upload.error_message = error_message[:500]
+        upload.completed_at = timezone.now()
+        upload.save(
+            update_fields=[
+                "status",
+                "error_code",
+                "error_message",
+                "completed_at",
+                "updated_at",
+            ]
+        )
+        audit_log(
+            user=upload.created_by,
+            action="document_generation.corpus.index.failed",
+            resource=upload,
+            result="failed",
+            error_message=upload.error_message,
+        )
 
 
 def _run_document_generation(task_id: str) -> str:
@@ -110,7 +358,11 @@ def _run_document_generation(task_id: str) -> str:
         orchestrator, provider_alias, model_alias = _build_orchestrator(task_id)
         orchestrator.run(request)
     except Exception as exc:
+        if _task_is_cancelled(task_id):
+            return "cancelled"
         _record_failure(task_id, exc)
+        if isinstance(exc, AgentError) and exc.code == "FACT_EVIDENCE_INVALID":
+            return "needs_confirmation"
         raise
     with transaction.atomic():
         task = GenerationTask.objects.select_for_update().get(pk=task_id)
@@ -250,6 +502,8 @@ def _run_fact_extraction(task_id: str) -> str:
             },
         )
     except Exception as exc:
+        if _task_is_cancelled(task_id):
+            return "cancelled"
         recorder.emit(
             stage="failed",
             tool="stop_workflow",
@@ -405,8 +659,7 @@ def _build_request(task_id: str) -> GenerationRequest:
     section_codes = tuple(task.pending_section_codes or task.template.section_order)
     force_regenerate_section_codes = (
         section_codes
-        if len(section_codes) == 1
-        and task.sections.filter(section_code=section_codes[0]).exists()
+        if len(section_codes) == 1 and task.sections.filter(section_code=section_codes[0]).exists()
         else ()
     )
     return GenerationRequest(
@@ -489,16 +742,112 @@ def _load_source_documents(task_id: str) -> tuple[SourceDocument, ...]:
     return tuple(sources)
 
 
+def _validation_failure_context(
+    exc: Exception,
+) -> tuple[str, list[dict[str, str]]]:
+    if not isinstance(exc, AgentError) or exc.code != "VALIDATION_FAILED":
+        return "", []
+    section_code = str(exc.details.get("section_code", "")).strip()
+    issues: list[dict[str, str]] = []
+    raw_issues = exc.details.get("issues", [])
+    if isinstance(raw_issues, list):
+        for raw_issue in raw_issues:
+            if not isinstance(raw_issue, Mapping):
+                continue
+            message = str(raw_issue.get("message", "")).strip()
+            if not message:
+                continue
+            issues.append(
+                {
+                    "code": str(raw_issue.get("code", "")).strip(),
+                    "message": message,
+                    "severity": str(raw_issue.get("severity", "error")).strip(),
+                }
+            )
+    return section_code, issues
+
+
+def _validation_recovery_message(
+    exc: Exception,
+    *,
+    section_code: str,
+    issues: list[dict[str, str]],
+) -> str:
+    issue_summary = "；".join(issue["message"] for issue in issues[:3])
+    subject = f"章节 {section_code}" if section_code else "生成章节"
+    if not issue_summary and isinstance(exc, AgentError):
+        issue_summary = exc.message
+    return (
+        f"{subject}未通过确定性校验：{issue_summary}。已保留通过校验的章节，可从失败章节继续生成。"
+    )[:500]
+
+
+def _pending_validation_sections(
+    task: GenerationTask,
+    *,
+    failed_section_code: str,
+) -> list[str]:
+    persisted = {section.section_code: section for section in task.sections.all()}
+    pending: list[str] = []
+    for section_code in task.template.section_order:
+        section = persisted.get(section_code)
+        has_blocking_issue = section is not None and any(
+            isinstance(issue, Mapping) and issue.get("severity") == "error"
+            for issue in (section.validation_issues or [])
+        )
+        if section is None or not section.content.strip() or has_blocking_issue:
+            pending.append(section_code)
+    if failed_section_code and failed_section_code not in pending:
+        pending.append(failed_section_code)
+    return pending
+
+
 def _record_failure(task_id: str, exc: Exception) -> None:
     current_job = get_current_job()
     retries_left = int(getattr(current_job, "retries_left", 0) or 0)
     error_code = exc.code if isinstance(exc, AgentError) else "GENERATION_FAILED"
     message = _public_failure_message(exc)
+    validation_section_code, validation_issues = _validation_failure_context(exc)
+    validation_recovery_required = error_code == "VALIDATION_FAILED"
     with transaction.atomic():
         task = (
-            GenerationTask.objects.select_for_update().select_related("created_by").get(pk=task_id)
+            GenerationTask.objects.select_for_update()
+            .select_related("created_by", "template")
+            .prefetch_related("sections")
+            .get(pk=task_id)
         )
-        if retries_left > 0:
+        if task.status == GenerationTask.Status.CANCELLED:
+            return
+        evidence_recovery_required = error_code == "FACT_EVIDENCE_INVALID"
+        if evidence_recovery_required:
+            task.status = GenerationTask.Status.NEEDS_CONFIRMATION
+            task.progress = 20
+            invalid_fields = sorted(
+                {
+                    str(field)
+                    for field in (
+                        exc.details.get("fields", []) if isinstance(exc, AgentError) else []
+                    )
+                }
+            )
+            task.fact_conflicts = [
+                {"field": field, "reason": "evidence_invalid"} for field in invalid_fields
+            ]
+            message = "部分项目事实的来源已失效，请重新核对标记项后再次提交"
+        elif validation_recovery_required:
+            task.pending_section_codes = _pending_validation_sections(
+                task,
+                failed_section_code=validation_section_code,
+            )
+            message = _validation_recovery_message(
+                exc,
+                section_code=validation_section_code,
+                issues=validation_issues,
+            )
+            task.status = (
+                GenerationTask.Status.QUEUED if retries_left > 0 else GenerationTask.Status.FAILED
+            )
+        elif retries_left > 0:
             task.status = (
                 GenerationTask.Status.EXTRACTING
                 if task.operation == GenerationTask.Operation.EXTRACT
@@ -513,6 +862,8 @@ def _record_failure(task_id: str, exc: Exception) -> None:
                 "status",
                 "error_code",
                 "error_message",
+                *(["progress", "fact_conflicts"] if evidence_recovery_required else []),
+                *(["pending_section_codes"] if validation_recovery_required else []),
                 "updated_at",
             ]
         )
@@ -531,8 +882,35 @@ def _record_failure(task_id: str, exc: Exception) -> None:
             resource=task,
             result="failed",
             error_message=f"{error_code}: {message}",
-            after_data={"will_retry": retries_left > 0},
+            after_data={
+                "will_retry": retries_left > 0 and not evidence_recovery_required,
+                "requires_fact_confirmation": evidence_recovery_required,
+                "validation_recovery_sections": (
+                    task.pending_section_codes if validation_recovery_required else []
+                ),
+            },
         )
+    if validation_recovery_required:
+        TaskWorkflowRecorder(task_id).emit(
+            stage="validating_sections",
+            tool="validation_recovery_ready",
+            status="failed",
+            title="章节校验未通过，已保留恢复点",
+            detail=message,
+            metadata={
+                "section_code": validation_section_code,
+                "issues": validation_issues,
+                "pending_section_codes": task.pending_section_codes,
+                "will_retry": retries_left > 0,
+            },
+        )
+
+
+def _task_is_cancelled(task_id: str) -> bool:
+    return GenerationTask.objects.filter(
+        pk=task_id,
+        status=GenerationTask.Status.CANCELLED,
+    ).exists()
 
 
 def _public_failure_message(exc: Exception) -> str:

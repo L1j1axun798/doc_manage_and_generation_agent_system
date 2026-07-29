@@ -206,12 +206,13 @@ class OpenAICompatibleLLMProvider:
             ensure_ascii=False,
             sort_keys=True,
         )
-        return self._generate_schema(
+        section = self._generate_schema(
             prompt=prompt,
             schema=GeneratedSection,
             purpose=ModelCallPurpose.SECTION_GENERATION,
             prompt_version=version,
         )
+        return self._bind_section_code(section, context.section_code)
 
     def revise_section(
         self,
@@ -236,12 +237,19 @@ class OpenAICompatibleLLMProvider:
                 sort_keys=True,
             )
         )
-        return self._generate_schema(
+        revised = self._generate_schema(
             prompt=prompt,
             schema=GeneratedSection,
             purpose=ModelCallPurpose.SECTION_REVISION,
             prompt_version=version,
         )
+        return self._bind_section_code(revised, context.section_code)
+
+    @staticmethod
+    def _bind_section_code(section: GeneratedSection, expected_code: str) -> GeneratedSection:
+        if section.section_code == expected_code:
+            return section
+        return section.model_copy(update={"section_code": expected_code})
 
     def repair_structured_output(self, raw_output: str) -> GeneratedSection:
         return self._repair_once(raw_output, GeneratedSection)

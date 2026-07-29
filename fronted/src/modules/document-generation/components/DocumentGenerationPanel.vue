@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 
 import { getErrorMessage } from '@/core/http/error-normalizer'
@@ -11,6 +11,7 @@ import { formatDateTime } from '@/shared/utils/format'
 import {
   approveGenerationTask,
   confirmAndGenerate,
+  deleteGenerationTask,
   exportGenerationTask,
   fetchGenerationEvents,
   fetchGenerationTask,
@@ -22,6 +23,7 @@ import {
   retryGenerationTask,
   setGeneratedSectionLock,
   startGenerationPipeline,
+  stopGenerationTask,
   submitGenerationReview,
   updateGeneratedSection,
 } from '../api/document-generation.api'
@@ -69,6 +71,7 @@ const authStore = useAuthStore()
 const loading = ref(false)
 const actionLoading = ref(false)
 const openingTaskId = ref<string | null>(null)
+const conversationActionTaskId = ref<string | null>(null)
 const createDialogVisible = ref(false)
 const templates = ref<DocumentGenerationTemplate[]>([])
 const documents = ref<DocumentItem[]>([])
@@ -86,9 +89,51 @@ const createForm = reactive<{
 })
 let pollTimer: number | undefined
 
+const sectionNames: Record<string, string> = {
+  overview: '工程概况与编制依据',
+  organization_measures: '组织措施',
+  construction_plan: '施工方案',
+  technical_measures: '技术措施',
+  safety_measures: '安全措施',
+  risk_identification: '风险辨识与预控',
+  emergency_plan: '应急预案',
+  environmental_measures: '环境保护与文明施工',
+}
+const runningConversationStatuses = new Set<GenerationTaskStatus>([
+  'extracting',
+  'queued',
+  'generating',
+])
 const eligibleDocuments = computed(() => documents.value.filter(isEligibleEntrySource))
 const criticalFactDrafts = computed(() => factDrafts.value.filter((fact) => fact.isRequired))
 const supplementalFactDrafts = computed(() => factDrafts.value.filter((fact) => !fact.isRequired))
+const invalidEvidenceFields = computed(
+  () => new Set(
+    (selectedTask.value?.fact_conflicts || [])
+      .filter((conflict) => conflict.reason === 'evidence_invalid')
+      .map((conflict) => typeof conflict.field === 'string' ? conflict.field : ''),
+  ),
+)
+const recoveryGuidance = computed(() => {
+  const task = selectedTask.value
+  if (!task?.error_code) {
+    return ''
+  }
+  if (task.error_code === 'FACT_EVIDENCE_INVALID') {
+    return task.status === 'needs_confirmation'
+      ? '处理方式：重新核对标记事实的来源资料和来源原文，然后点击“确认并开始编制”。'
+      : '处理方式：点击“自动修复来源并重试”；无法自动修复时，系统会返回事实核对页面。'
+  }
+  if (task.error_code === 'VALIDATION_FAILED') {
+    const sectionCode = task.pending_section_codes[0]
+    const sectionHint = sectionCode ? `（${sectionNames[sectionCode] || sectionCode}）` : ''
+    return `处理方式：系统已保留通过校验的章节。点击“从失败章节继续”后，将从未通过章节${sectionHint}及后续未完成章节继续生成。`
+  }
+  if (task.status === 'failed') {
+    return '处理方式：确认资料文件、Redis队列和模型服务可用后点击“重试当前步骤”，系统会从可恢复节点继续。'
+  }
+  return ''
+})
 const isProjectActive = computed(() => props.project.status === 'active')
 const canApprove = computed(
   () =>
@@ -116,6 +161,7 @@ const statusLabels: Record<GenerationTaskStatus, string> = {
   approved: '已批准，待导出',
   exported: '已导出',
   failed: '执行失败',
+  cancelled: '已停止',
 }
 
 onMounted(loadInitialData)
@@ -210,6 +256,10 @@ function conversationTitle(task: GenerationTask): string {
   return `四措两案编制 · ${formatDateTime(task.created_at)}`
 }
 
+function isConversationRunning(task: GenerationTask): boolean {
+  return runningConversationStatuses.has(task.status)
+}
+
 async function refreshCurrentConversation(): Promise<void> {
   await runAction(refreshSelectedTask)
 }
@@ -244,8 +294,9 @@ function hydrateTaskDrafts(): void {
     return
   }
   if (task.status === 'needs_confirmation') {
+    const snapshots = task.facts_snapshot as Array<FactProposal | ConfirmedFactPayload>
     const proposalFields = new Set(
-      (task.facts_snapshot as FactProposal[]).map((proposal) => proposal.field),
+      snapshots.map((proposal) => proposal.field),
     )
     const conflictDefaults = task.fact_conflicts.flatMap((conflict) => {
       const field = typeof conflict.field === 'string' ? conflict.field : ''
@@ -259,14 +310,20 @@ function hydrateTaskDrafts(): void {
         ? [{ ...preferred, field }]
         : []
     })
-    const proposals = [
-      ...(task.facts_snapshot as FactProposal[]),
+    const proposals: Array<FactProposal | ConfirmedFactPayload> = [
+      ...snapshots,
       ...conflictDefaults,
     ]
     const requiredFields = selectedTemplate.value?.required_fact_fields || []
     const requiredSet = new Set(requiredFields)
     const drafts = proposals.map((proposal) => {
-      const evidence = proposal.evidence?.[0]
+      const evidence = 'source_document_version_id' in proposal
+        ? {
+            source_document_version_id: proposal.source_document_version_id,
+            locator: proposal.locator,
+            confidence: proposal.confidence,
+          }
+        : proposal.evidence?.[0]
       const values = Array.isArray(proposal.value) ? proposal.value : []
       const codeValues = values.filter((value): value is string => typeof value === 'string')
       const riskEvidence = Object.fromEntries(
@@ -538,6 +595,73 @@ async function retryTask(): Promise<void> {
   )
 }
 
+async function stopConversation(task: GenerationTask): Promise<void> {
+  try {
+    await ElMessageBox.confirm(
+      '停止后，本次会话不会继续生成或进入审核；已经生成的中间章节会保留。',
+      '停止当前会话',
+      {
+        confirmButtonText: '确认停止',
+        cancelButtonText: '继续执行',
+        type: 'warning',
+      },
+    )
+  } catch {
+    return
+  }
+  conversationActionTaskId.value = task.id
+  try {
+    const stoppedTask = await stopGenerationTask(task.id)
+    tasks.value = tasks.value.map((item) => item.id === task.id ? stoppedTask : item)
+    if (selectedTask.value?.id === task.id) {
+      selectedTask.value = stoppedTask
+      const newEvents = await fetchGenerationEvents(
+        task.id,
+        workflowEvents.value.at(-1)?.sequence || 0,
+      )
+      workflowEvents.value.push(...newEvents)
+      stopPolling()
+    }
+    ElMessage.success('会话已停止')
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error))
+  } finally {
+    conversationActionTaskId.value = null
+  }
+}
+
+async function deleteConversation(task: GenerationTask): Promise<void> {
+  try {
+    await ElMessageBox.confirm(
+      '删除后，该会话将从历史列表中移除；已经正式导出的项目文档不会被删除。',
+      '删除历史会话',
+      {
+        confirmButtonText: '确认删除',
+        cancelButtonText: '取消',
+        type: 'warning',
+      },
+    )
+  } catch {
+    return
+  }
+  conversationActionTaskId.value = task.id
+  try {
+    await deleteGenerationTask(task.id)
+    tasks.value = tasks.value.filter((item) => item.id !== task.id)
+    if (selectedTask.value?.id === task.id) {
+      stopPolling()
+      selectedTask.value = null
+      workflowEvents.value = []
+      factDrafts.value = []
+    }
+    ElMessage.success('历史会话已删除')
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error))
+  } finally {
+    conversationActionTaskId.value = null
+  }
+}
+
 async function saveSection(section: GeneratedSection): Promise<void> {
   await runAction(async () => {
     await updateGeneratedSection(
@@ -656,7 +780,7 @@ async function runAction(action: () => Promise<void>): Promise<void> {
         <h2 v-if="selectedTask">{{ conversationTitle(selectedTask) }}</h2>
         <h2 v-else>{{ project.name }}的编制会话</h2>
         <p v-if="selectedTask">查看本次会话的编制进度，并继续完成事实确认、审核或导出。</p>
-        <p v-else>历史编制按会话列出；选择一项后才会打开详细内容。</p>
+        <p v-else>历史编制按会话列出；Agent只读取当前项目且你有权查看的入场前置资料。</p>
       </div>
       <div class="doc-agent__toolbar-actions">
         <el-button v-if="selectedTask" @click="returnToConversationList">返回会话列表</el-button>
@@ -667,7 +791,26 @@ async function runAction(action: () => Promise<void>): Promise<void> {
         >
           刷新当前会话
         </el-button>
-        <el-button v-else :loading="loading" @click="loadInitialData">刷新列表</el-button>
+        <el-button
+          v-if="selectedTask && isConversationRunning(selectedTask)"
+          type="warning"
+          :loading="conversationActionTaskId === selectedTask.id"
+          @click="stopConversation(selectedTask)"
+        >
+          停止会话
+        </el-button>
+        <el-button
+          v-if="selectedTask && !isConversationRunning(selectedTask)"
+          type="danger"
+          plain
+          :loading="conversationActionTaskId === selectedTask.id"
+          @click="deleteConversation(selectedTask)"
+        >
+          删除会话
+        </el-button>
+        <el-button v-if="!selectedTask" :loading="loading" @click="loadInitialData">
+          刷新列表
+        </el-button>
         <el-button
           v-if="!selectedTask"
           type="primary"
@@ -689,29 +832,63 @@ async function runAction(action: () => Promise<void>): Promise<void> {
       </div>
       <el-empty v-if="!tasks.length && !loading" description="暂无四措两案编制会话" />
       <div v-else class="doc-agent__conversation-list" aria-label="历史编制会话">
-        <button
+        <div
           v-for="task in tasks"
           :key="task.id"
-          class="doc-agent__conversation-item"
-          type="button"
-          :disabled="openingTaskId !== null"
-          @click="openConversation(task)"
+          class="doc-agent__conversation-row"
         >
-          <span class="doc-agent__conversation-copy">
-            <strong>{{ conversationTitle(task) }}</strong>
-            <small>{{ task.template_name || '默认四措两案模板' }}</small>
-          </span>
-          <span class="doc-agent__conversation-state">
-            <el-tag
-              size="small"
-              :type="task.status === 'failed' ? 'danger' : task.status === 'exported' ? 'success' : 'info'"
+          <button
+            class="doc-agent__conversation-item"
+            type="button"
+            :disabled="openingTaskId !== null || conversationActionTaskId !== null"
+            @click="openConversation(task)"
+          >
+            <span class="doc-agent__conversation-copy">
+              <strong>{{ conversationTitle(task) }}</strong>
+              <small>{{ task.template_name || '默认四措两案模板' }}</small>
+            </span>
+            <span class="doc-agent__conversation-state">
+              <el-tag
+                size="small"
+                :type="
+                  task.status === 'failed'
+                    ? 'danger'
+                    : task.status === 'exported'
+                      ? 'success'
+                      : task.status === 'cancelled'
+                        ? 'warning'
+                        : 'info'
+                "
+              >
+                {{ statusLabels[task.status] }}
+              </el-tag>
+              <small v-if="openingTaskId === task.id">正在打开…</small>
+              <small v-else>{{ task.created_by_name || '当前用户' }}</small>
+            </span>
+          </button>
+          <div class="doc-agent__conversation-actions">
+            <el-button
+              v-if="isConversationRunning(task)"
+              data-test="stop-conversation"
+              type="warning"
+              link
+              :loading="conversationActionTaskId === task.id"
+              @click="stopConversation(task)"
             >
-              {{ statusLabels[task.status] }}
-            </el-tag>
-            <small v-if="openingTaskId === task.id">正在打开…</small>
-            <small v-else>{{ task.created_by_name || '当前用户' }}</small>
-          </span>
-        </button>
+              停止
+            </el-button>
+            <el-button
+              v-else
+              data-test="delete-conversation"
+              type="danger"
+              link
+              :loading="conversationActionTaskId === task.id"
+              @click="deleteConversation(task)"
+            >
+              删除
+            </el-button>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -738,6 +915,14 @@ async function runAction(action: () => Promise<void>): Promise<void> {
         :closable="false"
         show-icon
       />
+      <el-alert
+        v-if="recoveryGuidance"
+        class="doc-agent__recovery"
+        :title="recoveryGuidance"
+        type="info"
+        :closable="false"
+        show-icon
+      />
 
       <GenerationWorkflowTrace :task="selectedTask" :events="workflowEvents" />
 
@@ -751,7 +936,11 @@ async function runAction(action: () => Promise<void>): Promise<void> {
         />
         <el-alert
           v-if="selectedTask.fact_conflicts.length"
-          title="不同资料存在同名事实冲突。系统已预填置信度较高的候选值，请重点核对下列项目。"
+          :title="
+            invalidEvidenceFields.size
+              ? '部分事实的来源定位无法自动恢复，请重点核对标记项目。'
+              : '不同资料存在同名事实冲突。系统已预填置信度较高的候选值，请重点核对下列项目。'
+          "
           type="warning"
           :closable="false"
         />
@@ -760,7 +949,9 @@ async function runAction(action: () => Promise<void>): Promise<void> {
             <template #default="{ row }">
               <div class="doc-agent__fact-name">
                 <span>{{ factFieldDefinition(row.field).label }}</span>
-                <el-tag size="small" type="danger">需确认</el-tag>
+                <el-tag size="small" type="danger">
+                  {{ invalidEvidenceFields.has(row.field) ? '来源需核对' : '需确认' }}
+                </el-tag>
               </div>
             </template>
           </el-table-column>
@@ -847,7 +1038,16 @@ async function runAction(action: () => Promise<void>): Promise<void> {
               <el-table-column label="信息项" min-width="180">
                 <template #default="{ row }">
                   <el-input v-if="row.isManual" v-model="row.field" placeholder="补充事实名称" />
-                  <span v-else>{{ factFieldDefinition(row.field).label }}</span>
+                  <span v-else>
+                    {{ factFieldDefinition(row.field).label }}
+                    <el-tag
+                      v-if="invalidEvidenceFields.has(row.field)"
+                      size="small"
+                      type="danger"
+                    >
+                      来源需核对
+                    </el-tag>
+                  </span>
                 </template>
               </el-table-column>
               <el-table-column label="内容" min-width="380">
@@ -896,7 +1096,13 @@ async function runAction(action: () => Promise<void>): Promise<void> {
           :disabled="!isProjectActive"
           @click="retryTask"
         >
-          重试当前步骤
+          {{
+            selectedTask.error_code === 'FACT_EVIDENCE_INVALID'
+              ? '自动修复来源并重试'
+              : selectedTask.error_code === 'VALIDATION_FAILED'
+                ? '从失败章节继续'
+                : '重试当前步骤'
+          }}
         </el-button>
       </div>
 
@@ -1147,8 +1353,16 @@ async function runAction(action: () => Promise<void>): Promise<void> {
   padding-top: 8px;
 }
 
+.doc-agent__conversation-row {
+  display: flex;
+  align-items: center;
+  border-radius: 10px;
+}
+
 .doc-agent__conversation-item {
   display: flex;
+  flex: 1;
+  min-width: 0;
   width: 100%;
   align-items: center;
   justify-content: space-between;
@@ -1173,6 +1387,11 @@ async function runAction(action: () => Promise<void>): Promise<void> {
 .doc-agent__conversation-item:disabled {
   cursor: wait;
   opacity: 0.7;
+}
+
+.doc-agent__conversation-actions {
+  flex: 0 0 auto;
+  padding-right: 14px;
 }
 
 .doc-agent__conversation-copy,
@@ -1219,6 +1438,10 @@ async function runAction(action: () => Promise<void>): Promise<void> {
 
 .doc-agent__meta {
   margin: 18px 0;
+}
+
+.doc-agent__recovery {
+  margin-top: 12px;
 }
 
 .doc-agent__actions {
@@ -1313,9 +1536,18 @@ pre {
 }
 
 @media (max-width: 640px) {
+  .doc-agent__conversation-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
   .doc-agent__conversation-item {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .doc-agent__conversation-actions {
+    padding: 0 16px 10px;
   }
 
   .doc-agent__conversation-state {

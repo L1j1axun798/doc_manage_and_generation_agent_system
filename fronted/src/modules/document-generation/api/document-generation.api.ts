@@ -8,13 +8,44 @@ import type {
   GeneratedSection,
   GenerationTask,
   GenerationTraceEvent,
+  KnowledgeCorpusUpload,
 } from '../document-generation.types'
 
 const TASKS = '/document-generation/tasks'
+const KNOWLEDGE_UPLOADS = '/document-generation/knowledge-uploads'
 
 export async function fetchGenerationTemplates(): Promise<DocumentGenerationTemplate[]> {
   const response = await apiClient.get<DocumentGenerationTemplate[]>(
     '/document-generation/templates/',
+  )
+  return response.data
+}
+
+export async function fetchKnowledgeCorpusUploads(
+  page = 1,
+): Promise<ApiPage<KnowledgeCorpusUpload>> {
+  const response = await apiClient.get<ApiPage<KnowledgeCorpusUpload>>(
+    `${KNOWLEDGE_UPLOADS}/`,
+    { params: { ordering: '-created_at', page } },
+  )
+  return response.data
+}
+
+export async function uploadKnowledgeCorpus(
+  payload: FormData,
+): Promise<KnowledgeCorpusUpload> {
+  const response = await apiClient.post<KnowledgeCorpusUpload>(
+    `${KNOWLEDGE_UPLOADS}/`,
+    payload,
+  )
+  return response.data
+}
+
+export async function retryKnowledgeCorpusUpload(
+  uploadId: string,
+): Promise<KnowledgeCorpusUpload> {
+  const response = await apiClient.post<KnowledgeCorpusUpload>(
+    `${KNOWLEDGE_UPLOADS}/${uploadId}/retry/`,
   )
   return response.data
 }
@@ -102,6 +133,15 @@ export async function generateEntryPlan(taskId: string): Promise<GenerationTask>
 export async function retryGenerationTask(taskId: string): Promise<GenerationTask> {
   const response = await apiClient.post<GenerationTask>(`${TASKS}/${taskId}/retry/`)
   return response.data
+}
+
+export async function stopGenerationTask(taskId: string): Promise<GenerationTask> {
+  const response = await apiClient.post<GenerationTask>(`${TASKS}/${taskId}/stop/`)
+  return response.data
+}
+
+export async function deleteGenerationTask(taskId: string): Promise<void> {
+  await apiClient.delete(`${TASKS}/${taskId}/`)
 }
 
 export async function updateGeneratedSection(

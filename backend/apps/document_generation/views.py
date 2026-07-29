@@ -7,10 +7,17 @@ from drf_spectacular.utils import extend_schema
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.generics import get_object_or_404
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 
+from apps.accounts.permissions import IsSystemAdmin
+
 from .exceptions import DocumentAgentDisabled, DocumentAgentPhase5Blocked
-from .models import DocumentTemplate, GenerationTask
+from .knowledge_corpus import (
+    create_knowledge_corpus_upload,
+    retry_knowledge_corpus_upload,
+)
+from .models import DocumentTemplate, GenerationTask, KnowledgeCorpusUpload
 from .permissions import IsDocumentGenerationUser
 from .selectors import (
     available_templates,
@@ -28,6 +35,8 @@ from .serializers import (
     GenerationTaskCreateSerializer,
     GenerationTaskSerializer,
     GenerationTraceEventSerializer,
+    KnowledgeCorpusUploadCreateSerializer,
+    KnowledgeCorpusUploadSerializer,
     ReviewActionSerializer,
     SectionLockSerializer,
     TraceEventQuerySerializer,
@@ -38,6 +47,7 @@ from .services import (
     confirm_and_request_generation,
     confirm_generation_facts,
     create_generation_task,
+    delete_generation_task,
     edit_generated_section,
     export_generation_task,
     lock_all_valid_sections,
@@ -47,6 +57,7 @@ from .services import (
     retry_generation_task,
     set_section_lock,
     start_compilation_pipeline,
+    stop_generation_task,
     submit_generation_review,
 )
 
@@ -74,6 +85,62 @@ class DocumentTemplateViewSet(
         if getattr(self, "swagger_fake_view", False):
             return DocumentTemplate.objects.none()
         return available_templates()
+
+
+class KnowledgeCorpusUploadViewSet(
+    DocumentAgentFeatureMixin,
+    mixins.ListModelMixin,
+    mixins.RetrieveModelMixin,
+    viewsets.GenericViewSet,
+):
+    queryset = KnowledgeCorpusUpload.objects.select_related(
+        "source_document_version",
+        "created_by",
+    )
+    serializer_class = KnowledgeCorpusUploadSerializer
+    permission_classes = [IsSystemAdmin]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+    ordering_fields = ["created_at", "updated_at"]
+    ordering = ["-created_at"]
+
+    def get_serializer_class(self):
+        if self.action == "create":
+            return KnowledgeCorpusUploadCreateSerializer
+        return KnowledgeCorpusUploadSerializer
+
+    @extend_schema(
+        request=KnowledgeCorpusUploadCreateSerializer,
+        responses=KnowledgeCorpusUploadSerializer,
+    )
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = dict(serializer.validated_data)
+        upload = create_knowledge_corpus_upload(
+            actor=request.user,
+            request=request,
+            uploaded_file=data.pop("file"),
+            **data,
+        )
+        upload.refresh_from_db()
+        return Response(
+            KnowledgeCorpusUploadSerializer(upload).data,
+            status=status.HTTP_202_ACCEPTED,
+        )
+
+    @extend_schema(request=None, responses=KnowledgeCorpusUploadSerializer)
+    @action(detail=True, methods=["post"])
+    def retry(self, request, pk=None):
+        upload = retry_knowledge_corpus_upload(
+            actor=request.user,
+            upload=self.get_object(),
+            request=request,
+        )
+        upload.refresh_from_db()
+        return Response(
+            KnowledgeCorpusUploadSerializer(upload).data,
+            status=status.HTTP_202_ACCEPTED,
+        )
 
 
 class GenerationTaskViewSet(
@@ -280,6 +347,25 @@ class GenerationTaskViewSet(
             request=request,
         )
         return Response(GenerationTaskSerializer(task).data, status=status.HTTP_202_ACCEPTED)
+
+    @extend_schema(request=None, responses=GenerationTaskSerializer)
+    @action(detail=True, methods=["post"])
+    def stop(self, request, pk=None):
+        task = stop_generation_task(
+            actor=request.user,
+            task=self.get_object(),
+            request=request,
+        )
+        return Response(GenerationTaskSerializer(task).data)
+
+    @extend_schema(request=None, responses={status.HTTP_204_NO_CONTENT: None})
+    def destroy(self, request, *args, **kwargs):
+        delete_generation_task(
+            actor=request.user,
+            task=self.get_object(),
+            request=request,
+        )
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     @extend_schema(
         request=ReviewActionSerializer,

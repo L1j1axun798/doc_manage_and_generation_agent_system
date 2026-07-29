@@ -28,6 +28,7 @@ const stageLabels: Record<string, string> = {
   storing: '保存Word草稿',
   completed: '编制完成',
   failed: '执行失败',
+  cancelled: '会话已停止',
 }
 
 const typeLabels: Record<GenerationTraceEventType, string> = {
@@ -101,7 +102,10 @@ function displayDetail(detail: string): string {
         <h3>Agent工作流</h3>
         <p>展示业务阶段、工具调用和RAG使用记录；不展示模型内部思维链。</p>
       </div>
-      <el-tag :type="task.status === 'failed' ? 'danger' : 'primary'" effect="plain">
+      <el-tag
+        :type="task.status === 'failed' ? 'danger' : task.status === 'cancelled' ? 'warning' : 'primary'"
+        effect="plain"
+      >
         {{ stageLabels[latestEvent?.stage || 'initialized'] || latestEvent?.stage }}
       </el-tag>
     </div>

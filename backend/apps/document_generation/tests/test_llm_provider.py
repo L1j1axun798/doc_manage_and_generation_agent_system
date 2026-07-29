@@ -169,6 +169,27 @@ def test_flat_section_list_is_safely_normalized_without_second_model_call() -> N
     assert call_count == 1
 
 
+def test_model_cannot_change_system_selected_section_code() -> None:
+    def transport(endpoint, headers, payload, timeout):
+        return (
+            _response(
+                {
+                    "section_code": "technical_measures",
+                    "title": "工程概况",
+                    "paragraphs": ["正文保持不变。"],
+                }
+            ),
+            "wrong-section-code-request",
+        )
+
+    provider = OpenAICompatibleLLMProvider(_config(), transport=transport)
+
+    section = provider.draft_section(_context())
+
+    assert section.section_code == "overview"
+    assert section.paragraphs == ("正文保持不变。",)
+
+
 def test_duplicate_provenance_is_safely_normalized_without_rewriting_body() -> None:
     call_count = 0
     body = "入场前技术准备正文不得被结构修复缩短。" * 200
@@ -429,7 +450,7 @@ def test_section_revision_has_separate_usage_purpose() -> None:
         return (
             _response(
                 {
-                    "section_code": "overview",
+                    "section_code": "technical_measures",
                     "title": "工程概况",
                     "paragraphs": ["修订后的入场计划。"],
                 }
@@ -442,4 +463,5 @@ def test_section_revision_has_separate_usage_purpose() -> None:
     revised = provider.revise_section(_context(), draft, ())
 
     assert revised.paragraphs == ("修订后的入场计划。",)
+    assert revised.section_code == "overview"
     assert provider.usage_records[-1].purpose == ModelCallPurpose.SECTION_REVISION

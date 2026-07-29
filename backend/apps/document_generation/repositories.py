@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections.abc import Sequence
 from uuid import UUID
 
+from django.db import transaction
+
 from .engine.canonical_facts import (
     infer_component_codes,
     infer_method_codes,
@@ -19,10 +21,12 @@ from .engine.contracts import (
 from .engine.contracts import (
     GeneratedSection as ContractGeneratedSection,
 )
+from .engine.errors import AgentError
 from .models import (
     ApprovalStatus,
     ClauseBlock,
     GeneratedSection,
+    GenerationTask,
     KnowledgeSection,
 )
 
@@ -148,12 +152,16 @@ class ORMSectionRepository:
             return None
         return self._persisted(row)
 
+    @transaction.atomic
     def save(
         self,
         task_key: str,
         section: ContractGeneratedSection,
         validation_issues: Sequence[ValidationIssue],
     ) -> PersistedSection:
+        task = GenerationTask.objects.select_for_update().get(pk=UUID(task_key))
+        if task.status != GenerationTask.Status.GENERATING or task.deleted_at is not None:
+            raise AgentError("TASK_CANCELLED", "编制会话已停止，禁止继续保存章节")
         defaults = {
             "title": section.title,
             "content": self._plain_text(section),

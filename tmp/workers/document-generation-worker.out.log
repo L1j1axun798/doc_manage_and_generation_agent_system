@@ -1,0 +1,7 @@
+recovered=0 queued=0 queue_failures=0
+worker_class=rq.worker.SimpleWorker scheduler=enabled
+11:58:13 Worker 4c9d50ceac334be285be888ced557691: started with PID 49828, version 2.10.0
+11:58:13 Worker 4c9d50ceac334be285be888ced557691: subscribing to channel rq:pubsub:4c9d50ceac334be285be888ced557691
+11:58:13 *** Listening on document-generation...
+11:58:13 Acquired scheduler lock for document-generation
+11:58:13 Worker 4c9d50ceac334be285be888ced557691: cleaning registries for queue: document-generation

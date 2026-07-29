@@ -38,6 +38,7 @@ TOOL_TITLES = {
     "publish_document_version": "保存可审核的Word草稿",
     "complete_generation": "四措两案初稿生成完成",
     "stop_workflow": "编制工作流已停止",
+    "cancel_generation_task": "用户已停止当前编制会话",
 }
 
 MODEL_TOOLS = {
@@ -103,6 +104,8 @@ class TaskWorkflowRecorder:
         metadata: Mapping[str, Any] | None = None,
     ) -> GenerationTraceEvent:
         task = GenerationTask.objects.select_for_update().get(pk=self.task_id)
+        if task.status == GenerationTask.Status.CANCELLED and tool != "cancel_generation_task":
+            raise TaskExecutionCancelled("编制会话已由用户停止")
         current = (
             GenerationTraceEvent.objects.filter(task=task).aggregate(value=Max("sequence"))["value"]
             or 0
@@ -133,3 +136,6 @@ class TaskWorkflowRecorder:
             task.save(update_fields=["progress", "updated_at"])
         return row
 
+
+class TaskExecutionCancelled(RuntimeError):
+    pass

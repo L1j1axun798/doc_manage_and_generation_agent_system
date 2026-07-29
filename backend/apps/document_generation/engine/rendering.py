@@ -16,6 +16,7 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.oxml.text.font import CT_RPr
 from docx.shared import Pt
+from docx.table import Table
 from docx.text.paragraph import Paragraph
 from docx.text.run import Run
 from docxtpl import DocxTemplate
@@ -197,7 +198,7 @@ def _add_generated_table(
     *,
     rows: int,
     cols: int,
-):
+) -> Table:
     table = document.add_table(rows=rows, cols=cols)
     if _has_style(document, "Table Grid"):
         table.style = "Table Grid"

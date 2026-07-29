@@ -35,7 +35,7 @@ def visible_generation_tasks(user: Any) -> QuerySet[GenerationTask]:
     if getattr(user, "is_temporary_user", False):
         return GenerationTask.objects.none()
     return (
-        GenerationTask.objects.filter(project__in=projects)
+        GenerationTask.objects.filter(project__in=projects, deleted_at__isnull=True)
         .select_related(
             "project",
             "template",

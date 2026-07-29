@@ -19,16 +19,27 @@ from apps.folders.models import Folder
 from apps.projects.models import Project
 from common.storage import LocalDocumentStorage
 
-from .engine.canonical_facts import REQUIRED_FACT_LABELS, validate_required_fact_value
+from .engine.canonical_facts import (
+    REQUIRED_FACT_LABELS,
+    infer_method_codes,
+    validate_required_fact_value,
+)
 from .engine.contracts import (
     FORBIDDEN_FACT_FIELD_PARTS,
     ConfirmedFact,
+    ParsedBlock,
+    ParsedDocument,
     RenderRequest,
+    SourceDocument,
+    SourceLocator,
     TemplateDocument,
 )
 from .engine.contracts import (
     GeneratedSection as ContractGeneratedSection,
 )
+from .engine.errors import AgentError
+from .engine.facts import FactEvidenceGate
+from .engine.parsing import EntrySourceParser
 from .engine.rendering import DocxTemplateRenderer
 from .exceptions import DocumentGenerationError
 from .models import (
@@ -42,6 +53,7 @@ from .models import (
     GenerationTask,
 )
 from .permissions import can_review_generation, can_use_generation
+from .queues import stop_generation_job
 from .selectors import visible_source_version_for_user
 from .workflow_events import TaskWorkflowRecorder
 
@@ -57,6 +69,13 @@ BLOCKED_SOURCE_MARKERS = (
     "完工报告",
     "竣工资料",
     "报告模板",
+)
+ACTIVE_TASK_STATUSES = frozenset(
+    {
+        GenerationTask.Status.EXTRACTING,
+        GenerationTask.Status.QUEUED,
+        GenerationTask.Status.GENERATING,
+    }
 )
 
 
@@ -83,6 +102,7 @@ def _task_snapshot(task: GenerationTask) -> dict[str, Any]:
         "progress": task.progress,
         "error_code": task.error_code,
         "output_document_version_id": task.output_document_version_id,
+        "deleted_at": task.deleted_at.isoformat() if task.deleted_at else None,
     }
 
 
@@ -97,6 +117,161 @@ def _ensure_active_project(project: Project) -> None:
 def _ensure_task_user(actor: Any, task: GenerationTask) -> None:
     if not can_use_generation(actor, task.project):
         raise PermissionDenied("无权操作该项目的入场资料编制任务")
+
+
+def _canonicalize_confirmed_fact_evidence(
+    task: GenerationTask,
+    facts: list[ConfirmedFact],
+) -> list[ConfirmedFact]:
+    storage = LocalDocumentStorage()
+    source_documents: list[SourceDocument] = []
+    for source in task.sources.select_related("document_version").all():
+        version = source.document_version
+        path = storage.resolve(version.storage_path)
+        if not path.is_file():
+            raise AgentError("SOURCE_PARSE_FAILED", "来源文档物理文件不存在")
+        content = path.read_bytes()
+        if (
+            hashlib.sha256(content).hexdigest() != version.sha256
+            or version.sha256 != source.file_sha256
+        ):
+            raise AgentError("SOURCE_INTEGRITY_FAILED", "来源文档哈希校验失败")
+        source_documents.append(
+            SourceDocument(
+                document_version_id=version.pk,
+                filename=version.original_filename,
+                mime_type=version.content_type or "application/octet-stream",
+                content=content,
+            )
+        )
+
+    parser = EntrySourceParser()
+    documents = tuple(parser.parse(source) for source in source_documents)
+    documents_by_id = {document.document_version_id: document for document in documents}
+    canonicalized: list[ConfirmedFact] = []
+    for fact in facts:
+        document = documents_by_id.get(fact.source_document_version_id)
+        block = _canonical_evidence_block(fact, document) if document is not None else None
+        canonicalized.append(
+            fact.model_copy(update={"locator": block.locator}) if block is not None else fact
+        )
+    return list(FactEvidenceGate().validate(canonicalized, documents=documents))
+
+
+def _canonical_evidence_block(
+    fact: ConfirmedFact,
+    document: ParsedDocument,
+) -> ParsedBlock | None:
+    expected = fact.locator
+
+    # Prefer a fully matching structural locator. A model may occasionally return
+    # both a paragraph and table index for text that is actually represented by
+    # one table block, so a failed exact match is not sufficient to reject the
+    # evidence.
+    for block in document.blocks:
+        actual = block.locator
+        if (
+            expected.paragraph_index is not None
+            and actual.paragraph_index != expected.paragraph_index
+        ):
+            continue
+        if expected.page is not None and actual.page != expected.page:
+            continue
+        if expected.table_index is not None and actual.table_index != expected.table_index:
+            continue
+        if expected.heading_path and actual.heading_path != expected.heading_path:
+            continue
+        if not _block_supports_fact_value(fact, block):
+            continue
+        return block
+
+    # Fall back to source text only after the structural locator fails. This
+    # repairs contradictory paragraph/table metadata while still requiring the
+    # quoted text to exist in the selected source document.
+    quote = _normalize_evidence_text(expected.text_quote or "")
+    if len(quote) >= 6:
+        for block in document.blocks:
+            block_text = _normalize_evidence_text(block.text)
+            if (
+                quote in block_text or (len(block_text) >= 6 and block_text in quote)
+            ) and _block_supports_fact_value(fact, block):
+                return block
+
+    # Detection methods are an enumerated fact. When the model's quote is also
+    # shortened or reformatted, infer the selected method codes from the actual
+    # parsed source block and only repair the locator if every selected code is
+    # explicitly supported there.
+    if fact.field == "inspection_method_codes" and isinstance(fact.value, list):
+        expected_codes = {
+            str(value).strip().upper()
+            for value in fact.value
+            if str(value).strip()
+        }
+        if expected_codes:
+            method_blocks = [
+                block
+                for block in document.blocks
+                if _block_supports_fact_value(fact, block)
+            ]
+            if method_blocks:
+                return max(
+                    method_blocks,
+                    key=lambda block: _evidence_locator_similarity(expected, block),
+                )
+    return None
+
+
+def _normalize_evidence_text(value: str) -> str:
+    return "".join(value.split()).replace("|", "")
+
+
+def _block_supports_fact_value(fact: ConfirmedFact, block: ParsedBlock) -> bool:
+    if fact.field != "inspection_method_codes" or not isinstance(fact.value, list):
+        return True
+    expected_codes = {
+        str(value).strip().upper()
+        for value in fact.value
+        if str(value).strip()
+    }
+    return bool(expected_codes) and expected_codes.issubset(
+        set(infer_method_codes(block.text))
+    )
+
+
+def _evidence_locator_similarity(expected: SourceLocator, block: ParsedBlock) -> int:
+    actual = block.locator
+    score = 0
+    if expected.table_index is not None and actual.table_index == expected.table_index:
+        score += 4
+    if (
+        expected.paragraph_index is not None
+        and actual.paragraph_index == expected.paragraph_index
+    ):
+        score += 4
+    if expected.page is not None and actual.page == expected.page:
+        score += 3
+    if expected.heading_path and actual.heading_path == expected.heading_path:
+        score += 2
+    quote = _normalize_evidence_text(expected.text_quote or "")
+    block_text = _normalize_evidence_text(block.text)
+    if quote and (quote in block_text or block_text in quote):
+        score += 8
+    return score
+
+
+def _fact_evidence_api_error(exc: AgentError) -> DocumentGenerationError:
+    if exc.code == "FACT_EVIDENCE_INVALID":
+        fields = [
+            REQUIRED_FACT_LABELS.get(str(field), str(field))
+            for field in exc.details.get("fields", [])
+        ]
+        suffix = f"：{'、'.join(fields)}" if fields else ""
+        return DocumentGenerationError(
+            exc.code,
+            f"系统已尝试自动修复来源定位，但仍未在所选资料中找到对应依据{suffix}。"
+            "请检查该项选择，或重新指定包含原文的来源",
+        )
+    return DocumentGenerationError(exc.code, exc.message)
 
 
 def _ensure_review_user(actor: Any, task: GenerationTask) -> None:
@@ -458,6 +633,10 @@ def confirm_generation_facts(
             "FACTS_INVALID",
             "；".join(invalid_messages),
         )
+    try:
+        confirmed = _canonicalize_confirmed_fact_evidence(locked, confirmed)
+    except AgentError as exc:
+        raise _fact_evidence_api_error(exc) from exc
     before = _task_snapshot(locked)
     locked.facts_snapshot = [fact.model_dump(mode="json") for fact in confirmed]
     locked.risk_profile = _risk_profile_from_facts(confirmed)
@@ -609,6 +788,57 @@ def retry_generation_task(
                 "任务缺少已确认事实或来源，不能重试",
             )
         before = _task_snapshot(locked)
+        recovered_fact_evidence = False
+        if (
+            locked.operation == GenerationTask.Operation.GENERATE
+            and locked.error_code == "FACT_EVIDENCE_INVALID"
+        ):
+            try:
+                confirmed = [ConfirmedFact.model_validate(value) for value in locked.facts_snapshot]
+                confirmed = _canonicalize_confirmed_fact_evidence(locked, confirmed)
+            except PydanticValidationError as exc:
+                raise DocumentGenerationError(
+                    "FACTS_INCOMPLETE",
+                    "已确认事实格式不完整，请重新核对项目事实",
+                ) from exc
+            except AgentError as exc:
+                if exc.code != "FACT_EVIDENCE_INVALID":
+                    raise _fact_evidence_api_error(exc) from exc
+                invalid_fields = sorted({str(field) for field in exc.details.get("fields", [])})
+                locked.status = GenerationTask.Status.NEEDS_CONFIRMATION
+                locked.progress = 20
+                locked.fact_conflicts = [
+                    {"field": field, "reason": "evidence_invalid"} for field in invalid_fields
+                ]
+                locked.error_message = "部分项目事实的来源已失效，请重新核对标记项后再次提交"
+                locked.save(
+                    update_fields=[
+                        "status",
+                        "progress",
+                        "fact_conflicts",
+                        "error_message",
+                        "updated_at",
+                    ]
+                )
+                GenerationReview.objects.create(
+                    task=locked,
+                    action=GenerationReview.Action.RETRIED,
+                    actor=actor,
+                    comment="来源证据无法自动修复，已回退到人工事实核对",
+                )
+                audit_log(
+                    user=actor,
+                    action="document_generation.facts.recovery_required",
+                    resource=locked,
+                    result="success",
+                    request=request,
+                    before_data=before,
+                    after_data=_task_snapshot(locked),
+                )
+                return locked
+            locked.facts_snapshot = [fact.model_dump(mode="json") for fact in confirmed]
+            locked.fact_conflicts = []
+            recovered_fact_evidence = True
         locked.status = (
             GenerationTask.Status.EXTRACTING
             if locked.operation == GenerationTask.Operation.EXTRACT
@@ -625,6 +855,7 @@ def retry_generation_task(
                 "completed_at",
                 "error_code",
                 "error_message",
+                *(["facts_snapshot", "fact_conflicts"] if recovered_fact_evidence else []),
                 "updated_at",
             ]
         )
@@ -644,6 +875,111 @@ def retry_generation_task(
             after_data=_task_snapshot(locked),
         )
     return locked
+
+
+def stop_generation_task(
+    *,
+    actor: Any,
+    task: GenerationTask,
+    request: Any = None,
+) -> GenerationTask:
+    with transaction.atomic():
+        locked = (
+            GenerationTask.objects.select_for_update().select_related("project").get(pk=task.pk)
+        )
+        _ensure_task_user(actor, locked)
+        _ensure_status(locked, ACTIVE_TASK_STATUSES)
+        before = _task_snapshot(locked)
+        locked.status = GenerationTask.Status.CANCELLED
+        locked.completed_at = timezone.now()
+        locked.error_code = ""
+        locked.error_message = ""
+        locked.save(
+            update_fields=[
+                "status",
+                "completed_at",
+                "error_code",
+                "error_message",
+                "updated_at",
+            ]
+        )
+        GenerationReview.objects.create(
+            task=locked,
+            action=GenerationReview.Action.STOPPED,
+            actor=actor,
+            comment="用户主动停止编制会话",
+        )
+        audit_log(
+            user=actor,
+            action="document_generation.task.stop",
+            resource=locked,
+            result="success",
+            request=request,
+            before_data=before,
+            after_data=_task_snapshot(locked),
+        )
+        transaction.on_commit(
+            lambda: _finish_stopping_generation_task(str(locked.pk)),
+            robust=True,
+        )
+    return locked
+
+
+def delete_generation_task(
+    *,
+    actor: Any,
+    task: GenerationTask,
+    request: Any = None,
+    storage: LocalDocumentStorage | None = None,
+) -> None:
+    with transaction.atomic():
+        locked = (
+            GenerationTask.objects.select_for_update().select_related("project").get(pk=task.pk)
+        )
+        _ensure_task_user(actor, locked)
+        if locked.status in ACTIVE_TASK_STATUSES:
+            raise DocumentGenerationError(
+                "TASK_STILL_RUNNING",
+                "会话仍在执行，请先停止会话后再删除",
+                status_code=409,
+            )
+        if locked.deleted_at is not None:
+            return
+        before = _task_snapshot(locked)
+        draft_storage_path = locked.draft_storage_path
+        locked.deleted_at = timezone.now()
+        locked.deleted_by = actor
+        locked.save(update_fields=["deleted_at", "deleted_by", "updated_at"])
+        audit_log(
+            user=actor,
+            action="document_generation.task.delete",
+            resource=locked,
+            result="success",
+            request=request,
+            before_data=before,
+            after_data={
+                "deleted_at": locked.deleted_at.isoformat(),
+                "output_document_version_preserved": locked.output_document_version_id,
+            },
+        )
+        if draft_storage_path:
+            backend = storage or LocalDocumentStorage()
+            transaction.on_commit(
+                lambda: backend.delete(draft_storage_path),
+                robust=True,
+            )
+
+
+def _finish_stopping_generation_task(task_id: str) -> None:
+    try:
+        TaskWorkflowRecorder(task_id).emit(
+            stage="cancelled",
+            tool="cancel_generation_task",
+            status="succeeded",
+            detail="用户主动停止，会话不会继续生成或进入审核",
+        )
+    finally:
+        stop_generation_job(task_id)
 
 
 @transaction.atomic

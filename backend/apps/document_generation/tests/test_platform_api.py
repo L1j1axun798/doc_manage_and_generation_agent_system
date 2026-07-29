@@ -46,6 +46,17 @@ def docx_bytes(*paragraphs: str) -> bytes:
     return output.getvalue()
 
 
+def docx_with_method_table_bytes() -> bytes:
+    document = DocxDocument()
+    document.add_paragraph("项目名称：风场入场项目")
+    table = document.add_table(rows=2, cols=1)
+    table.cell(0, 0).text = "对变桨轴承采用相控阵超声无损探伤。"
+    table.cell(1, 0).text = "对风电机组高强度螺栓采用相控阵超声探伤。"
+    output = BytesIO()
+    document.save(output)
+    return output.getvalue()
+
+
 def create_stored_version(
     *,
     root,
@@ -189,6 +200,351 @@ def create_task_via_api(client, case):
     )
     assert response.status_code == 201
     return GenerationTask.objects.get(pk=response.json()["id"])
+
+
+def prepare_confirmation_task(client, case):
+    task = create_task_via_api(client, case)
+    response = client.post(
+        f"/api/v1/document-generation/tasks/{task.pk}/sources/",
+        {"document_version_ids": [case["source_version"].pk]},
+        content_type="application/json",
+    )
+    assert response.status_code == 200
+    task.status = GenerationTask.Status.NEEDS_CONFIRMATION
+    task.progress = 20
+    task.save(update_fields=["status", "progress", "updated_at"])
+    return task
+
+
+@pytest.mark.django_db(transaction=True)
+def test_running_conversation_can_be_stopped_without_worker_overwrite(
+    client,
+    tmp_path,
+    monkeypatch,
+):
+    case = setup_generation_case(tmp_path)
+    client.force_login(case["manager"])
+    task = create_task_via_api(client, case)
+    task.status = GenerationTask.Status.GENERATING
+    task.operation = GenerationTask.Operation.GENERATE
+    task.progress = 68
+    task.save(update_fields=["status", "operation", "progress", "updated_at"])
+    stop_signals: list[str] = []
+    monkeypatch.setattr(
+        "apps.document_generation.services.stop_generation_job",
+        lambda task_id: stop_signals.append(task_id) or "stop_requested",
+    )
+
+    response = client.post(f"/api/v1/document-generation/tasks/{task.pk}/stop/")
+
+    task.refresh_from_db()
+    assert response.status_code == 200
+    assert response.json()["status"] == "cancelled"
+    assert task.status == GenerationTask.Status.CANCELLED
+    assert task.progress == 68
+    assert task.completed_at is not None
+    assert stop_signals == [str(task.pk)]
+    assert task.reviews.filter(action=GenerationReview.Action.STOPPED).exists()
+    assert task.workflow_events.filter(
+        tool="cancel_generation_task",
+        stage="cancelled",
+        status="succeeded",
+    ).exists()
+    assert run_generation_task(str(task.pk)) == "skipped"
+    task.refresh_from_db()
+    assert task.status == GenerationTask.Status.CANCELLED
+
+
+@pytest.mark.django_db(transaction=True)
+def test_terminal_conversation_delete_is_soft_and_removes_private_draft(
+    client,
+    tmp_path,
+):
+    case = setup_generation_case(tmp_path)
+    client.force_login(case["manager"])
+    task = create_task_via_api(client, case)
+    storage = LocalDocumentStorage(root=tmp_path)
+    stored = storage.save_uploaded_file(
+        SimpleUploadedFile("draft.docx", b"private draft", content_type=DOCX_MIME)
+    )
+    task.draft_storage_path = stored.relative_path
+    task.save(update_fields=["draft_storage_path", "updated_at"])
+
+    with override_settings(FILE_STORAGE_ROOT=tmp_path):
+        response = client.delete(f"/api/v1/document-generation/tasks/{task.pk}/")
+
+    task.refresh_from_db()
+    assert response.status_code == 204
+    assert task.deleted_at is not None
+    assert task.deleted_by == case["manager"]
+    assert not storage.exists(stored.relative_path)
+    assert (
+        client.get(
+            "/api/v1/document-generation/tasks/",
+            {"project": case["project"].pk},
+        ).json()["count"]
+        == 0
+    )
+    assert client.get(f"/api/v1/document-generation/tasks/{task.pk}/").status_code == 404
+    assert AuditLog.objects.filter(
+        action="document_generation.task.delete",
+        resource_id=str(task.pk),
+        result=AuditLog.Result.SUCCESS,
+    ).exists()
+
+
+@pytest.mark.django_db(transaction=True)
+def test_running_conversation_must_be_stopped_before_delete(client, tmp_path):
+    case = setup_generation_case(tmp_path)
+    client.force_login(case["manager"])
+    task = create_task_via_api(client, case)
+    task.status = GenerationTask.Status.EXTRACTING
+    task.save(update_fields=["status", "updated_at"])
+
+    response = client.delete(f"/api/v1/document-generation/tasks/{task.pk}/")
+
+    task.refresh_from_db()
+    assert response.status_code == 409
+    assert response.json()["code"] == "TASK_STILL_RUNNING"
+    assert task.deleted_at is None
+
+
+@pytest.mark.django_db(transaction=True)
+def test_viewer_cannot_stop_or_delete_project_conversation(client, tmp_path):
+    case = setup_generation_case(tmp_path)
+    client.force_login(case["manager"])
+    task = create_task_via_api(client, case)
+    task.status = GenerationTask.Status.GENERATING
+    task.operation = GenerationTask.Operation.GENERATE
+    task.save(update_fields=["status", "operation", "updated_at"])
+    client.force_login(case["viewer"])
+
+    stop_response = client.post(f"/api/v1/document-generation/tasks/{task.pk}/stop/")
+    task.status = GenerationTask.Status.DRAFT
+    task.save(update_fields=["status", "updated_at"])
+    delete_response = client.delete(f"/api/v1/document-generation/tasks/{task.pk}/")
+
+    task.refresh_from_db()
+    assert stop_response.status_code == 403
+    assert delete_response.status_code == 403
+    assert task.deleted_at is None
+
+
+@pytest.mark.django_db(transaction=True)
+def test_fact_confirmation_canonicalizes_shortened_quote_at_structural_position(
+    client,
+    tmp_path,
+):
+    case = setup_generation_case(tmp_path)
+    client.force_login(case["manager"])
+    task = prepare_confirmation_task(client, case)
+
+    with override_settings(FILE_STORAGE_ROOT=tmp_path):
+        response = client.put(
+            f"/api/v1/document-generation/tasks/{task.pk}/facts/confirm/",
+            {
+                "facts": [
+                    {
+                        "field": "project_name",
+                        "value": "风场入场项目",
+                        "value_type": "string",
+                        "source_document_version_id": case["source_version"].pk,
+                        "locator": {
+                            "paragraph_index": 0,
+                            "text_quote": "项目名称：风场...",
+                        },
+                        "confidence": 1,
+                    }
+                ]
+            },
+            content_type="application/json",
+        )
+
+    task.refresh_from_db()
+    assert response.status_code == 200
+    assert task.status == GenerationTask.Status.READY
+    assert task.facts_snapshot[0]["locator"]["text_quote"] == "项目名称：风场入场项目"
+
+
+@pytest.mark.django_db(transaction=True)
+def test_fact_confirmation_repairs_conflicting_method_locator_from_source_text(
+    client,
+    tmp_path,
+):
+    case = setup_generation_case(tmp_path)
+    method_version = create_stored_version(
+        root=tmp_path,
+        actor=case["manager"],
+        project=case["project"],
+        folder=case["entry_folder"],
+        title="相控阵检测方案",
+        filename="method-plan.docx",
+        content=docx_with_method_table_bytes(),
+        source_type=Document.SourceType.ENTRANCE_MATERIAL,
+    )
+    client.force_login(case["manager"])
+    task = create_task_via_api(client, case)
+    source_response = client.post(
+        f"/api/v1/document-generation/tasks/{task.pk}/sources/",
+        {"document_version_ids": [method_version.pk]},
+        content_type="application/json",
+    )
+    assert source_response.status_code == 200
+    task.status = GenerationTask.Status.NEEDS_CONFIRMATION
+    task.progress = 20
+    task.save(update_fields=["status", "progress", "updated_at"])
+
+    with override_settings(FILE_STORAGE_ROOT=tmp_path):
+        response = client.put(
+            f"/api/v1/document-generation/tasks/{task.pk}/facts/confirm/",
+            {
+                "facts": [
+                    {
+                        "field": "project_name",
+                        "value": "风场入场项目",
+                        "value_type": "string",
+                        "source_document_version_id": method_version.pk,
+                        "locator": {
+                            "paragraph_index": 0,
+                            "text_quote": "项目名称：风场入场项目",
+                        },
+                        "confidence": 1,
+                    },
+                    {
+                        "field": "inspection_method_codes",
+                        "value": ["PAUT"],
+                        "value_type": "list[string]",
+                        "source_document_version_id": method_version.pk,
+                        "locator": {
+                            "paragraph_index": 110,
+                            "table_index": 0,
+                            "text_quote": (
+                                "对变桨轴承采用相控阵超声无损探伤。\n"
+                                "对风电机组高强度螺栓采用相控阵超声探伤。"
+                            ),
+                        },
+                        "confidence": 1,
+                    },
+                ]
+            },
+            content_type="application/json",
+        )
+
+    task.refresh_from_db()
+    assert response.status_code == 200
+    assert task.status == GenerationTask.Status.READY
+    method_fact = next(
+        fact
+        for fact in task.facts_snapshot
+        if fact["field"] == "inspection_method_codes"
+    )
+    assert method_fact["locator"]["paragraph_index"] is None
+    assert method_fact["locator"]["table_index"] == 0
+    assert "相控阵超声" in method_fact["locator"]["text_quote"]
+
+
+@pytest.mark.django_db(transaction=True)
+def test_fact_confirmation_does_not_repair_unsupported_method_code(
+    client,
+    tmp_path,
+):
+    case = setup_generation_case(tmp_path)
+    method_version = create_stored_version(
+        root=tmp_path,
+        actor=case["manager"],
+        project=case["project"],
+        folder=case["entry_folder"],
+        title="相控阵检测方案",
+        filename="method-plan.docx",
+        content=docx_with_method_table_bytes(),
+        source_type=Document.SourceType.ENTRANCE_MATERIAL,
+    )
+    client.force_login(case["manager"])
+    task = create_task_via_api(client, case)
+    source_response = client.post(
+        f"/api/v1/document-generation/tasks/{task.pk}/sources/",
+        {"document_version_ids": [method_version.pk]},
+        content_type="application/json",
+    )
+    assert source_response.status_code == 200
+    task.status = GenerationTask.Status.NEEDS_CONFIRMATION
+    task.progress = 20
+    task.save(update_fields=["status", "progress", "updated_at"])
+
+    with override_settings(FILE_STORAGE_ROOT=tmp_path):
+        response = client.put(
+            f"/api/v1/document-generation/tasks/{task.pk}/facts/confirm/",
+            {
+                "facts": [
+                    {
+                        "field": "project_name",
+                        "value": "风场入场项目",
+                        "value_type": "string",
+                        "source_document_version_id": method_version.pk,
+                        "locator": {
+                            "paragraph_index": 0,
+                            "text_quote": "项目名称：风场入场项目",
+                        },
+                        "confidence": 1,
+                    },
+                    {
+                        "field": "inspection_method_codes",
+                        "value": ["MT"],
+                        "value_type": "list[string]",
+                        "source_document_version_id": method_version.pk,
+                        "locator": {
+                            "paragraph_index": 110,
+                            "table_index": 0,
+                            "text_quote": "对变桨轴承采用相控阵超声无损探伤。",
+                        },
+                        "confidence": 1,
+                    },
+                ]
+            },
+            content_type="application/json",
+        )
+
+    task.refresh_from_db()
+    assert response.status_code == 400
+    assert response.json()["code"] == "FACT_EVIDENCE_INVALID"
+    assert "系统已尝试自动修复来源定位" in response.json()["message"]
+    assert task.status == GenerationTask.Status.NEEDS_CONFIRMATION
+
+
+@pytest.mark.django_db(transaction=True)
+def test_fact_confirmation_rejects_invalid_evidence_before_queueing_generation(
+    client,
+    tmp_path,
+):
+    case = setup_generation_case(tmp_path)
+    client.force_login(case["manager"])
+    task = prepare_confirmation_task(client, case)
+
+    with override_settings(FILE_STORAGE_ROOT=tmp_path):
+        response = client.put(
+            f"/api/v1/document-generation/tasks/{task.pk}/facts/confirm/",
+            {
+                "facts": [
+                    {
+                        "field": "project_name",
+                        "value": "风场入场项目",
+                        "value_type": "string",
+                        "source_document_version_id": case["source_version"].pk,
+                        "locator": {
+                            "paragraph_index": 99,
+                            "text_quote": "不存在的来源",
+                        },
+                        "confidence": 1,
+                    }
+                ]
+            },
+            content_type="application/json",
+        )
+
+    task.refresh_from_db()
+    assert response.status_code == 400
+    assert response.json()["code"] == "FACT_EVIDENCE_INVALID"
+    assert task.status == GenerationTask.Status.NEEDS_CONFIRMATION
 
 
 @pytest.mark.django_db(transaction=True)
@@ -388,25 +744,26 @@ def test_full_generation_review_and_export_workflow(client, tmp_path, monkeypatc
     task.refresh_from_db()
     assert task.status == GenerationTask.Status.NEEDS_CONFIRMATION
     assert task.facts_snapshot[0]["evidence"]
-    confirm_response = client.put(
-        f"/api/v1/document-generation/tasks/{task.pk}/facts/confirm/",
-        {
-            "facts": [
-                {
-                    "field": "project_name",
-                    "value": "风场入场项目",
-                    "value_type": "string",
-                    "source_document_version_id": case["source_version"].pk,
-                    "locator": {
-                        "paragraph_index": 0,
-                        "text_quote": "项目名称：风场入场项目",
-                    },
-                    "confidence": 1,
-                }
-            ]
-        },
-        content_type="application/json",
-    )
+    with override_settings(FILE_STORAGE_ROOT=tmp_path):
+        confirm_response = client.put(
+            f"/api/v1/document-generation/tasks/{task.pk}/facts/confirm/",
+            {
+                "facts": [
+                    {
+                        "field": "project_name",
+                        "value": "风场入场项目",
+                        "value_type": "string",
+                        "source_document_version_id": case["source_version"].pk,
+                        "locator": {
+                            "paragraph_index": 0,
+                            "text_quote": "项目名称：风场入场项目",
+                        },
+                        "confidence": 1,
+                    }
+                ]
+            },
+            content_type="application/json",
+        )
     queued_ids.clear()
     generate_response = client.post(
         f"/api/v1/document-generation/tasks/{task.pk}/generate/",

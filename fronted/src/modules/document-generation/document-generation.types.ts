@@ -1,6 +1,42 @@
 export const DOCUMENT_PURPOSE = 'entry_four_measures_two_plans' as const
 export const BUSINESS_TYPE = 'wind_turbine_inspection_four_measures_two_plans' as const
 
+export type KnowledgeSectionCode =
+  | 'overview'
+  | 'organization_measures'
+  | 'construction_plan'
+  | 'technical_measures'
+  | 'safety_measures'
+  | 'risk_identification'
+  | 'emergency_plan'
+  | 'environmental_measures'
+
+export type KnowledgeCorpusUploadStatus = 'queued' | 'processing' | 'succeeded' | 'failed'
+
+export interface KnowledgeCorpusUpload {
+  id: string
+  filename: string
+  file_sha256: string
+  business_type: typeof BUSINESS_TYPE
+  section_codes: KnowledgeSectionCode[]
+  section_names: string[]
+  indexed_section_codes: KnowledgeSectionCode[]
+  indexed_section_names: string[]
+  skipped_section_codes: KnowledgeSectionCode[]
+  skipped_section_names: string[]
+  status: KnowledgeCorpusUploadStatus
+  chunk_count: number
+  embedding_model_alias: string
+  embedding_dimension: number | null
+  error_code: string
+  error_message: string
+  created_by_name: string
+  started_at: string | null
+  completed_at: string | null
+  created_at: string
+  updated_at: string
+}
+
 export type GenerationTaskStatus =
   | 'draft'
   | 'extracting'
@@ -13,6 +49,7 @@ export type GenerationTaskStatus =
   | 'approved'
   | 'exported'
   | 'failed'
+  | 'cancelled'
 
 export type GenerationOperation = 'extract' | 'generate'
 

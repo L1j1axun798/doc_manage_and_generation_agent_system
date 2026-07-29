@@ -128,7 +128,7 @@ export function factFieldDefinition(field: string): FactFieldDefinition {
 
 export function missingRequiredFactFields(
   requiredFields: string[],
-  proposals: FactProposal[],
+  proposals: Array<Pick<FactProposal, 'field'>>,
 ): string[] {
   const present = new Set(proposals.map((proposal) => proposal.field))
   return requiredFields.filter((field) => !present.has(field))

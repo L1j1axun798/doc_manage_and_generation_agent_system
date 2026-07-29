@@ -1,7 +1,11 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
-from .views import DocumentTemplateViewSet, GenerationTaskViewSet
+from .views import (
+    DocumentTemplateViewSet,
+    GenerationTaskViewSet,
+    KnowledgeCorpusUploadViewSet,
+)
 
 router = DefaultRouter()
 router.register(
@@ -10,6 +14,11 @@ router.register(
     basename="docgen-template",
 )
 router.register("document-generation/tasks", GenerationTaskViewSet, basename="docgen-task")
+router.register(
+    "document-generation/knowledge-uploads",
+    KnowledgeCorpusUploadViewSet,
+    basename="docgen-knowledge-upload",
+)
 
 section_detail = GenerationTaskViewSet.as_view({"patch": "update_section"})
 section_lock = GenerationTaskViewSet.as_view({"post": "lock_section"})

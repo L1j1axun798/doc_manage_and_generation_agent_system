@@ -188,6 +188,82 @@ class KnowledgeSection(models.Model):
         return self.chunk_id
 
 
+class KnowledgeCorpusUpload(models.Model):
+    class Status(models.TextChoices):
+        QUEUED = "queued", "等待处理"
+        PROCESSING = "processing", "正在处理"
+        SUCCEEDED = "succeeded", "已入库"
+        FAILED = "failed", "处理失败"
+
+    class SectionCode(models.TextChoices):
+        OVERVIEW = "overview", "工程概况与编制依据"
+        ORGANIZATION_MEASURES = "organization_measures", "组织措施"
+        CONSTRUCTION_PLAN = "construction_plan", "施工方案"
+        TECHNICAL_MEASURES = "technical_measures", "技术措施"
+        SAFETY_MEASURES = "safety_measures", "安全措施"
+        RISK_IDENTIFICATION = "risk_identification", "风险辨识与预控"
+        EMERGENCY_PLAN = "emergency_plan", "应急预案"
+        ENVIRONMENTAL_MEASURES = "environmental_measures", "环境保护与文明施工"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    source_document_version = models.ForeignKey(
+        "documents.DocumentVersion",
+        on_delete=models.PROTECT,
+        related_name="generation_corpus_uploads",
+        verbose_name="来源文档版本",
+    )
+    business_type = models.CharField("业务类型", max_length=80, default=BUSINESS_TYPE)
+    client_code = models.CharField("甲方编码", max_length=80, blank=True)
+    section_code = models.CharField(
+        "适用章节",
+        max_length=80,
+        choices=SectionCode.choices,
+    )
+    section_codes = models.JSONField("适用章节列表", default=list)
+    indexed_section_codes = models.JSONField("已索引章节列表", default=list, blank=True)
+    skipped_section_codes = models.JSONField("未识别章节列表", default=list, blank=True)
+    fallback_to_full_document = models.BooleanField("允许整篇归入单一章节", default=False)
+    component_tags = models.JSONField("部件标签", default=list, blank=True)
+    method_tags = models.JSONField("方法标签", default=list, blank=True)
+    risk_tags = models.JSONField("风险标签", default=list, blank=True)
+    status = models.CharField(
+        "处理状态",
+        max_length=20,
+        choices=Status.choices,
+        default=Status.QUEUED,
+    )
+    chunk_count = models.PositiveIntegerField("知识块数量", default=0)
+    embedding_model_alias = models.CharField("向量模型", max_length=120, blank=True)
+    embedding_dimension = models.PositiveIntegerField("向量维度", null=True, blank=True)
+    error_code = models.CharField("错误码", max_length=80, blank=True)
+    error_message = models.CharField("错误说明", max_length=500, blank=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="created_generation_corpus_uploads",
+        verbose_name="上传人",
+    )
+    started_at = models.DateTimeField("开始处理时间", null=True, blank=True)
+    completed_at = models.DateTimeField("处理完成时间", null=True, blank=True)
+    created_at = models.DateTimeField("创建时间", auto_now_add=True)
+    updated_at = models.DateTimeField("更新时间", auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["status", "created_at"], name="docgen_corpus_status_idx"),
+            models.Index(
+                fields=["business_type", "section_code"],
+                name="docgen_corpus_section_idx",
+            ),
+        ]
+        verbose_name = "RAG语料上传"
+        verbose_name_plural = "RAG语料上传"
+
+    def __str__(self) -> str:
+        return f"{self.source_document_version_id}:{self.section_code}"
+
+
 class GenerationTask(models.Model):
     class Operation(models.TextChoices):
         EXTRACT = "extract", "提取事实"
@@ -205,6 +281,7 @@ class GenerationTask(models.Model):
         APPROVED = "approved", "已批准"
         EXPORTED = "exported", "已导出"
         FAILED = "failed", "失败"
+        CANCELLED = "cancelled", "已停止"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     project = models.ForeignKey(
@@ -281,6 +358,15 @@ class GenerationTask(models.Model):
     approved_at = models.DateTimeField("批准时间", null=True, blank=True)
     started_at = models.DateTimeField("开始生成时间", null=True, blank=True)
     completed_at = models.DateTimeField("生成完成时间", null=True, blank=True)
+    deleted_at = models.DateTimeField("删除时间", null=True, blank=True)
+    deleted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="deleted_generation_tasks",
+        verbose_name="删除人",
+    )
     created_at = models.DateTimeField("创建时间", auto_now_add=True)
     updated_at = models.DateTimeField("更新时间", auto_now=True)
 
@@ -453,6 +539,7 @@ class GenerationReview(models.Model):
         APPROVED = "approved", "批准"
         EXPORTED = "exported", "导出"
         RETRIED = "retried", "重试"
+        STOPPED = "stopped", "停止"
 
     task = models.ForeignKey(
         GenerationTask,

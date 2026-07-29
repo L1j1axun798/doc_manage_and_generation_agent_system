@@ -1,7 +1,7 @@
 import { flushPromises, mount } from '@vue/test-utils'
-import ElementPlus from 'element-plus'
+import ElementPlus, { ElMessageBox } from 'element-plus'
 import { createPinia } from 'pinia'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { GenerationTask } from '@/modules/document-generation'
 import DocumentGenerationPanel from '@/modules/document-generation/components/DocumentGenerationPanel.vue'
@@ -13,11 +13,14 @@ const mocks = vi.hoisted(() => ({
   fetchGenerationEvents: vi.fn(),
   fetchGenerationTemplates: vi.fn(),
   fetchDocuments: vi.fn(),
+  stopGenerationTask: vi.fn(),
+  deleteGenerationTask: vi.fn(),
 }))
 
 vi.mock('@/modules/document-generation/api/document-generation.api', () => ({
   approveGenerationTask: vi.fn(),
   confirmAndGenerate: vi.fn(),
+  deleteGenerationTask: mocks.deleteGenerationTask,
   exportGenerationTask: vi.fn(),
   fetchGenerationEvents: mocks.fetchGenerationEvents,
   fetchGenerationTask: mocks.fetchGenerationTask,
@@ -29,6 +32,7 @@ vi.mock('@/modules/document-generation/api/document-generation.api', () => ({
   retryGenerationTask: vi.fn(),
   setGeneratedSectionLock: vi.fn(),
   startGenerationPipeline: vi.fn(),
+  stopGenerationTask: mocks.stopGenerationTask,
   submitGenerationReview: vi.fn(),
   updateGeneratedSection: vi.fn(),
 }))
@@ -99,6 +103,10 @@ const task: GenerationTask = {
 }
 
 describe('document generation conversation directory', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
   it('lists historical conversations without automatically opening task details', async () => {
     mocks.fetchGenerationTemplates.mockResolvedValue([])
     mocks.fetchDocuments.mockResolvedValue({
@@ -136,6 +144,210 @@ describe('document generation conversation directory', () => {
     expect(mocks.fetchGenerationTask).toHaveBeenCalledWith(task.id)
     expect(wrapper.find('.doc-agent__conversation-directory').exists()).toBe(false)
     expect(wrapper.find('.doc-agent__task').exists()).toBe(true)
+
+    wrapper.unmount()
+  })
+
+  it('shows invalid evidence facts with an actionable recovery path', async () => {
+    const recoveryTask: GenerationTask = {
+      ...task,
+      status: 'needs_confirmation',
+      progress: 20,
+      error_code: 'FACT_EVIDENCE_INVALID',
+      error_message: '部分项目事实的来源已失效，请重新核对标记项后再次提交',
+      fact_conflicts: [{ field: 'project_name', reason: 'evidence_invalid' }],
+      facts_snapshot: [
+        {
+          field: 'project_name',
+          value: project.name,
+          value_type: 'string',
+          source_document_version_id: 194,
+          locator: {
+            paragraph_index: 3,
+            text_quote: `项目名称：${project.name}`,
+          },
+          confidence: 1,
+        },
+      ],
+      sources: [
+        {
+          id: 1,
+          document_version_id: 194,
+          document_title: '入场任务通知',
+          filename: 'entry.docx',
+          file_sha256: '1'.repeat(64),
+          parse_status: 'parsed',
+          parse_error: '',
+          created_at: '2026-07-28T10:00:00+08:00',
+        },
+      ],
+    }
+    mocks.fetchGenerationTemplates.mockResolvedValue([
+      {
+        id: recoveryTask.template_id,
+        code: 'T001',
+        client_name: '示例客户',
+        display_name: recoveryTask.template_name,
+        business_type: 'wind_turbine_inspection_four_measures_two_plans',
+        version: 'v1',
+        document_version_id: 10,
+        filename: 'template.docx',
+        field_mapping: {},
+        section_order: ['overview'],
+        required_fact_fields: ['project_name'],
+      },
+    ])
+    mocks.fetchDocuments.mockResolvedValue({
+      count: 0,
+      next: null,
+      previous: null,
+      results: [],
+    })
+    mocks.fetchGenerationTasks.mockResolvedValue({
+      count: 1,
+      next: null,
+      previous: null,
+      results: [recoveryTask],
+    })
+    mocks.fetchGenerationTask.mockResolvedValue(recoveryTask)
+    mocks.fetchGenerationEvents.mockResolvedValue([])
+
+    const wrapper = mount(DocumentGenerationPanel, {
+      props: { project },
+      global: {
+        plugins: [createPinia(), ElementPlus],
+      },
+    })
+    await flushPromises()
+    await wrapper.get('.doc-agent__conversation-item').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('来源需核对')
+    expect(wrapper.text()).toContain('重新核对标记事实的来源资料和来源原文')
+    expect(
+      wrapper.findAll('textarea').some((input) => input.element.value === project.name),
+    ).toBe(true)
+
+    wrapper.unmount()
+  })
+
+  it('shows a validation recovery point and resumes from the failed section', async () => {
+    const recoveryTask: GenerationTask = {
+      ...task,
+      status: 'failed',
+      operation: 'generate',
+      progress: 78,
+      error_code: 'VALIDATION_FAILED',
+      error_message: '章节 risk_identification 未通过确定性校验：风险项缺少对应的预控措施。',
+      pending_section_codes: ['risk_identification', 'emergency_plan'],
+    }
+    mocks.fetchGenerationTemplates.mockResolvedValue([])
+    mocks.fetchDocuments.mockResolvedValue({
+      count: 0,
+      next: null,
+      previous: null,
+      results: [],
+    })
+    mocks.fetchGenerationTasks.mockResolvedValue({
+      count: 1,
+      next: null,
+      previous: null,
+      results: [recoveryTask],
+    })
+    mocks.fetchGenerationTask.mockResolvedValue(recoveryTask)
+    mocks.fetchGenerationEvents.mockResolvedValue([])
+
+    const wrapper = mount(DocumentGenerationPanel, {
+      props: { project },
+      global: {
+        plugins: [createPinia(), ElementPlus],
+      },
+    })
+    await flushPromises()
+    await wrapper.get('.doc-agent__conversation-item').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('风险项缺少对应的预控措施')
+    expect(wrapper.text()).toContain('系统已保留通过校验的章节')
+    expect(wrapper.text()).toContain('从失败章节继续')
+    expect(wrapper.text()).toContain('风险辨识与预控')
+
+    wrapper.unmount()
+  })
+
+  it('stops a running conversation from the history directory', async () => {
+    const runningTask: GenerationTask = {
+      ...task,
+      status: 'generating',
+      operation: 'generate',
+      progress: 68,
+    }
+    const stoppedTask: GenerationTask = {
+      ...runningTask,
+      status: 'cancelled',
+    }
+    mocks.fetchGenerationTemplates.mockResolvedValue([])
+    mocks.fetchDocuments.mockResolvedValue({
+      count: 0,
+      next: null,
+      previous: null,
+      results: [],
+    })
+    mocks.fetchGenerationTasks.mockResolvedValue({
+      count: 1,
+      next: null,
+      previous: null,
+      results: [runningTask],
+    })
+    mocks.stopGenerationTask.mockResolvedValue(stoppedTask)
+    vi.spyOn(ElMessageBox, 'confirm').mockResolvedValue('confirm')
+
+    const wrapper = mount(DocumentGenerationPanel, {
+      props: { project },
+      global: {
+        plugins: [createPinia(), ElementPlus],
+      },
+    })
+    await flushPromises()
+    await wrapper.get('[data-test="stop-conversation"]').trigger('click')
+    await flushPromises()
+
+    expect(mocks.stopGenerationTask).toHaveBeenCalledWith(task.id)
+    expect(wrapper.text()).toContain('已停止')
+    expect(wrapper.find('[data-test="delete-conversation"]').exists()).toBe(true)
+
+    wrapper.unmount()
+  })
+
+  it('deletes a completed conversation from the history directory', async () => {
+    mocks.fetchGenerationTemplates.mockResolvedValue([])
+    mocks.fetchDocuments.mockResolvedValue({
+      count: 0,
+      next: null,
+      previous: null,
+      results: [],
+    })
+    mocks.fetchGenerationTasks.mockResolvedValue({
+      count: 1,
+      next: null,
+      previous: null,
+      results: [task],
+    })
+    mocks.deleteGenerationTask.mockResolvedValue(undefined)
+    vi.spyOn(ElMessageBox, 'confirm').mockResolvedValue('confirm')
+
+    const wrapper = mount(DocumentGenerationPanel, {
+      props: { project },
+      global: {
+        plugins: [createPinia(), ElementPlus],
+      },
+    })
+    await flushPromises()
+    await wrapper.get('[data-test="delete-conversation"]').trigger('click')
+    await flushPromises()
+
+    expect(mocks.deleteGenerationTask).toHaveBeenCalledWith(task.id)
+    expect(wrapper.find('.doc-agent__conversation-item').exists()).toBe(false)
 
     wrapper.unmount()
   })

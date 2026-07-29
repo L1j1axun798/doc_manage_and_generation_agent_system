@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from rest_framework import serializers
 
+from common.validators import uploaded_file_extension, validate_uploaded_file
+
 from .models import (
     BUSINESS_TYPE,
     DOCUMENT_PURPOSE,
@@ -13,8 +15,11 @@ from .models import (
     GenerationSource,
     GenerationTask,
     GenerationTraceEvent,
+    KnowledgeCorpusUpload,
     KnowledgeSection,
 )
+
+KNOWLEDGE_CORPUS_MAX_BYTES = 20 * 1024 * 1024
 
 
 def document_template_display_name(template: DocumentTemplate) -> str:
@@ -52,6 +57,82 @@ class DocumentTemplateSerializer(serializers.ModelSerializer):
 
     def get_display_name(self, obj: DocumentTemplate) -> str:
         return document_template_display_name(obj)
+
+
+class KnowledgeCorpusUploadSerializer(serializers.ModelSerializer):
+    filename = serializers.CharField(
+        source="source_document_version.original_filename",
+        read_only=True,
+    )
+    file_sha256 = serializers.CharField(
+        source="source_document_version.sha256",
+        read_only=True,
+    )
+    created_by_name = serializers.CharField(source="created_by.real_name", read_only=True)
+    section_names = serializers.SerializerMethodField()
+    indexed_section_names = serializers.SerializerMethodField()
+    skipped_section_names = serializers.SerializerMethodField()
+
+    class Meta:
+        model = KnowledgeCorpusUpload
+        fields = [
+            "id",
+            "filename",
+            "file_sha256",
+            "business_type",
+            "section_codes",
+            "section_names",
+            "indexed_section_codes",
+            "indexed_section_names",
+            "skipped_section_codes",
+            "skipped_section_names",
+            "status",
+            "chunk_count",
+            "embedding_model_alias",
+            "embedding_dimension",
+            "error_code",
+            "error_message",
+            "created_by_name",
+            "started_at",
+            "completed_at",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = fields
+
+    def get_section_names(self, upload: KnowledgeCorpusUpload) -> list[str]:
+        return _section_names(upload.section_codes or [upload.section_code])
+
+    def get_indexed_section_names(self, upload: KnowledgeCorpusUpload) -> list[str]:
+        return _section_names(upload.indexed_section_codes)
+
+    def get_skipped_section_names(self, upload: KnowledgeCorpusUpload) -> list[str]:
+        return _section_names(upload.skipped_section_codes)
+
+
+class KnowledgeCorpusUploadCreateSerializer(serializers.Serializer):
+    file = serializers.FileField()
+    section_codes = serializers.ListField(
+        child=serializers.ChoiceField(choices=KnowledgeCorpusUpload.SectionCode.choices),
+        allow_empty=False,
+        max_length=len(KnowledgeCorpusUpload.SectionCode.choices),
+    )
+
+    def validate_file(self, uploaded_file):
+        validate_uploaded_file(uploaded_file)
+        if uploaded_file_extension(uploaded_file) not in {".docx", ".pdf"}:
+            raise serializers.ValidationError("RAG语料仅支持可解析的 DOCX 或文本型 PDF")
+        if uploaded_file.size > KNOWLEDGE_CORPUS_MAX_BYTES:
+            raise serializers.ValidationError("单个RAG语料文件不能超过20MB")
+        return uploaded_file
+
+    def validate_section_codes(self, values):
+        return list(dict.fromkeys(values))
+
+
+def _section_names(section_codes: list[str]) -> list[str]:
+    labels = dict(KnowledgeCorpusUpload.SectionCode.choices)
+    return [labels[code] for code in section_codes if code in labels]
 
 
 class GenerationSourceSerializer(serializers.ModelSerializer):
@@ -193,9 +274,9 @@ class GenerationTaskSerializer(serializers.ModelSerializer):
         return {
             "project_source_files": len(obj.sources.all()),
             "approved_rag_chunks": knowledge.count(),
-            "approved_rag_source_files": knowledge.values(
-                "source_document_version_id"
-            ).distinct().count(),
+            "approved_rag_source_files": knowledge.values("source_document_version_id")
+            .distinct()
+            .count(),
             "approved_clause_blocks": ClauseBlock.objects.filter(
                 business_type=obj.business_type,
                 is_active=True,
