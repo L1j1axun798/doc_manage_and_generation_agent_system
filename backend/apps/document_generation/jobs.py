@@ -24,6 +24,7 @@ from .engine.contracts import (
     KnowledgeChunkDraft,
     KnowledgeSectionInput,
     ParsedDocument,
+    RetrievedSection,
     SourceDocument,
     TemplateDocument,
 )
@@ -42,6 +43,7 @@ from .engine.validation import ControlledSectionValidator
 from .knowledge_sections import blocks_for_section
 from .models import (
     ApprovalStatus,
+    GenerationReview,
     GenerationSource,
     GenerationTask,
     KnowledgeCorpusUpload,
@@ -50,6 +52,7 @@ from .models import (
 from .providers.embedding import OpenAICompatibleEmbeddingProvider
 from .providers.llm import OpenAICompatibleLLMProvider
 from .repositories import ORMClauseRepository, ORMKnowledgeRepository, ORMSectionRepository
+from .revision import is_revision_followup, revision_required_literals
 from .risk import ORMRiskProfiler
 from .workflow_events import TaskWorkflowRecorder
 
@@ -97,8 +100,8 @@ def run_knowledge_corpus_upload(upload_id: str) -> str:
             if not section_blocks:
                 skipped_section_codes.append(section_code)
                 continue
-            drafts.extend(
-                chunker.chunk(
+            try:
+                section_drafts = chunker.chunk(
                     KnowledgeSectionInput(
                         source_document_version_id=source.document_version_id,
                         business_type=upload.business_type,
@@ -107,7 +110,12 @@ def run_knowledge_corpus_upload(upload_id: str) -> str:
                         approval_status="approved",
                     )
                 )
-            )
+            except AgentError as exc:
+                if exc.code != "KNOWLEDGE_SECTION_EMPTY":
+                    raise
+                skipped_section_codes.append(section_code)
+                continue
+            drafts.extend(section_drafts)
             indexed_section_codes.append(section_code)
         if not drafts:
             raise AgentError(
@@ -349,6 +357,19 @@ def _run_document_generation(task_id: str) -> str:
                 "updated_at",
             ]
         )
+        for review in task.reviews.filter(
+            action=GenerationReview.Action.SECTION_REGENERATED,
+            section__section_code__in=task.pending_section_codes,
+        ):
+            metadata = dict(review.metadata or {})
+            if metadata.get("conversation_status") != "queued":
+                continue
+            metadata["conversation_status"] = "processing"
+            metadata["assistant_message"] = (
+                "正在理解你的修改要求，并重新检索本章可用的已批准RAG参考。"
+            )
+            review.metadata = metadata
+            review.save(update_fields=["metadata"])
         GenerationSource.objects.filter(task=task).update(
             parse_status=GenerationSource.ParseStatus.PENDING,
             parse_error="",
@@ -363,6 +384,11 @@ def _run_document_generation(task_id: str) -> str:
         _record_failure(task_id, exc)
         if isinstance(exc, AgentError) and exc.code == "FACT_EVIDENCE_INVALID":
             return "needs_confirmation"
+        if GenerationTask.objects.filter(
+            pk=task_id,
+            status=GenerationTask.Status.REVIEW_REQUIRED,
+        ).exists():
+            return "review_required"
         raise
     with transaction.atomic():
         task = GenerationTask.objects.select_for_update().get(pk=task_id)
@@ -372,8 +398,9 @@ def _run_document_generation(task_id: str) -> str:
         task.progress = 90
         task.provider_alias = provider_alias
         task.model_alias = model_alias
-        task.prompt_version = "section_generation/v2"
+        task.prompt_version = "section_generation/v4"
         task.chunk_rule_version = "phase3-v1"
+        completed_section_codes = list(task.pending_section_codes)
         task.pending_section_codes = []
         task.completed_at = timezone.now()
         task.save(
@@ -389,6 +416,30 @@ def _run_document_generation(task_id: str) -> str:
                 "updated_at",
             ]
         )
+        revisions = {
+            section.section_code: section.revision
+            for section in task.sections.filter(section_code__in=completed_section_codes)
+        }
+        for review in task.reviews.filter(
+            action=GenerationReview.Action.SECTION_REGENERATED,
+            section__section_code__in=completed_section_codes,
+        ):
+            metadata = dict(review.metadata or {})
+            if metadata.get("conversation_status") not in {"queued", "processing"}:
+                continue
+            revision = revisions.get(review.section.section_code) if review.section else None
+            metadata.update(
+                {
+                    "conversation_status": "completed",
+                    "assistant_message": (
+                        f"本轮修改已写入正文并通过落地校验，当前为修订 {revision}。"
+                        "请继续核对正文、事实和引用。"
+                    ),
+                    "revision_after": revision,
+                }
+            )
+            review.metadata = metadata
+            review.save(update_fields=["metadata"])
         GenerationSource.objects.filter(task=task).update(
             parse_status=GenerationSource.ParseStatus.PARSED,
             parse_error="",
@@ -643,7 +694,11 @@ def _anchored_initial_candidates(
 def _build_request(task_id: str) -> GenerationRequest:
     task = (
         GenerationTask.objects.select_related("template__document_version")
-        .prefetch_related("sources__document_version")
+        .prefetch_related(
+            "sources__document_version",
+            "sections",
+            "reviews__section",
+        )
         .get(pk=task_id)
     )
     storage = LocalDocumentStorage()
@@ -662,6 +717,109 @@ def _build_request(task_id: str) -> GenerationRequest:
         if len(section_codes) == 1 and task.sections.filter(section_code=section_codes[0]).exists()
         else ()
     )
+    section_revision_instructions: dict[str, str] = {}
+    section_revision_conversations: dict[str, tuple[str, ...]] = {}
+    section_revision_required_literals: dict[str, tuple[str, ...]] = {}
+    section_previous_contents: dict[str, str] = {}
+    section_priority_references: dict[str, tuple[RetrievedSection, ...]] = {}
+    sections_by_code = {section.section_code: section for section in task.sections.all()}
+    for section_code in force_regenerate_section_codes:
+        section_reviews = [
+            candidate
+            for candidate in task.reviews.all()
+            if candidate.action == GenerationReview.Action.SECTION_REGENERATED
+            and candidate.section is not None
+            and candidate.section.section_code == section_code
+        ]
+        review = next(
+            (
+                candidate
+                for candidate in reversed(section_reviews)
+                if (candidate.metadata or {}).get("conversation_status")
+                in {"queued", "processing"}
+            ),
+            None,
+        )
+        if review is None:
+            continue
+        metadata = dict(review.metadata or {})
+        requested_chunk_ids = [
+            str(chunk_id)
+            for chunk_id in metadata.get("requested_rag_chunk_ids", [])
+            if str(chunk_id).strip()
+        ]
+        instruction = review.comment.strip()
+        if requested_chunk_ids:
+            instruction += (
+                "\n重点参照以下已批准RAG片段："
+                + "、".join(requested_chunk_ids)
+            )
+            rows = {
+                row.chunk_id: row
+                for row in KnowledgeSection.objects.filter(
+                    chunk_id__in=requested_chunk_ids,
+                    business_type=task.business_type,
+                    is_active=True,
+                    approval_status=ApprovalStatus.APPROVED,
+                )
+            }
+            missing_chunk_ids = [
+                chunk_id for chunk_id in requested_chunk_ids if chunk_id not in rows
+            ]
+            if missing_chunk_ids:
+                raise AgentError(
+                    "RAG_REFERENCE_UNAVAILABLE",
+                    "用户指定的RAG参考已失效，请刷新章节后重新选择",
+                    details={"chunk_ids": missing_chunk_ids},
+                )
+            section_priority_references[section_code] = tuple(
+                RetrievedSection(
+                    chunk_id=row.chunk_id,
+                    source_document_version_id=row.source_document_version_id,
+                    section_code=row.section_code,
+                    heading_path=tuple(row.heading_path),
+                    text=row.text,
+                    similarity=1,
+                    final_score=1,
+                    client_code=row.client_code or None,
+                    component_tags=tuple(row.component_tags),
+                    method_tags=tuple(row.method_tags),
+                    risk_tags=tuple(row.risk_tags),
+                )
+                for row in (rows[chunk_id] for chunk_id in requested_chunk_ids)
+            )
+        section_revision_instructions[section_code] = instruction
+        required_literals = tuple(
+            str(value).strip()
+            for value in metadata.get("required_literals", [])
+            if str(value).strip()
+        ) or revision_required_literals(review.comment)
+        if is_revision_followup(review.comment):
+            for previous_review in reversed(section_reviews):
+                if previous_review.pk == review.pk:
+                    continue
+                previous_metadata = dict(previous_review.metadata or {})
+                previous_literals = tuple(
+                    str(value).strip()
+                    for value in previous_metadata.get("required_literals", [])
+                    if str(value).strip()
+                ) or revision_required_literals(previous_review.comment)
+                if previous_literals:
+                    required_literals = tuple(
+                        dict.fromkeys((*previous_literals, *required_literals))
+                    )
+                    break
+        section_revision_required_literals[section_code] = required_literals
+        section_revision_conversations[section_code] = tuple(
+            (
+                f"审核人：{candidate.comment}\n"
+                f"Agent：{str((candidate.metadata or {}).get('assistant_message', '')).strip()}"
+            ).strip()
+            for candidate in section_reviews[-6:]
+        )
+        existing_section = sections_by_code.get(section_code)
+        if existing_section is not None:
+            section_previous_contents[section_code] = existing_section.content
     return GenerationRequest(
         request_id=str(task.pk),
         idempotency_key=str(task.pk),
@@ -679,6 +837,11 @@ def _build_request(task_id: str) -> GenerationRequest:
         required_fact_fields=tuple(task.template.required_fact_fields),
         section_codes=section_codes,
         force_regenerate_section_codes=force_regenerate_section_codes,
+        section_revision_instructions=section_revision_instructions,
+        section_revision_conversations=section_revision_conversations,
+        section_revision_required_literals=section_revision_required_literals,
+        section_previous_contents=section_previous_contents,
+        section_priority_references=section_priority_references,
     )
 
 
@@ -808,7 +971,13 @@ def _record_failure(task_id: str, exc: Exception) -> None:
     error_code = exc.code if isinstance(exc, AgentError) else "GENERATION_FAILED"
     message = _public_failure_message(exc)
     validation_section_code, validation_issues = _validation_failure_context(exc)
-    validation_recovery_required = error_code == "VALIDATION_FAILED"
+    revision_recovery_required = error_code == "VALIDATION_FAILED" and any(
+        issue["code"] in {"REVISION_CONTENT_UNCHANGED", "REVISION_LITERAL_MISSING"}
+        for issue in validation_issues
+    )
+    validation_recovery_required = (
+        error_code == "VALIDATION_FAILED" and not revision_recovery_required
+    )
     with transaction.atomic():
         task = (
             GenerationTask.objects.select_for_update()
@@ -818,6 +987,7 @@ def _record_failure(task_id: str, exc: Exception) -> None:
         )
         if task.status == GenerationTask.Status.CANCELLED:
             return
+        conversation_section_codes = list(task.pending_section_codes)
         evidence_recovery_required = error_code == "FACT_EVIDENCE_INVALID"
         if evidence_recovery_required:
             task.status = GenerationTask.Status.NEEDS_CONFIRMATION
@@ -834,6 +1004,20 @@ def _record_failure(task_id: str, exc: Exception) -> None:
                 {"field": field, "reason": "evidence_invalid"} for field in invalid_fields
             ]
             message = "部分项目事实的来源已失效，请重新核对标记项后再次提交"
+        elif revision_recovery_required:
+            issue_summary = "；".join(
+                issue["message"]
+                for issue in validation_issues
+                if issue["code"]
+                in {"REVISION_CONTENT_UNCHANGED", "REVISION_LITERAL_MISSING"}
+            )
+            task.status = GenerationTask.Status.REVIEW_REQUIRED
+            task.progress = 90
+            task.pending_section_codes = []
+            message = (
+                f"本次修改未能落实到正文：{issue_summary}。"
+                "原章节已保留，请调整指令后重新发送。"
+            )[:500]
         elif validation_recovery_required:
             task.pending_section_codes = _pending_validation_sections(
                 task,
@@ -863,10 +1047,38 @@ def _record_failure(task_id: str, exc: Exception) -> None:
                 "error_code",
                 "error_message",
                 *(["progress", "fact_conflicts"] if evidence_recovery_required else []),
+                *(
+                    ["progress", "pending_section_codes"]
+                    if revision_recovery_required
+                    else []
+                ),
                 *(["pending_section_codes"] if validation_recovery_required else []),
                 "updated_at",
             ]
         )
+        conversation_status = (
+            "failed"
+            if revision_recovery_required
+            else ("processing" if retries_left > 0 else "failed")
+        )
+        assistant_message = (
+            f"本次修改未完成：{message}"
+            if revision_recovery_required
+            else "本次修改遇到校验或服务异常，系统正在自动重试。"
+            if retries_left > 0
+            else f"本次修改未完成：{message}"
+        )
+        for review in task.reviews.filter(
+            action=GenerationReview.Action.SECTION_REGENERATED,
+            section__section_code__in=conversation_section_codes,
+        ):
+            metadata = dict(review.metadata or {})
+            if metadata.get("conversation_status") not in {"queued", "processing"}:
+                continue
+            metadata["conversation_status"] = conversation_status
+            metadata["assistant_message"] = assistant_message
+            review.metadata = metadata
+            review.save(update_fields=["metadata"])
         if error_code in {
             "SOURCE_UNSUPPORTED",
             "SOURCE_PARSE_FAILED",
@@ -890,18 +1102,22 @@ def _record_failure(task_id: str, exc: Exception) -> None:
                 ),
             },
         )
-    if validation_recovery_required:
+    if validation_recovery_required or revision_recovery_required:
         TaskWorkflowRecorder(task_id).emit(
             stage="validating_sections",
             tool="validation_recovery_ready",
             status="failed",
-            title="章节校验未通过，已保留恢复点",
+            title=(
+                "本轮修改未落实，已保留原章节"
+                if revision_recovery_required
+                else "章节校验未通过，已保留恢复点"
+            ),
             detail=message,
             metadata={
                 "section_code": validation_section_code,
                 "issues": validation_issues,
                 "pending_section_codes": task.pending_section_codes,
-                "will_retry": retries_left > 0,
+                "will_retry": retries_left > 0 and not revision_recovery_required,
             },
         )
 

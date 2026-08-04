@@ -134,6 +134,9 @@ const selectedPublicRootNode = computed<PublicRootFolderNode | undefined>(() => 
 const isEntryPreparationSelection = computed(
   () => selectedPublicRootNode.value?.publicRootKey === 'entryPreparation',
 )
+const isTechnicalSolutionSelection = computed(
+  () => selectedPublicRootNode.value?.publicRootKey === 'technicalSolution',
+)
 const subfolderPanelRoot = computed(() => {
   const root = selectedPublicRootNode.value
   if (!root || !['company', 'staff'].includes(root.publicRootKey)) {
@@ -879,7 +882,7 @@ async function handleRestore(document: DocumentItem): Promise<void> {
         :loading="listLoading"
         :mode="props.mode"
         :read-only="isArchiveYearSelected"
-        :show-project="isArchiveYearSelected"
+        :show-project="isArchiveYearSelected || isTechnicalSolutionSelection"
         @delete="handleDelete"
         @download="handleDownload"
         @edit="openEditDialog"

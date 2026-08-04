@@ -9,10 +9,15 @@ from django.test import override_settings
 from docx import Document as DocxDocument
 
 from apps.documents.models import Document
+from apps.documents.services import create_document
 from apps.folders.models import Folder
 
 from ..jobs import run_knowledge_corpus_upload
 from ..models import ApprovalStatus, KnowledgeCorpusUpload, KnowledgeSection
+from ..technical_solution_corpus import (
+    enqueue_technical_solution_corpus,
+    scan_technical_solution_corpus,
+)
 
 User = get_user_model()
 DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -27,6 +32,7 @@ def _docx_bytes() -> bytes:
     document.add_paragraph("相控阵超声检测作业区域设置警戒线，雨雪、大风等不利天气停止登塔作业。")
     document.add_heading("应急预案", level=1)
     document.add_paragraph("发生人员受伤时立即停止作业，启动现场救援并按程序上报。")
+    document.add_heading("环境保护", level=1)
     output = BytesIO()
     document.save(output)
     return output.getvalue()
@@ -182,6 +188,58 @@ def test_single_section_entry_material_falls_back_to_whole_document(
         source_document_version=upload.source_document_version,
         section_code="overview",
     ).exists()
+
+
+@pytest.mark.django_db(transaction=True)
+@override_settings(
+    DOCUMENT_AGENT_ENABLED=True,
+    DOCUMENT_AGENT_PHASE5_APPROVED=True,
+    DOCUMENT_AGENT_ALLOW_FAKE_PROVIDER=True,
+)
+def test_technical_solution_scan_queues_only_usable_missing_sections(
+    tmp_path,
+    monkeypatch,
+):
+    admin = _user("bulk-corpus-admin", User.Role.SYSTEM_ADMIN)
+    folder = _public_technical_folder(admin)
+    queued: list[str] = []
+    monkeypatch.setattr(
+        "apps.document_generation.technical_solution_corpus.queue_knowledge_corpus_upload",
+        lambda upload_id: queued.append(upload_id),
+    )
+
+    with override_settings(FILE_STORAGE_ROOT=tmp_path):
+        document = create_document(
+            actor=admin,
+            folder=folder,
+            uploaded_file=SimpleUploadedFile(
+                "complete-plan.docx",
+                _docx_bytes(),
+                content_type=DOCX_MIME,
+            ),
+            title="complete-plan.docx",
+        )
+        plans = scan_technical_solution_corpus()
+        plan = next(item for item in plans if item.document_id == document.pk)
+        assert plan.section_codes == (
+            "safety_measures",
+            "emergency_plan",
+            "environmental_measures",
+        )
+        assert plan.empty_section_codes == ("environmental_measures",)
+        assert plan.estimated_chunk_count > 0
+
+        uploads = enqueue_technical_solution_corpus(actor=admin, plans=plans)
+        assert len(uploads) == 1
+        assert queued == [str(uploads[0].pk)]
+        assert run_knowledge_corpus_upload(str(uploads[0].pk)) == "completed"
+
+    uploads[0].refresh_from_db()
+    assert uploads[0].indexed_section_codes == [
+        "safety_measures",
+        "emergency_plan",
+    ]
+    assert uploads[0].skipped_section_codes == ["environmental_measures"]
 
 
 @pytest.mark.django_db

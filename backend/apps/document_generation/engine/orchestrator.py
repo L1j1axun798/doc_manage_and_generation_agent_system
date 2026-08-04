@@ -17,6 +17,7 @@ from .contracts import (
     RenderRequest,
     RetrievalQuery,
     RetrievalResult,
+    RetrievedSection,
     RiskProfile,
     SectionContext,
     TraceEvent,
@@ -229,6 +230,30 @@ class GenerationOrchestrator:
                         risk_profile,
                         clauses,
                         retrieval,
+                        revision_instruction=request.section_revision_instructions.get(
+                            section_code,
+                            "",
+                        ),
+                        revision_conversation=(
+                            request.section_revision_conversations.get(
+                                section_code,
+                                (),
+                            )
+                        ),
+                        revision_required_literals=(
+                            request.section_revision_required_literals.get(
+                                section_code,
+                                (),
+                            )
+                        ),
+                        previous_content=request.section_previous_contents.get(
+                            section_code,
+                            "",
+                        ),
+                        priority_references=request.section_priority_references.get(
+                            section_code,
+                            (),
+                        ),
                     ),
                     detail=section_code,
                 )
@@ -446,6 +471,12 @@ class GenerationOrchestrator:
         risk_profile: RiskProfile,
         clauses: tuple[ClauseSelection, ...],
         retrieval: RetrievalResult,
+        *,
+        revision_instruction: str = "",
+        revision_conversation: tuple[str, ...] = (),
+        revision_required_literals: tuple[str, ...] = (),
+        previous_content: str = "",
+        priority_references: tuple[RetrievedSection, ...] = (),
     ) -> SectionContext:
         return self.context_builder.build(
             section_code=section_code,
@@ -453,6 +484,11 @@ class GenerationOrchestrator:
             risk_profile=risk_profile,
             clauses=clauses,
             retrieval=retrieval,
+            revision_instruction=revision_instruction,
+            revision_conversation=revision_conversation,
+            revision_required_literals=revision_required_literals,
+            previous_content=previous_content,
+            priority_references=priority_references,
         )
 
     def _select_clauses(

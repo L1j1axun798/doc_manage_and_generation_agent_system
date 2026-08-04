@@ -13,6 +13,7 @@ from .contracts import (
     GeneratedSection,
     PersistedSection,
     RetrievalResult,
+    RetrievedSection,
     RiskProfile,
     SectionContext,
     ValidationIssue,
@@ -29,6 +30,11 @@ class SectionContextBuilder:
         risk_profile: RiskProfile,
         clauses: Sequence[ClauseSelection],
         retrieval: RetrievalResult,
+        revision_instruction: str = "",
+        revision_conversation: Sequence[str] = (),
+        revision_required_literals: Sequence[str] = (),
+        previous_content: str = "",
+        priority_references: Sequence[RetrievedSection] = (),
     ) -> SectionContext:
         if retrieval.query.section_code != section_code:
             raise AgentError("SECTION_CONTEXT_INVALID", "检索结果章节与目标章节不一致")
@@ -47,13 +53,23 @@ class SectionContextBuilder:
                 f"确定性最低门禁为{minimum_characters}个中文字符"
             )
         quality_parts.append("资料不足时必须登记缺项，不得编造")
+        references = tuple(
+            {
+                reference.chunk_id: reference
+                for reference in (*priority_references, *retrieval.sections)
+            }.values()
+        )
         return SectionContext(
             section_code=section_code,
             objective="质量结构要求：" + "；".join(quality_parts),
             confirmed_facts=tuple(confirmed_facts),
             risk_profile=risk_profile,
             clauses=tuple(clauses),
-            references=retrieval.sections,
+            references=references,
+            revision_instruction=revision_instruction,
+            revision_conversation=tuple(revision_conversation),
+            revision_required_literals=tuple(revision_required_literals),
+            previous_content=previous_content,
         )
 
 

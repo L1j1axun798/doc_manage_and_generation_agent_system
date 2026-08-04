@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   fetchDocuments: vi.fn(),
   stopGenerationTask: vi.fn(),
   deleteGenerationTask: vi.fn(),
+  regenerateSection: vi.fn(),
 }))
 
 vi.mock('@/modules/document-generation/api/document-generation.api', () => ({
@@ -28,7 +29,7 @@ vi.mock('@/modules/document-generation/api/document-generation.api', () => ({
   fetchGenerationTemplates: mocks.fetchGenerationTemplates,
   generateEntryPlan: vi.fn(),
   lockAllGeneratedSections: vi.fn(),
-  regenerateSection: vi.fn(),
+  regenerateSection: mocks.regenerateSection,
   retryGenerationTask: vi.fn(),
   setGeneratedSectionLock: vi.fn(),
   startGenerationPipeline: vi.fn(),
@@ -144,6 +145,99 @@ describe('document generation conversation directory', () => {
     expect(mocks.fetchGenerationTask).toHaveBeenCalledWith(task.id)
     expect(wrapper.find('.doc-agent__conversation-directory').exists()).toBe(false)
     expect(wrapper.find('.doc-agent__task').exists()).toBe(true)
+
+    wrapper.unmount()
+  })
+
+  it('sends chapter revision instructions and selected approved RAG references', async () => {
+    const reviewTask: GenerationTask = {
+      ...task,
+      status: 'review_required',
+      operation: 'generate',
+      progress: 90,
+      sections: [
+        {
+          section_code: 'overview',
+          title: '工程概况与编制依据',
+          content: '原章节正文',
+          structured_content: {},
+          citations: [
+            {
+              chunk_id: 'approved-chunk-001',
+              source_document_version_id: 198,
+              locator: { heading_path: ['工程概况', '人员分工'] },
+            },
+          ],
+          validation_issues: [],
+          revision: 1,
+          is_locked: false,
+          generated_at: '2026-07-30T10:00:00+08:00',
+          updated_at: '2026-07-30T10:00:00+08:00',
+        },
+      ],
+    }
+    mocks.fetchGenerationTemplates.mockResolvedValue([])
+    mocks.fetchDocuments.mockResolvedValue({
+      count: 0,
+      next: null,
+      previous: null,
+      results: [],
+    })
+    mocks.fetchGenerationTasks.mockResolvedValue({
+      count: 1,
+      next: null,
+      previous: null,
+      results: [reviewTask],
+    })
+    mocks.fetchGenerationTask.mockResolvedValue(reviewTask)
+    mocks.fetchGenerationEvents.mockResolvedValue([])
+    mocks.regenerateSection.mockResolvedValue({
+      ...reviewTask,
+      status: 'queued',
+      pending_section_codes: ['overview'],
+      reviews: [
+        {
+          id: 8,
+          section_code: 'overview',
+          action: 'section_regenerated',
+          comment: '补充岗位分工',
+          metadata: {
+            conversation_status: 'queued',
+            assistant_message: '已收到修改要求，正在重新生成本章。',
+          },
+          actor_name: '张工',
+          created_at: '2026-07-30T10:10:00+08:00',
+        },
+      ],
+    })
+
+    const wrapper = mount(DocumentGenerationPanel, {
+      props: { project },
+      global: {
+        plugins: [createPinia(), ElementPlus],
+      },
+    })
+    await flushPromises()
+    await wrapper.get('.doc-agent__conversation-item').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('与 Agent 修改本章')
+    expect(wrapper.text()).toContain('特别参照的RAG信息')
+    await wrapper.get('.doc-agent__rag-chips button').trigger('click')
+    const composer = wrapper.get(
+      'textarea[placeholder="输入修改方向、需要加入的信息或其他调整指令…"]',
+    )
+    await composer.setValue('补充岗位分工')
+    await wrapper.get('.doc-agent__composer-footer .el-button').trigger('click')
+    await flushPromises()
+
+    expect(mocks.regenerateSection).toHaveBeenCalledWith(
+      reviewTask.id,
+      'overview',
+      '补充岗位分工',
+      ['approved-chunk-001'],
+    )
+    expect(wrapper.text()).toContain('已收到修改要求')
 
     wrapper.unmount()
   })

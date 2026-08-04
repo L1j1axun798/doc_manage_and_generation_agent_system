@@ -29,6 +29,113 @@ test('shows the not found page for unknown routes', async ({ page }) => {
   await expect(page.getByRole('heading', { name: '页面不存在' })).toBeVisible()
 })
 
+test('shows the admin personnel map and RAG overview on the dashboard', async ({ page }) => {
+  await mockAuthenticatedSession(page)
+  const pageResult = {
+    count: 1,
+    next: null,
+    previous: null,
+    results: [{}],
+  }
+  await page.route('**/api/v1/documents/?**', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify(pageResult) })
+  })
+  await page.route('**/api/v1/projects/?**', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify(pageResult) })
+  })
+  await page.route('**/api/v1/notifications/?**', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify(pageResult) })
+  })
+  await page.route('**/api/v1/document-grants/?**', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify(pageResult) })
+  })
+  const locationSnapshot = {
+    user: {
+      id: 1,
+      username: 'admin',
+      real_name: '管理员',
+      employee_no: 'A001',
+      role: 'system_admin',
+      phone: '',
+    },
+    latest_report: {
+      id: 1,
+      longitude: '116.397128',
+      latitude: '39.916527',
+      accuracy: '20.00',
+      address: '北京市东城区',
+      report_status: 'success',
+      failure_reason: '',
+      reported_at: '2026-07-30T10:00:00+08:00',
+      created_at: '2026-07-30T10:00:00+08:00',
+    },
+    location_status: 'normal',
+    should_report: false,
+  }
+  await page.route('**/api/v1/locations/me/latest/', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify(locationSnapshot),
+    })
+  })
+  await page.route('**/api/v1/locations/admin/latest/', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify([locationSnapshot]),
+    })
+  })
+  await page.route('**/api/v1/document-generation/overview/', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        knowledge_status: 'ready',
+        knowledge_chunks: 948,
+        source_documents: 27,
+        covered_section_count: 8,
+        total_section_count: 8,
+        section_coverage: [
+          { code: 'overview', name: '工程概况与编制依据', chunk_count: 82 },
+          { code: 'organization_measures', name: '组织措施', chunk_count: 86 },
+          { code: 'construction_plan', name: '施工方案', chunk_count: 132 },
+          { code: 'technical_measures', name: '技术措施', chunk_count: 81 },
+          { code: 'safety_measures', name: '安全措施', chunk_count: 117 },
+          { code: 'risk_identification', name: '风险辨识与预控', chunk_count: 31 },
+          { code: 'emergency_plan', name: '应急预案', chunk_count: 373 },
+          { code: 'environmental_measures', name: '环境保护与文明施工', chunk_count: 46 },
+        ],
+        last_indexed_at: '2026-07-30T11:11:26+08:00',
+        embedding_model_alias: 'text-embedding-v4',
+        embedding_dimension: 1024,
+        operations: {
+          status: 'healthy',
+          redis_status: 'ok',
+          worker_status: 'idle',
+          queue_depth: 0,
+          processing_uploads: 0,
+          failed_uploads: 0,
+          latest_upload_status: 'succeeded',
+          latest_upload_at: '2026-07-30T11:11:26+08:00',
+        },
+      }),
+    })
+  })
+
+  await page.goto('/dashboard')
+
+  await expect(page.getByRole('heading', { name: '绿能信盾资料管理系统' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '人员位置概览' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'RAG 知识库概览' })).toBeVisible()
+  await expect(page.getByText('948', { exact: true })).toBeVisible()
+  await expect(page.getByText('text-embedding-v4 · 1024 维')).toBeVisible()
+  await expect(page.getByText('运行正常')).toBeVisible()
+  await page.getByRole('button', { name: '切换深色模式' }).click()
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
+
+  await page.getByRole('link', { name: '查看人员位置目录' }).click()
+  await expect(page).toHaveURL(/\/locations\/admin/)
+  await expect(page.getByRole('heading', { name: '人员位置' })).toBeVisible()
+})
+
 test('shows document center with folder tree and document detail', async ({ page }) => {
   await mockAuthenticatedSession(page)
   const publicFolderTree: FolderTreeNode[] = [

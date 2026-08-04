@@ -9,6 +9,7 @@ from rest_framework.decorators import action
 from rest_framework.generics import get_object_or_404
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from apps.accounts.permissions import IsSystemAdmin
 
@@ -18,6 +19,7 @@ from .knowledge_corpus import (
     retry_knowledge_corpus_upload,
 )
 from .models import DocumentTemplate, GenerationTask, KnowledgeCorpusUpload
+from .overview import get_rag_overview
 from .permissions import IsDocumentGenerationUser
 from .selectors import (
     available_templates,
@@ -29,6 +31,7 @@ from .serializers import (
     ExportSerializer,
     GeneratedSectionSerializer,
     GeneratedSectionUpdateSerializer,
+    GenerationExportInfoSerializer,
     GenerationFactConfirmSerializer,
     GenerationPipelineCreateSerializer,
     GenerationSourceAddSerializer,
@@ -37,8 +40,10 @@ from .serializers import (
     GenerationTraceEventSerializer,
     KnowledgeCorpusUploadCreateSerializer,
     KnowledgeCorpusUploadSerializer,
+    RagOverviewSerializer,
     ReviewActionSerializer,
     SectionLockSerializer,
+    SectionRegenerateSerializer,
     TraceEventQuerySerializer,
 )
 from .services import (
@@ -50,6 +55,7 @@ from .services import (
     delete_generation_task,
     edit_generated_section,
     export_generation_task,
+    generation_export_info,
     lock_all_valid_sections,
     prepare_fact_confirmation,
     request_generation,
@@ -85,6 +91,17 @@ class DocumentTemplateViewSet(
         if getattr(self, "swagger_fake_view", False):
             return DocumentTemplate.objects.none()
         return available_templates()
+
+
+class RagOverviewView(DocumentAgentFeatureMixin, APIView):
+    permission_classes = [IsDocumentGenerationUser]
+
+    @extend_schema(responses=RagOverviewSerializer)
+    def get(self, request):
+        overview = get_rag_overview(
+            include_operations=bool(getattr(request.user, "is_system_admin", False))
+        )
+        return Response(RagOverviewSerializer(overview).data)
 
 
 class KnowledgeCorpusUploadViewSet(
@@ -173,6 +190,7 @@ class GenerationTaskViewSet(
             "confirm_and_generate": GenerationFactConfirmSerializer,
             "update_section": GeneratedSectionUpdateSerializer,
             "lock_section": SectionLockSerializer,
+            "regenerate_section": SectionRegenerateSerializer,
             "submit_review": ReviewActionSerializer,
             "approve": ReviewActionSerializer,
             "export": ExportSerializer,
@@ -409,9 +427,16 @@ class GenerationTaskViewSet(
             actor=request.user,
             task=self.get_object(),
             idempotency_key=serializer.validated_data["idempotency_key"],
+            filename=serializer.validated_data.get("filename"),
             request=request,
         )
         return Response(GenerationTaskSerializer(task).data)
+
+    @extend_schema(responses=GenerationExportInfoSerializer)
+    @action(detail=True, methods=["get"], url_path="export-info")
+    def export_info(self, request, pk=None):
+        info = generation_export_info(self.get_object())
+        return Response(GenerationExportInfoSerializer(info).data)
 
     def update_section(self, request, pk=None, section_code=None):
         serializer = self.get_serializer(data=request.data)
@@ -439,10 +464,14 @@ class GenerationTaskViewSet(
         return Response(GeneratedSectionSerializer(section).data)
 
     def regenerate_section(self, request, pk=None, section_code=None):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
         task = request_section_regeneration(
             actor=request.user,
             task=self.get_object(),
             section_code=section_code,
+            instruction=serializer.validated_data["instruction"],
+            rag_chunk_ids=serializer.validated_data["rag_chunk_ids"],
             request=request,
         )
         return Response(GenerationTaskSerializer(task).data, status=status.HTTP_202_ACCEPTED)

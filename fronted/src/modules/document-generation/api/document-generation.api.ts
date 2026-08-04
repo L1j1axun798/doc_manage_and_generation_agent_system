@@ -6,13 +6,20 @@ import type {
   CreateGenerationTaskPayload,
   DocumentGenerationTemplate,
   GeneratedSection,
+  GenerationExportInfo,
   GenerationTask,
   GenerationTraceEvent,
   KnowledgeCorpusUpload,
+  RagOverview,
 } from '../document-generation.types'
 
 const TASKS = '/document-generation/tasks'
 const KNOWLEDGE_UPLOADS = '/document-generation/knowledge-uploads'
+
+export async function fetchRagOverview(): Promise<RagOverview> {
+  const response = await apiClient.get<RagOverview>('/document-generation/overview/')
+  return response.data
+}
 
 export async function fetchGenerationTemplates(): Promise<DocumentGenerationTemplate[]> {
   const response = await apiClient.get<DocumentGenerationTemplate[]>(
@@ -179,9 +186,15 @@ export async function lockAllGeneratedSections(taskId: string): Promise<Generati
 export async function regenerateSection(
   taskId: string,
   sectionCode: string,
+  instruction: string,
+  ragChunkIds: string[] = [],
 ): Promise<GenerationTask> {
   const response = await apiClient.post<GenerationTask>(
     `${TASKS}/${taskId}/sections/${sectionCode}/regenerate/`,
+    {
+      instruction,
+      rag_chunk_ids: ragChunkIds,
+    },
   )
   return response.data
 }
@@ -209,9 +222,20 @@ export async function approveGenerationTask(
 export async function exportGenerationTask(
   taskId: string,
   idempotencyKey: string,
+  filename: string,
 ): Promise<GenerationTask> {
   const response = await apiClient.post<GenerationTask>(`${TASKS}/${taskId}/export/`, {
     idempotency_key: idempotencyKey,
+    filename,
   })
+  return response.data
+}
+
+export async function fetchGenerationExportInfo(
+  taskId: string,
+): Promise<GenerationExportInfo> {
+  const response = await apiClient.get<GenerationExportInfo>(
+    `${TASKS}/${taskId}/export-info/`,
+  )
   return response.data
 }

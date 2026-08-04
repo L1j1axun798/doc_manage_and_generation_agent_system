@@ -334,6 +334,85 @@ def test_public_root_folder_filter_includes_matching_project_folders(client, tmp
 
 
 @pytest.mark.django_db
+def test_public_technical_solution_lists_only_visible_project_documents(
+    client,
+    tmp_path,
+    settings,
+):
+    settings.FILE_STORAGE_ROOT = tmp_path
+    admin = make_user("admin", User.Role.SYSTEM_ADMIN)
+    operator = make_user("operator", User.Role.DATA_OPERATOR)
+    visible_project = Project.objects.create(name="可见项目", code="P001", created_by=admin)
+    hidden_project = Project.objects.create(name="隐藏项目", code="P002", created_by=admin)
+    ProjectMember.objects.create(project=visible_project, user=operator)
+    public_technical = Folder.objects.create(
+        name="技术方案",
+        code="PUBLIC-TECH-SOLUTION",
+        is_system_root=True,
+        created_by=admin,
+    )
+    visible_technical = Folder.objects.create(
+        project=visible_project,
+        name="技术方案",
+        code="PUBLIC-TECH-SOLUTION",
+        created_by=admin,
+    )
+    hidden_technical = Folder.objects.create(
+        project=hidden_project,
+        name="技术方案",
+        code="PUBLIC-TECH-SOLUTION",
+        created_by=admin,
+    )
+    visible_other = Folder.objects.create(
+        project=visible_project,
+        name="其他资料",
+        code="PROJECT-OTHER",
+        created_by=admin,
+    )
+    client.force_login(admin)
+    create_document_via_api(
+        client,
+        folder=public_technical,
+        title="公共技术方案",
+        content=b"public",
+    )
+    visible_document = create_document_via_api(
+        client,
+        folder=visible_technical,
+        title="可见项目四措两案",
+        content=b"visible-agent-output",
+    )
+    create_document_via_api(
+        client,
+        folder=hidden_technical,
+        title="隐藏项目四措两案",
+        content=b"hidden-agent-output",
+    )
+    create_document_via_api(
+        client,
+        folder=visible_other,
+        title="可见项目其他资料",
+        content=b"visible-other",
+    )
+    client.force_login(operator)
+
+    public_response = client.get(
+        f"/api/v1/documents/?folder={public_technical.id}",
+    )
+    project_response = client.get(
+        f"/api/v1/documents/?project={visible_project.id}",
+    )
+
+    assert public_response.status_code == 200
+    assert {item["title"] for item in public_response.json()["results"]} == {
+        "公共技术方案",
+        "可见项目四措两案",
+    }
+    assert project_response.status_code == 200
+    assert visible_document["id"] in {item["id"] for item in project_response.json()["results"]}
+
+
+@pytest.mark.django_db
 def test_public_staff_root_only_lists_current_users_documents_for_non_admin(
     client,
     tmp_path,

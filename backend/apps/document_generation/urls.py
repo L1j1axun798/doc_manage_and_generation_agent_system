@@ -5,6 +5,7 @@ from .views import (
     DocumentTemplateViewSet,
     GenerationTaskViewSet,
     KnowledgeCorpusUploadViewSet,
+    RagOverviewView,
 )
 
 router = DefaultRouter()
@@ -26,6 +27,11 @@ section_regenerate = GenerationTaskViewSet.as_view({"post": "regenerate_section"
 
 urlpatterns = [
     path("", include(router.urls)),
+    path(
+        "document-generation/overview/",
+        RagOverviewView.as_view(),
+        name="docgen-rag-overview",
+    ),
     path(
         "document-generation/tasks/<uuid:pk>/sections/<str:section_code>/",
         section_detail,

@@ -211,6 +211,55 @@ def test_normalizer_removes_unsourced_numeric_threshold_and_records_gap() -> Non
     assert "UNSOURCED_NUMBER" not in _error_codes(normalized)
 
 
+def test_revision_keeps_reviewer_confirmed_personnel_literals_and_verifies_change() -> None:
+    original = _valid_section()
+    context = _context().model_copy(
+        update={
+            "revision_instruction": "在岗位职责中加入张三，12345678。",
+            "revision_required_literals": ("张三", "12345678"),
+            "previous_content": "\n".join(original.paragraphs),
+        }
+    )
+    revised = original.model_copy(
+        update={
+            "paragraphs": (
+                *original.paragraphs,
+                "张三负责现场协调，人员编号为12345678。",
+            )
+        }
+    )
+
+    normalized = normalize_section_provenance(revised, context)
+    issues = ControlledSectionValidator().validate(normalized, context)
+    error_codes = {
+        issue.code for issue in issues if issue.severity == ValidationSeverity.ERROR
+    }
+
+    assert "12345678" in "\n".join(normalized.paragraphs)
+    assert "UNSOURCED_NUMBER" not in error_codes
+    assert "REVISION_LITERAL_MISSING" not in error_codes
+    assert "REVISION_CONTENT_UNCHANGED" not in error_codes
+
+
+def test_revision_rejects_unchanged_content_and_missing_required_literals() -> None:
+    original = _valid_section()
+    context = _context().model_copy(
+        update={
+            "revision_instruction": "在岗位职责中加入张三，12345678。",
+            "revision_required_literals": ("张三", "12345678"),
+            "previous_content": "\n".join(original.paragraphs),
+        }
+    )
+
+    issues = ControlledSectionValidator().validate(original, context)
+    error_codes = {
+        issue.code for issue in issues if issue.severity == ValidationSeverity.ERROR
+    }
+
+    assert "REVISION_CONTENT_UNCHANGED" in error_codes
+    assert "REVISION_LITERAL_MISSING" in error_codes
+
+
 def test_normalizer_removes_forbidden_result_sentence_before_validation() -> None:
     section = _valid_section().model_copy(
         update={

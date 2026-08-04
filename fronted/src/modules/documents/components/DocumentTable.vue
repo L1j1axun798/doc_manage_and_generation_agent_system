@@ -47,7 +47,6 @@ function canDownloadDocument(document: DocumentItem): boolean {
         <button class="document-table__title" type="button" @click="emit('view', row)">
           {{ row.title }}
         </button>
-        <p class="document-table__filename">{{ row.current_version?.original_filename || '-' }}</p>
       </template>
     </el-table-column>
 

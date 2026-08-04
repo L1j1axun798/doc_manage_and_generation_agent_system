@@ -116,6 +116,8 @@ class FakeLLMProvider:
                     (sentence * (target_per_topic // len(sentence) + 1))[:target_per_topic]
                 )
         paragraphs.extend(clause.text for clause in context.clauses)
+        if context.revision_instruction:
+            paragraphs.append(f"审核人补充修改：{context.revision_instruction}")
         reference_citations = tuple(
             SourceCitation(
                 source_document_version_id=reference.source_document_version_id,

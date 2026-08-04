@@ -434,9 +434,7 @@ def test_fact_confirmation_repairs_conflicting_method_locator_from_source_text(
     assert response.status_code == 200
     assert task.status == GenerationTask.Status.READY
     method_fact = next(
-        fact
-        for fact in task.facts_snapshot
-        if fact["field"] == "inspection_method_codes"
+        fact for fact in task.facts_snapshot if fact["field"] == "inspection_method_codes"
     )
     assert method_fact["locator"]["paragraph_index"] is None
     assert method_fact["locator"]["table_index"] == 0
@@ -786,9 +784,61 @@ def test_full_generation_review_and_export_workflow(client, tmp_path, monkeypatc
     section = GeneratedSection.objects.get(task=task, section_code="overview")
     assert task.status == GenerationTask.Status.REVIEW_REQUIRED
     assert task.generation_attempts == 2
-    assert task.prompt_version == "section_generation/v2"
+    assert task.prompt_version == "section_generation/v4"
     assert section.content
     assert (tmp_path / task.draft_storage_path).is_file()
+
+    regenerate_response = client.post(
+        f"/api/v1/document-generation/tasks/{task.pk}/sections/overview/regenerate/",
+        {
+            "instruction": "补充岗位分工：张三，12345678，并增加检查记录要求。",
+            "rag_chunk_ids": [],
+        },
+        content_type="application/json",
+    )
+    task.refresh_from_db()
+    regeneration_review = task.reviews.get(
+        action=GenerationReview.Action.SECTION_REGENERATED,
+    )
+    assert regenerate_response.status_code == 202
+    assert task.status == GenerationTask.Status.QUEUED
+    assert regeneration_review.comment.startswith("补充岗位分工")
+    assert regeneration_review.metadata["conversation_status"] == "queued"
+    assert regeneration_review.metadata["required_literals"] == ["张三", "12345678"]
+
+    with override_settings(FILE_STORAGE_ROOT=tmp_path):
+        assert run_generation_task(str(task.pk)) == "completed"
+    task.refresh_from_db()
+    section.refresh_from_db()
+    regeneration_review.refresh_from_db()
+    assert task.status == GenerationTask.Status.REVIEW_REQUIRED
+    assert section.revision == 2
+    assert "张三" in section.content
+    assert "12345678" in section.content
+    assert regeneration_review.metadata["conversation_status"] == "completed"
+    assert regeneration_review.metadata["revision_after"] == 2
+
+    followup_response = client.post(
+        f"/api/v1/document-generation/tasks/{task.pk}/sections/overview/regenerate/",
+        {
+            "instruction": "没有看到你在正文内容中的修改。",
+            "rag_chunk_ids": [],
+        },
+        content_type="application/json",
+    )
+    assert followup_response.status_code == 202
+    with override_settings(FILE_STORAGE_ROOT=tmp_path):
+        assert run_generation_task(str(task.pk)) == "review_required"
+    task.refresh_from_db()
+    section.refresh_from_db()
+    followup_review = task.reviews.filter(
+        action=GenerationReview.Action.SECTION_REGENERATED,
+    ).latest("id")
+    assert task.status == GenerationTask.Status.REVIEW_REQUIRED
+    assert section.revision == 2
+    assert "张三" in section.content
+    assert followup_review.metadata["conversation_status"] == "failed"
+    assert "未能落实到正文" in followup_review.metadata["assistant_message"]
 
     lock_response = client.post(
         f"/api/v1/document-generation/tasks/{task.pk}/sections/overview/lock/",
@@ -805,10 +855,16 @@ def test_full_generation_review_and_export_workflow(client, tmp_path, monkeypatc
         {"comment": "技术负责人确认"},
         content_type="application/json",
     )
+    export_info_before = client.get(
+        f"/api/v1/document-generation/tasks/{task.pk}/export-info/",
+    )
     with override_settings(FILE_STORAGE_ROOT=tmp_path):
         export_response = client.post(
             f"/api/v1/document-generation/tasks/{task.pk}/export/",
-            {"idempotency_key": "export-001"},
+            {
+                "idempotency_key": "export-001",
+                "filename": "风场项目-四措两案-终版.docx",
+            },
             content_type="application/json",
         )
         repeated_export = client.post(
@@ -816,6 +872,9 @@ def test_full_generation_review_and_export_workflow(client, tmp_path, monkeypatc
             {"idempotency_key": "export-001"},
             content_type="application/json",
         )
+    export_info_after = client.get(
+        f"/api/v1/document-generation/tasks/{task.pk}/export-info/",
+    )
     task.refresh_from_db()
     output = task.output_document_version.document
 
@@ -823,11 +882,19 @@ def test_full_generation_review_and_export_workflow(client, tmp_path, monkeypatc
     assert submit_response.status_code == 200
     assert submit_response.json()["status"] == GenerationTask.Status.PENDING_APPROVAL
     assert approve_response.status_code == 200
+    assert export_info_before.status_code == 200
+    assert export_info_before.json()["target_folder"] == "技术方案"
+    assert export_info_before.json()["agent_generated_count"] == 0
+    assert export_info_before.json()["default_filename"].endswith(".docx")
     assert export_response.status_code == 200
     assert repeated_export.status_code == 200
+    assert export_info_after.status_code == 200
+    assert export_info_after.json()["agent_generated_count"] == 1
     assert task.status == GenerationTask.Status.EXPORTED
     assert output.project == case["project"]
     assert output.folder == case["technical_folder"]
+    assert output.title == "风场项目-四措两案-终版"
+    assert output.current_version.original_filename == "风场项目-四措两案-终版.docx"
     assert "不是检测报告或完工报告" in output.description
     assert (
         GenerationReview.objects.filter(
@@ -843,6 +910,53 @@ def test_full_generation_review_and_export_workflow(client, tmp_path, monkeypatc
     assert events_response.status_code == 200
     assert any(event["event_type"] == "rag" for event in events_response.json())
     assert any(event["tool"] == "render_word_document" for event in events_response.json())
+
+
+@pytest.mark.django_db
+def test_export_name_conflict_reports_existing_agent_file_count(client, tmp_path):
+    case = setup_generation_case(tmp_path)
+    client.force_login(case["manager"])
+    task = create_task_via_api(client, case)
+    task.status = GenerationTask.Status.APPROVED
+    task.save(update_fields=["status", "updated_at"])
+    existing_version = create_stored_version(
+        root=tmp_path,
+        actor=case["manager"],
+        project=case["project"],
+        folder=case["technical_folder"],
+        title="已有四措两案",
+        filename="已有四措两案.docx",
+        content=docx_bytes("已导出的Agent文件"),
+    )
+    GenerationTask.objects.create(
+        project=case["project"],
+        template=case["template"],
+        status=GenerationTask.Status.EXPORTED,
+        progress=100,
+        idempotency_key="previous-agent-export",
+        request_fingerprint="previous-agent-export",
+        output_document_version=existing_version,
+        export_idempotency_key="previous-export-key",
+        created_by=case["manager"],
+    )
+
+    info_response = client.get(
+        f"/api/v1/document-generation/tasks/{task.pk}/export-info/",
+    )
+    export_response = client.post(
+        f"/api/v1/document-generation/tasks/{task.pk}/export/",
+        {
+            "idempotency_key": "conflicting-export",
+            "filename": "已有四措两案.docx",
+        },
+        content_type="application/json",
+    )
+
+    assert info_response.status_code == 200
+    assert info_response.json()["agent_generated_count"] == 1
+    assert export_response.status_code == 409
+    assert "已有 1 份 Agent 生成文件" in export_response.json()["message"]
+    assert "请修改文件名后重试" in export_response.json()["message"]
 
 
 @pytest.mark.django_db

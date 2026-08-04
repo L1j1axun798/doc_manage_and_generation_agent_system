@@ -1,29 +1,206 @@
 :root {
-  --color-bg-page: #f6f7f9;
+  color-scheme: light;
+
+  /* Brand and semantic colors, aligned with TDesign's enterprise palette. */
+  --color-brand-1: #f2f6ff;
+  --color-brand-2: #d9e7ff;
+  --color-brand-3: #b5d0ff;
+  --color-brand-4: #8eafff;
+  --color-brand-5: #618dff;
+  --color-brand-6: #366ef4;
+  --color-brand-7: #0052d9;
+  --color-brand-8: #003cab;
+  --color-brand-9: #002a7c;
+  --color-brand: var(--color-brand-7);
+  --color-brand-hover: var(--color-brand-6);
+  --color-brand-active: var(--color-brand-8);
+  --color-brand-disabled: var(--color-brand-3);
+  --color-brand-soft: var(--color-brand-1);
+  --color-brand-focus: rgb(0 82 217 / 20%);
+  --color-brand-highlight: #247cf0;
+  --color-brand-glow: rgb(0 82 217 / 4%);
+  --color-on-brand-border: rgb(255 255 255 / 24%);
+  --color-accent: #00a870;
+  --color-accent-soft: #e8f8f2;
+
+  --color-success: #00a870;
+  --color-success-hover: #00935f;
+  --color-success-soft: #e8f8f2;
+  --color-warning: #ed7b2f;
+  --color-warning-hover: #d35a21;
+  --color-warning-soft: #fff3e8;
+  --color-danger: #d54941;
+  --color-danger-hover: #ba342e;
+  --color-danger-soft: #fff0ed;
+  --color-info: #0052d9;
+  --color-info-soft: #f2f6ff;
+
+  /* Neutral surfaces and text. */
+  --color-bg-page: #f3f6fb;
   --color-bg-surface: #ffffff;
-  --color-border: #d9dee5;
-  --color-text-primary: #1f2933;
-  --color-text-secondary: #687382;
+  --color-bg-surface-secondary: #f7f8fa;
+  --color-bg-surface-hover: #f3f5f8;
+  --color-bg-surface-active: #e9eef7;
+  --color-bg-elevated: #ffffff;
+  --color-bg-mask: rgb(15 23 42 / 46%);
+  --color-border: #e2e6ed;
+  --color-border-light: #edf0f5;
+  --color-border-strong: #cfd5df;
+  --color-divider: #edf0f5;
+  --color-text-primary: #1d2129;
+  --color-text-secondary: #5f6673;
+  --color-text-tertiary: #86909c;
+  --color-text-placeholder: #a1a7b3;
+  --color-text-disabled: #c2c7d0;
+  --color-text-inverse: #ffffff;
   --color-control-bg: #ffffff;
-  --color-control-hover-bg: #f3f7f5;
+  --color-control-hover-bg: #f2f6ff;
+  --color-control-active-bg: #e5edff;
+  --color-header-bg: rgb(255 255 255 / 88%);
+  --color-login-overlay:
+    linear-gradient(112deg, rgb(6 18 28 / 58%) 0%, rgb(8 35 55 / 24%) 48%, rgb(3 14 23 / 52%) 100%),
+    linear-gradient(180deg, rgb(255 255 255 / 8%) 0%, rgb(0 0 0 / 14%) 100%);
+  --color-glass-panel: rgb(255 255 255 / 90%);
+  --color-glass-border: rgb(255 255 255 / 58%);
+  --shadow-glass: 0 24px 70px rgb(3 14 23 / 28%);
+
+  /* Typography. */
+  --font-family:
+    Inter, 'PingFang SC', 'Microsoft YaHei UI', 'Microsoft YaHei', ui-sans-serif, system-ui,
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-family-mono: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+  --font-size-xs: 12px;
+  --font-size-sm: 13px;
+  --font-size-base: 14px;
+  --font-size-md: 16px;
+  --font-size-lg: 20px;
+  --font-size-xl: 24px;
+  --font-size-display: 28px;
+  --line-height-tight: 1.25;
+  --line-height-base: 1.5;
+  --line-height-relaxed: 1.7;
+  --font-weight-regular: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+
+  /* Spacing scale. */
+  --space-0: 0;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 28px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  /* Shape and elevation. */
+  --radius-xs: 3px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-round: 999px;
+  --shadow-1: 0 1px 2px rgb(31 35 41 / 6%), 0 1px 3px rgb(31 35 41 / 4%);
+  --shadow-2: 0 4px 12px rgb(31 35 41 / 8%), 0 1px 3px rgb(31 35 41 / 6%);
+  --shadow-3: 0 8px 24px rgb(31 35 41 / 10%), 0 2px 6px rgb(31 35 41 / 6%);
+  --shadow-4: 0 16px 48px rgb(31 35 41 / 14%), 0 4px 12px rgb(31 35 41 / 8%);
+  --shadow-focus: 0 0 0 3px var(--color-brand-focus);
+  --shadow-brand-sm: 0 4px 12px rgb(0 82 217 / 18%);
+  --shadow-brand-md: 0 10px 24px rgb(0 82 217 / 24%);
+
+  /* Motion and application shell. */
+  --duration-fast: 120ms;
+  --duration-base: 200ms;
+  --duration-slow: 300ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-emphasized: cubic-bezier(0.4, 0, 0.2, 1);
+  --header-height: 64px;
+  --sidebar-width: 232px;
+  --sidebar-width-collapsed: 72px;
+  --content-max-width: 1600px;
+  --z-header: 30;
+  --z-sidebar: 40;
+  --z-overlay: 1000;
+
+  /* Map markers stay light to remain readable on third-party map canvases. */
+  --map-marker-bg: rgb(255 255 255 / 96%);
+  --map-marker-border: rgb(0 82 217 / 22%);
+  --map-marker-text: #1d2129;
+  --map-marker-shadow: 0 8px 18px rgb(15 23 42 / 18%);
+  --map-marker-shadow-hover: 0 10px 22px rgb(15 23 42 / 24%);
 }
 
 :root[data-theme='dark'] {
-  --color-bg-page: #111713;
-  --color-bg-surface: #18211d;
-  --color-border: #334139;
-  --color-text-primary: #eef4ef;
-  --color-text-secondary: #a7b8ae;
-  --color-control-bg: #202b26;
-  --color-control-hover-bg: #29372f;
-  --el-bg-color: #18211d;
-  --el-bg-color-page: #111713;
-  --el-bg-color-overlay: #202b26;
-  --el-border-color: #334139;
-  --el-border-color-light: #3f4d45;
-  --el-fill-color-blank: #18211d;
-  --el-fill-color-light: #202b26;
-  --el-text-color-primary: #eef4ef;
-  --el-text-color-regular: #d5ded8;
-  --el-text-color-secondary: #a7b8ae;
+  color-scheme: dark;
+  --color-brand-1: #17233c;
+  --color-brand-2: #1d3158;
+  --color-brand-3: #244477;
+  --color-brand-4: #2f5d9e;
+  --color-brand-5: #3d76c6;
+  --color-brand-6: #4587e6;
+  --color-brand-7: #5c93f0;
+  --color-brand-8: #7cacf7;
+  --color-brand-9: #a7c7ff;
+  --color-brand: var(--color-brand-7);
+  --color-brand-hover: var(--color-brand-8);
+  --color-brand-active: var(--color-brand-6);
+  --color-brand-disabled: #2b4770;
+  --color-brand-soft: #17233c;
+  --color-brand-focus: rgb(92 147 240 / 28%);
+  --color-brand-highlight: #5c93f0;
+  --color-brand-glow: rgb(92 147 240 / 7%);
+  --color-on-brand-border: rgb(255 255 255 / 18%);
+  --color-accent: #35c994;
+  --color-accent-soft: #18372e;
+  --color-success: #35c994;
+  --color-success-hover: #5bd9ac;
+  --color-success-soft: #18372e;
+  --color-warning: #f2995f;
+  --color-warning-hover: #f6b486;
+  --color-warning-soft: #3b2a20;
+  --color-danger: #e66c64;
+  --color-danger-hover: #f08b84;
+  --color-danger-soft: #402323;
+  --color-info: #5c93f0;
+  --color-info-soft: #17233c;
+
+  --color-bg-page: #0f1115;
+  --color-bg-surface: #17191e;
+  --color-bg-surface-secondary: #1d2026;
+  --color-bg-surface-hover: #24272e;
+  --color-bg-surface-active: #2a303a;
+  --color-bg-elevated: #202329;
+  --color-bg-mask: rgb(0 0 0 / 64%);
+  --color-border: #30343c;
+  --color-border-light: #272a31;
+  --color-border-strong: #424751;
+  --color-divider: #272a31;
+  --color-text-primary: #f2f3f5;
+  --color-text-secondary: #b6bac3;
+  --color-text-tertiary: #8b909a;
+  --color-text-placeholder: #6f747e;
+  --color-text-disabled: #555a64;
+  --color-text-inverse: #111318;
+  --color-control-bg: #1d2026;
+  --color-control-hover-bg: #242b38;
+  --color-control-active-bg: #2a3548;
+  --color-header-bg: rgb(23 25 30 / 90%);
+  --color-login-overlay:
+    linear-gradient(112deg, rgb(3 8 15 / 70%) 0%, rgb(8 24 40 / 52%) 48%, rgb(1 6 12 / 72%) 100%),
+    linear-gradient(180deg, rgb(15 17 21 / 12%) 0%, rgb(0 0 0 / 30%) 100%);
+  --color-glass-panel: rgb(23 25 30 / 92%);
+  --color-glass-border: rgb(255 255 255 / 12%);
+  --shadow-glass: 0 24px 70px rgb(0 0 0 / 48%);
+
+  --shadow-1: 0 1px 2px rgb(0 0 0 / 28%), 0 1px 3px rgb(0 0 0 / 18%);
+  --shadow-2: 0 4px 12px rgb(0 0 0 / 30%), 0 1px 3px rgb(0 0 0 / 22%);
+  --shadow-3: 0 8px 24px rgb(0 0 0 / 36%), 0 2px 6px rgb(0 0 0 / 24%);
+  --shadow-4: 0 16px 48px rgb(0 0 0 / 44%), 0 4px 12px rgb(0 0 0 / 28%);
+  --shadow-brand-sm: 0 4px 12px rgb(0 0 0 / 28%);
+  --shadow-brand-md: 0 10px 24px rgb(0 0 0 / 34%);
 }

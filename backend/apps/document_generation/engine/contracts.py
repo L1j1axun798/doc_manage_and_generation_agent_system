@@ -368,6 +368,10 @@ class SectionContext(ContractModel):
     risk_profile: RiskProfile
     clauses: tuple[ClauseSelection, ...] = ()
     references: tuple[RetrievedSection, ...] = ()
+    revision_instruction: str = ""
+    revision_conversation: tuple[str, ...] = ()
+    revision_required_literals: tuple[str, ...] = ()
+    previous_content: str = ""
 
 
 class GeneratedTable(ContractModel):
@@ -506,6 +510,17 @@ class GenerationRequest(ContractModel):
     required_fact_fields: tuple[str, ...] = ()
     section_codes: tuple[str, ...] = Field(min_length=1)
     force_regenerate_section_codes: tuple[str, ...] = ()
+    section_revision_instructions: dict[str, str] = Field(default_factory=dict)
+    section_revision_conversations: dict[str, tuple[str, ...]] = Field(
+        default_factory=dict
+    )
+    section_revision_required_literals: dict[str, tuple[str, ...]] = Field(
+        default_factory=dict
+    )
+    section_previous_contents: dict[str, str] = Field(default_factory=dict)
+    section_priority_references: dict[str, tuple[RetrievedSection, ...]] = Field(
+        default_factory=dict
+    )
 
     @field_validator("required_fact_fields")
     @classmethod
@@ -527,6 +542,15 @@ class GenerationRequest(ContractModel):
             raise ValueError("source purpose does not match the generation purpose")
         if not set(self.force_regenerate_section_codes).issubset(self.section_codes):
             raise ValueError("force regeneration sections must be requested sections")
+        revision_sections = (
+            set(self.section_revision_instructions)
+            | set(self.section_revision_conversations)
+            | set(self.section_revision_required_literals)
+            | set(self.section_previous_contents)
+            | set(self.section_priority_references)
+        )
+        if not revision_sections.issubset(self.force_regenerate_section_codes):
+            raise ValueError("revision context is only allowed for forced regeneration sections")
         return self
 
 

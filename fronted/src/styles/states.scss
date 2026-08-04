@@ -1,0 +1,188 @@
+.app-state {
+  display: grid;
+  width: min(520px, 100%);
+  justify-items: center;
+  gap: var(--space-3);
+  padding: var(--space-10) var(--space-8);
+  color: var(--color-text-primary);
+  text-align: center;
+}
+
+.app-state--compact {
+  padding: var(--space-6);
+}
+
+.app-state__visual {
+  position: relative;
+  display: grid;
+  width: 88px;
+  height: 88px;
+  place-items: center;
+  margin-bottom: var(--space-1);
+  border: 1px solid var(--color-brand-2);
+  border-radius: 26px;
+  color: var(--color-brand);
+  background: linear-gradient(145deg, var(--color-bg-surface), var(--color-brand-soft));
+  box-shadow: var(--shadow-2);
+  transform: rotate(-3deg);
+}
+
+.app-state__visual-halo {
+  position: absolute;
+  inset: 12px;
+  border-radius: 18px;
+  background: var(--color-brand-2);
+  opacity: 0.42;
+  transform: rotate(8deg);
+}
+
+.app-state__visual .el-icon {
+  position: relative;
+  z-index: 1;
+  font-size: 36px;
+  transform: rotate(3deg);
+}
+
+.app-state--loading .app-state__visual .el-icon {
+  animation: app-state-spin 1.1s linear infinite;
+}
+
+.app-state--error .app-state__visual {
+  border-color: color-mix(in srgb, var(--color-danger) 34%, var(--color-border));
+  color: var(--color-danger);
+  background: linear-gradient(145deg, var(--color-bg-surface), var(--color-danger-soft));
+}
+
+.app-state--error .app-state__visual-halo {
+  background: var(--color-danger-soft);
+}
+
+.app-state--forbidden .app-state__visual {
+  border-color: color-mix(in srgb, var(--color-warning) 32%, var(--color-border));
+  color: var(--color-warning);
+  background: linear-gradient(145deg, var(--color-bg-surface), var(--color-warning-soft));
+}
+
+.app-state--forbidden .app-state__visual-halo {
+  background: var(--color-warning-soft);
+}
+
+.app-state__code {
+  margin: 0;
+  color: var(--color-brand);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-bold);
+  letter-spacing: 0.16em;
+}
+
+.app-state h1 {
+  margin: 0;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--line-height-tight);
+}
+
+.app-state__description {
+  max-width: 420px;
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-base);
+  line-height: var(--line-height-relaxed);
+}
+
+.app-state__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+}
+
+/* Element Plus state primitives share one visual rhythm across every module. */
+.el-empty {
+  min-height: 220px;
+  padding: var(--space-8) var(--space-6);
+}
+
+.el-empty__image {
+  filter: saturate(0.72);
+  opacity: 0.88;
+}
+
+.el-empty__description {
+  margin-top: var(--space-4);
+}
+
+.el-empty__description p {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-base);
+}
+
+.el-empty__bottom {
+  margin-top: var(--space-4);
+}
+
+.el-skeleton {
+  --el-skeleton-color: var(--color-bg-surface-secondary);
+  --el-skeleton-to-color: var(--color-bg-surface-hover);
+  padding: var(--space-2) 0;
+}
+
+.el-loading-mask {
+  background: color-mix(in srgb, var(--color-bg-surface) 84%, transparent);
+  backdrop-filter: blur(2px);
+}
+
+.el-loading-spinner .circular {
+  width: 34px;
+  height: 34px;
+}
+
+.el-loading-spinner .path {
+  stroke: var(--color-brand);
+  stroke-width: 3;
+}
+
+.el-loading-spinner .el-loading-text {
+  margin-top: var(--space-2);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.el-alert {
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+}
+
+.el-alert--error.is-light {
+  border-color: color-mix(in srgb, var(--color-danger) 22%, transparent);
+  background: var(--color-danger-soft);
+}
+
+.el-alert--warning.is-light {
+  border-color: color-mix(in srgb, var(--color-warning) 22%, transparent);
+  background: var(--color-warning-soft);
+}
+
+.el-alert--success.is-light {
+  border-color: color-mix(in srgb, var(--color-success) 22%, transparent);
+  background: var(--color-success-soft);
+}
+
+.el-alert--info.is-light {
+  border-color: color-mix(in srgb, var(--color-info) 20%, transparent);
+  background: var(--color-info-soft);
+}
+
+@keyframes app-state-spin {
+  to {
+    transform: rotate(363deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-state--loading .app-state__visual .el-icon {
+    animation-duration: 2.4s;
+  }
+}

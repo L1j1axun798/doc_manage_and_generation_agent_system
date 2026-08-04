@@ -14,6 +14,7 @@ import {
   deleteGenerationTask,
   exportGenerationTask,
   fetchGenerationEvents,
+  fetchGenerationExportInfo,
   fetchGenerationTask,
   fetchGenerationTasks,
   fetchGenerationTemplates,
@@ -34,6 +35,8 @@ import {
   type DocumentGenerationTemplate,
   type FactProposal,
   type GeneratedSection,
+  type GenerationExportInfo,
+  type GenerationReview,
   type GenerationTask,
   type GenerationTaskStatus,
   type GenerationTraceEvent,
@@ -73,6 +76,10 @@ const actionLoading = ref(false)
 const openingTaskId = ref<string | null>(null)
 const conversationActionTaskId = ref<string | null>(null)
 const createDialogVisible = ref(false)
+const exportDialogVisible = ref(false)
+const exportInfoLoading = ref(false)
+const exportInfo = ref<GenerationExportInfo | null>(null)
+const exportFilename = ref('')
 const templates = ref<DocumentGenerationTemplate[]>([])
 const documents = ref<DocumentItem[]>([])
 const tasks = ref<GenerationTask[]>([])
@@ -80,6 +87,8 @@ const selectedTask = ref<GenerationTask | null>(null)
 const workflowEvents = ref<GenerationTraceEvent[]>([])
 const factDrafts = ref<FactDraft[]>([])
 const sectionDrafts = reactive<Record<string, string>>({})
+const revisionDrafts = reactive<Record<string, string>>({})
+const selectedRagChunks = reactive<Record<string, string[]>>({})
 const createForm = reactive<{
   templateId: number | null
   sourceVersionIds: number[]
@@ -104,6 +113,19 @@ const runningConversationStatuses = new Set<GenerationTaskStatus>([
   'queued',
   'generating',
 ])
+const revisionQuickCommands = [
+  '精简重复表述，突出本章关键动作',
+  '补充岗位分工、检查要求和记录留存',
+  '强化风险预控措施及责任闭环',
+  '调整为正式、清晰的技术方案语言',
+  '优先吸收已批准RAG中的专业做法',
+]
+const showSectionReview = computed(
+  () => Boolean(
+    selectedTask.value?.sections.length
+    && ['review_required', 'queued', 'generating'].includes(selectedTask.value.status),
+  ),
+)
 const eligibleDocuments = computed(() => documents.value.filter(isEligibleEntrySource))
 const criticalFactDrafts = computed(() => factDrafts.value.filter((fact) => fact.isRequired))
 const supplementalFactDrafts = computed(() => factDrafts.value.filter((fact) => !fact.isRequired))
@@ -148,6 +170,27 @@ const allSectionsLocked = computed(
 const selectedTemplate = computed(
   () => templates.value.find((template) => template.id === selectedTask.value?.template_id) || null,
 )
+const exportFilenameError = computed(() => {
+  const filename = normalizedExportFilenameStem()
+  if (!filename) {
+    return '请输入导出文件名'
+  }
+  if (filename.length > 250) {
+    return '文件名不能超过250个字符'
+  }
+  if (/[\\/:*?"<>|]/.test(filename) || filename.endsWith('.')) {
+    return '文件名不能包含 \\ / : * ? " < > |，也不能以句点结尾'
+  }
+  return ''
+})
+
+function normalizedExportFilenameStem(): string {
+  return exportFilename.value.trim().replace(/\.docx$/i, '').trim()
+}
+
+function normalizeExportFilenameInput(): void {
+  exportFilename.value = normalizedExportFilenameStem()
+}
 
 const statusLabels: Record<GenerationTaskStatus, string> = {
   draft: '待选择资料',
@@ -696,14 +739,96 @@ async function lockAllSections(): Promise<void> {
 }
 
 async function regenerate(section: GeneratedSection): Promise<void> {
+  const instruction = (revisionDrafts[section.section_code] || '').trim()
+  if (!instruction) {
+    ElMessage.warning('请先输入本章的修改要求')
+    return
+  }
   await runAction(async () => {
     selectedTask.value = await regenerateSection(
       selectedTask.value!.id,
       section.section_code,
+      instruction,
+      selectedRagChunks[section.section_code] || [],
     )
+    revisionDrafts[section.section_code] = ''
+    selectedRagChunks[section.section_code] = []
     configurePolling()
-    ElMessage.success('该章节已重新排队')
+    ElMessage.success('修改要求已发送，正在重新生成本章')
   })
+}
+
+function sectionRevisionTurns(sectionCode: string): GenerationReview[] {
+  return (selectedTask.value?.reviews || []).filter(
+    (review) =>
+      review.action === 'section_regenerated'
+      && review.section_code === sectionCode
+      && review.comment.trim(),
+  )
+}
+
+function reviewMetadataText(review: GenerationReview, key: string): string {
+  const value = review.metadata[key]
+  return typeof value === 'string' ? value : ''
+}
+
+function revisionStatus(review: GenerationReview): string {
+  return reviewMetadataText(review, 'conversation_status') || 'completed'
+}
+
+function appendRevisionCommand(sectionCode: string, command: string): void {
+  const current = (revisionDrafts[sectionCode] || '').trim()
+  revisionDrafts[sectionCode] = current ? `${current}\n${command}` : command
+}
+
+function citationChunkId(citation: Record<string, unknown>): string {
+  return typeof citation.chunk_id === 'string' ? citation.chunk_id : ''
+}
+
+function citationLabel(citation: Record<string, unknown>): string {
+  const heading = Array.isArray(citation.locator)
+    ? ''
+    : (
+        citation.locator
+        && typeof citation.locator === 'object'
+        && Array.isArray((citation.locator as Record<string, unknown>).heading_path)
+      )
+      ? ((citation.locator as Record<string, unknown>).heading_path as unknown[])
+          .filter((value): value is string => typeof value === 'string')
+          .join(' / ')
+      : ''
+  return heading || citationChunkId(citation).slice(0, 12) || 'RAG参考'
+}
+
+function isRagChunkSelected(sectionCode: string, chunkId: string): boolean {
+  return (selectedRagChunks[sectionCode] || []).includes(chunkId)
+}
+
+function toggleRagChunk(sectionCode: string, chunkId: string): void {
+  if (!chunkId) {
+    return
+  }
+  const selected = selectedRagChunks[sectionCode] || []
+  selectedRagChunks[sectionCode] = selected.includes(chunkId)
+    ? selected.filter((value) => value !== chunkId)
+    : [...selected, chunkId]
+}
+
+function isSectionRegenerating(section: GeneratedSection): boolean {
+  const task = selectedTask.value
+  return Boolean(
+    task
+    && ['queued', 'generating'].includes(task.status)
+    && task.pending_section_codes.includes(section.section_code),
+  )
+}
+
+function handleRevisionKeydown(event: KeyboardEvent, section: GeneratedSection): void {
+  if (event.key !== 'Enter' || event.shiftKey || event.isComposing) {
+    return
+  }
+  event.preventDefault()
+  void regenerate(section)
 }
 
 async function submitReview(): Promise<void> {
@@ -720,11 +845,46 @@ async function approveTask(): Promise<void> {
   )
 }
 
+async function openExportDialog(): Promise<void> {
+  if (!selectedTask.value) {
+    return
+  }
+  exportDialogVisible.value = true
+  exportInfoLoading.value = true
+  exportInfo.value = null
+  exportFilename.value = ''
+  try {
+    exportInfo.value = await fetchGenerationExportInfo(selectedTask.value.id)
+    exportFilename.value = exportInfo.value.default_filename.replace(/\.docx$/i, '')
+  } catch (error) {
+    exportDialogVisible.value = false
+    ElMessage.error(getErrorMessage(error))
+  } finally {
+    exportInfoLoading.value = false
+  }
+}
+
 async function exportTask(): Promise<void> {
-  await runTaskAction(
-    (taskId) => exportGenerationTask(taskId, window.crypto.randomUUID()),
-    '已导出到当前项目的“技术方案”目录',
-  )
+  if (!selectedTask.value || exportFilenameError.value) {
+    ElMessage.warning(exportFilenameError.value || '请检查导出文件名')
+    return
+  }
+  actionLoading.value = true
+  try {
+    selectedTask.value = await exportGenerationTask(
+      selectedTask.value.id,
+      window.crypto.randomUUID(),
+      `${normalizedExportFilenameStem()}.docx`,
+    )
+    exportDialogVisible.value = false
+    await refreshTasks()
+    configurePolling()
+    ElMessage.success('已导出到当前项目的“技术方案”目录')
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error))
+  } finally {
+    actionLoading.value = false
+  }
 }
 
 async function downloadOutput(): Promise<void> {
@@ -1106,8 +1266,20 @@ async function runAction(action: () => Promise<void>): Promise<void> {
         </el-button>
       </div>
 
-      <template v-if="selectedTask.status === 'review_required'">
-        <h3>逐章人工审核</h3>
+      <template v-if="showSectionReview">
+        <div class="doc-agent__review-heading">
+          <div>
+            <h3>逐章人工审核</h3>
+            <p>可直接编辑正文，也可用对话告诉 Agent 如何修改本章。</p>
+          </div>
+          <el-tag
+            v-if="selectedTask.status !== 'review_required'"
+            type="primary"
+            effect="light"
+          >
+            Agent 正在处理修改
+          </el-tag>
+        </div>
         <el-collapse>
           <el-collapse-item
             v-for="section in selectedTask.sections"
@@ -1120,47 +1292,175 @@ async function runAction(action: () => Promise<void>): Promise<void> {
                 {{ section.is_locked ? '已锁定' : `修订 ${section.revision}` }}
               </el-tag>
             </template>
-            <el-input
-              v-model="sectionDrafts[section.section_code]"
-              type="textarea"
-              :rows="12"
-              :disabled="section.is_locked"
-            />
-            <div v-if="section.validation_issues.length" class="doc-agent__issues">
-              <el-alert
-                v-for="issue in section.validation_issues"
-                :key="issue.code + issue.message"
-                :title="`${issue.code}: ${issue.message}`"
-                :type="issue.severity === 'error' ? 'error' : 'warning'"
-                :closable="false"
-              />
-            </div>
-            <details v-if="section.citations.length">
-              <summary>查看来源引用（{{ section.citations.length }}）</summary>
-              <pre>{{ JSON.stringify(section.citations, null, 2) }}</pre>
-            </details>
-            <div class="doc-agent__actions">
-              <el-button
-                :disabled="section.is_locked"
-                :loading="actionLoading"
-                @click="saveSection(section)"
-              >
-                保存修改
-              </el-button>
-              <el-button :loading="actionLoading" @click="toggleSectionLock(section)">
-                {{ section.is_locked ? '解锁' : '确认并锁定' }}
-              </el-button>
-              <el-button
-                :disabled="section.is_locked"
-                :loading="actionLoading"
-                @click="regenerate(section)"
-              >
-                重新生成本章
-              </el-button>
+            <div class="doc-agent__section-workspace">
+              <div class="doc-agent__section-editor">
+                <div class="doc-agent__panel-label">
+                  <strong>章节正文</strong>
+                  <span>修订 {{ section.revision }}</span>
+                </div>
+                <el-input
+                  v-model="sectionDrafts[section.section_code]"
+                  type="textarea"
+                  :rows="16"
+                  :disabled="section.is_locked || isSectionRegenerating(section)"
+                />
+                <div v-if="section.validation_issues.length" class="doc-agent__issues">
+                  <el-alert
+                    v-for="issue in section.validation_issues"
+                    :key="issue.code + issue.message"
+                    :title="`${issue.code}: ${issue.message}`"
+                    :type="issue.severity === 'error' ? 'error' : 'warning'"
+                    :closable="false"
+                  />
+                </div>
+                <details v-if="section.citations.length">
+                  <summary>查看完整来源引用（{{ section.citations.length }}）</summary>
+                  <pre>{{ JSON.stringify(section.citations, null, 2) }}</pre>
+                </details>
+                <div class="doc-agent__actions">
+                  <el-button
+                    :disabled="
+                      section.is_locked
+                      || selectedTask.status !== 'review_required'
+                    "
+                    :loading="actionLoading"
+                    @click="saveSection(section)"
+                  >
+                    保存手工修改
+                  </el-button>
+                  <el-button
+                    :disabled="selectedTask.status !== 'review_required'"
+                    :loading="actionLoading"
+                    @click="toggleSectionLock(section)"
+                  >
+                    {{ section.is_locked ? '解锁' : '确认并锁定' }}
+                  </el-button>
+                </div>
+              </div>
+
+              <aside class="doc-agent__revision-chat">
+                <div class="doc-agent__chat-header">
+                  <div>
+                    <strong>与 Agent 修改本章</strong>
+                    <span>修改要求会进入生成 Prompt 并保留记录</span>
+                  </div>
+                  <span class="doc-agent__agent-dot" aria-hidden="true" />
+                </div>
+
+                <div class="doc-agent__chat-history" aria-live="polite">
+                  <div
+                    v-if="sectionRevisionTurns(section.section_code).length === 0"
+                    class="doc-agent__chat-empty"
+                  >
+                    <strong>描述你想怎样调整</strong>
+                    <span>例如补充信息、强化某项措施，或指定优先参考的RAG片段。</span>
+                  </div>
+                  <template
+                    v-for="turn in sectionRevisionTurns(section.section_code)"
+                    :key="turn.id"
+                  >
+                    <div class="doc-agent__message doc-agent__message--user">
+                      <div>{{ turn.comment }}</div>
+                      <small>{{ turn.actor_name }} · {{ formatDateTime(turn.created_at) }}</small>
+                    </div>
+                    <div class="doc-agent__message doc-agent__message--agent">
+                      <div>
+                        {{
+                          reviewMetadataText(turn, 'assistant_message')
+                          || '已完成本轮章节修订，请核对正文。'
+                        }}
+                      </div>
+                      <small
+                        :class="`doc-agent__message-status--${revisionStatus(turn)}`"
+                      >
+                        {{
+                          revisionStatus(turn) === 'completed'
+                            ? '已完成'
+                            : revisionStatus(turn) === 'failed'
+                              ? '未完成'
+                              : '处理中'
+                        }}
+                      </small>
+                    </div>
+                  </template>
+                </div>
+
+                <div class="doc-agent__quick-commands">
+                  <span>常用调整</span>
+                  <div>
+                    <button
+                      v-for="command in revisionQuickCommands"
+                      :key="command"
+                      type="button"
+                      :disabled="section.is_locked || isSectionRegenerating(section)"
+                      @click="appendRevisionCommand(section.section_code, command)"
+                    >
+                      {{ command }}
+                    </button>
+                  </div>
+                </div>
+
+                <div v-if="section.citations.some(citationChunkId)" class="doc-agent__rag-focus">
+                  <div class="doc-agent__rag-focus-heading">
+                    <span>特别参照的RAG信息</span>
+                    <small>可多选本章已批准引用</small>
+                  </div>
+                  <div class="doc-agent__rag-chips">
+                    <button
+                      v-for="citation in section.citations.filter(citationChunkId)"
+                      :key="citationChunkId(citation)"
+                      type="button"
+                      :class="{
+                        'is-selected': isRagChunkSelected(
+                          section.section_code,
+                          citationChunkId(citation),
+                        ),
+                      }"
+                      :disabled="section.is_locked || isSectionRegenerating(section)"
+                      @click="toggleRagChunk(section.section_code, citationChunkId(citation))"
+                    >
+                      {{ citationLabel(citation) }}
+                    </button>
+                  </div>
+                </div>
+
+                <div class="doc-agent__chat-composer">
+                  <p class="doc-agent__revision-scope">
+                    明确新增的人员、编号等信息将视为审核人本轮确认内容，仅用于当前任务章节，不写入RAG。
+                  </p>
+                  <el-input
+                    v-model="revisionDrafts[section.section_code]"
+                    type="textarea"
+                    :autosize="{ minRows: 3, maxRows: 7 }"
+                    maxlength="4000"
+                    show-word-limit
+                    resize="none"
+                    placeholder="输入修改方向、需要加入的信息或其他调整指令…"
+                    :disabled="section.is_locked || isSectionRegenerating(section)"
+                    @keydown="handleRevisionKeydown($event, section)"
+                  />
+                  <div class="doc-agent__composer-footer">
+                    <span>Enter 发送 · Shift + Enter 换行</span>
+                    <el-button
+                      type="primary"
+                      :disabled="
+                        section.is_locked
+                        || isSectionRegenerating(section)
+                        || selectedTask.status !== 'review_required'
+                        || !(revisionDrafts[section.section_code] || '').trim()
+                      "
+                      :loading="actionLoading && isSectionRegenerating(section)"
+                      @click="regenerate(section)"
+                    >
+                      发送并重新生成
+                    </el-button>
+                  </div>
+                </div>
+              </aside>
             </div>
           </el-collapse-item>
         </el-collapse>
-        <div class="doc-agent__actions">
+        <div v-if="selectedTask.status === 'review_required'" class="doc-agent__actions">
           <el-button
             :disabled="allSectionsLocked"
             :loading="actionLoading"
@@ -1198,7 +1498,7 @@ async function runAction(action: () => Promise<void>): Promise<void> {
           type="primary"
           :loading="actionLoading"
           :disabled="!isProjectActive"
-          @click="exportTask"
+          @click="openExportDialog"
         >
           导出Word到“技术方案”
         </el-button>
@@ -1215,6 +1515,61 @@ async function runAction(action: () => Promise<void>): Promise<void> {
         </el-button>
       </div>
     </el-card>
+
+    <el-dialog
+      v-model="exportDialogVisible"
+      title="导出已批准 Word"
+      width="560px"
+      :close-on-click-modal="false"
+    >
+      <div v-loading="exportInfoLoading" class="doc-agent__export-dialog">
+        <el-alert
+          v-if="exportInfo"
+          :title="
+            exportInfo.agent_generated_count
+              ? `“${exportInfo.target_folder}”目录已有 ${exportInfo.agent_generated_count} 份 Agent 生成文件`
+              : `“${exportInfo.target_folder}”目录暂无 Agent 生成文件`
+          "
+          :type="exportInfo.agent_generated_count ? 'warning' : 'success'"
+          :closable="false"
+          show-icon
+        >
+          <template #default>
+            新文件不会覆盖已有文件；如提示同名，请在下方修改名称后重新导出。
+          </template>
+        </el-alert>
+        <el-form v-if="exportInfo" label-position="top">
+          <el-form-item label="导出文件名" :error="exportFilenameError">
+            <el-input
+              v-model="exportFilename"
+              maxlength="250"
+              show-word-limit
+              clearable
+              autocomplete="off"
+              placeholder="请输入文件名"
+              @blur="normalizeExportFilenameInput"
+              @keyup.enter="exportTask"
+            >
+              <template #append>.docx</template>
+            </el-input>
+            <div class="doc-agent__field-help">
+              保存位置：当前项目 / {{ exportInfo.target_folder }}
+            </div>
+          </el-form-item>
+        </el-form>
+      </div>
+      <template #footer>
+        <el-button :disabled="actionLoading" @click="exportDialogVisible = false">取消</el-button>
+        <el-button
+          type="primary"
+          :loading="actionLoading"
+          :disabled="exportInfoLoading || !exportInfo || Boolean(exportFilenameError)"
+          @click="exportTask"
+        >
+          确认导出
+        </el-button>
+      </template>
+    </el-dialog>
 
     <el-dialog v-model="createDialogVisible" title="开始编制四措两案" width="720px">
       <el-form label-position="top">
@@ -1296,6 +1651,14 @@ async function runAction(action: () => Promise<void>): Promise<void> {
 
 .doc-agent__notice {
   margin-bottom: 4px;
+}
+
+.doc-agent__export-dialog {
+  min-height: 150px;
+}
+
+.doc-agent__export-dialog .el-alert {
+  margin-bottom: 22px;
 }
 
 .doc-agent__toolbar,
@@ -1453,6 +1816,214 @@ async function runAction(action: () => Promise<void>): Promise<void> {
   margin-left: 12px;
 }
 
+.doc-agent__review-heading,
+.doc-agent__panel-label,
+.doc-agent__chat-header,
+.doc-agent__rag-focus-heading,
+.doc-agent__composer-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.doc-agent__review-heading {
+  margin: 6px 0 14px;
+}
+
+.doc-agent__review-heading h3,
+.doc-agent__review-heading p {
+  margin: 0;
+}
+
+.doc-agent__review-heading p {
+  margin-top: 4px;
+  color: var(--el-text-color-secondary);
+  font-size: 13px;
+}
+
+.doc-agent__section-workspace {
+  display: grid;
+  align-items: start;
+  gap: 18px;
+  grid-template-columns: minmax(0, 1.15fr) minmax(360px, 0.85fr);
+}
+
+.doc-agent__section-editor,
+.doc-agent__revision-chat {
+  min-width: 0;
+}
+
+.doc-agent__panel-label {
+  margin-bottom: 10px;
+}
+
+.doc-agent__panel-label span,
+.doc-agent__chat-header span,
+.doc-agent__rag-focus-heading small,
+.doc-agent__composer-footer span {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+
+.doc-agent__revision-chat {
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--el-color-primary) 18%, var(--el-border-color));
+  border-radius: 14px;
+  background:
+    linear-gradient(
+      145deg,
+      color-mix(in srgb, var(--el-color-primary) 7%, var(--el-bg-color)) 0%,
+      var(--el-bg-color) 42%
+    );
+  box-shadow: 0 10px 28px color-mix(in srgb, var(--el-color-primary) 7%, transparent);
+}
+
+.doc-agent__chat-header {
+  padding: 15px 16px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+}
+
+.doc-agent__chat-header > div {
+  display: grid;
+  gap: 3px;
+}
+
+.doc-agent__agent-dot {
+  width: 10px;
+  height: 10px;
+  border: 3px solid color-mix(in srgb, var(--el-color-success) 22%, transparent);
+  border-radius: 50%;
+  background: var(--el-color-success);
+  box-sizing: content-box;
+}
+
+.doc-agent__chat-history {
+  display: flex;
+  max-height: 360px;
+  min-height: 150px;
+  overflow-y: auto;
+  padding: 16px;
+  flex-direction: column;
+  gap: 10px;
+  scrollbar-width: thin;
+}
+
+.doc-agent__chat-empty {
+  display: grid;
+  place-content: center;
+  min-height: 118px;
+  padding: 16px;
+  color: var(--el-text-color-secondary);
+  text-align: center;
+}
+
+.doc-agent__chat-empty strong {
+  margin-bottom: 5px;
+  color: var(--el-text-color-primary);
+}
+
+.doc-agent__message {
+  display: grid;
+  max-width: 88%;
+  padding: 10px 12px;
+  border-radius: 13px;
+  line-height: 1.55;
+  gap: 5px;
+}
+
+.doc-agent__message small {
+  opacity: 0.78;
+  font-size: 11px;
+}
+
+.doc-agent__message--user {
+  align-self: flex-end;
+  border-bottom-right-radius: 4px;
+  background: var(--el-color-primary);
+  color: var(--el-color-white);
+}
+
+.doc-agent__message--agent {
+  align-self: flex-start;
+  border: 1px solid var(--el-border-color-lighter);
+  border-bottom-left-radius: 4px;
+  background: var(--el-fill-color-light);
+  color: var(--el-text-color-primary);
+}
+
+.doc-agent__message-status--completed {
+  color: var(--el-color-success);
+}
+
+.doc-agent__message-status--failed {
+  color: var(--el-color-danger);
+}
+
+.doc-agent__quick-commands,
+.doc-agent__rag-focus {
+  display: grid;
+  padding: 12px 16px 0;
+  gap: 8px;
+}
+
+.doc-agent__quick-commands > span,
+.doc-agent__rag-focus-heading > span {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.doc-agent__quick-commands > div,
+.doc-agent__rag-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.doc-agent__quick-commands button,
+.doc-agent__rag-chips button {
+  padding: 6px 9px;
+  border: 1px solid var(--el-border-color);
+  border-radius: 999px;
+  background: var(--el-bg-color);
+  color: var(--el-text-color-regular);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  transition: 0.16s ease;
+}
+
+.doc-agent__quick-commands button:hover,
+.doc-agent__rag-chips button:hover,
+.doc-agent__rag-chips button.is-selected {
+  border-color: var(--el-color-primary);
+  background: color-mix(in srgb, var(--el-color-primary) 10%, var(--el-bg-color));
+  color: var(--el-color-primary);
+}
+
+.doc-agent__quick-commands button:disabled,
+.doc-agent__rag-chips button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.doc-agent__chat-composer {
+  padding: 14px 16px 16px;
+}
+
+.doc-agent__revision-scope {
+  margin: 0 0 9px;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.doc-agent__composer-footer {
+  align-items: flex-end;
+  margin-top: 10px;
+}
+
 .doc-agent__issues {
   display: grid;
   gap: 8px;
@@ -1533,6 +2104,10 @@ pre {
     align-items: flex-start;
     flex-direction: column;
   }
+
+  .doc-agent__section-workspace {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 640px) {
@@ -1552,6 +2127,16 @@ pre {
 
   .doc-agent__conversation-state {
     justify-items: start;
+  }
+
+  .doc-agent__review-heading,
+  .doc-agent__composer-footer {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .doc-agent__composer-footer .el-button {
+    width: 100%;
   }
 }
 </style>

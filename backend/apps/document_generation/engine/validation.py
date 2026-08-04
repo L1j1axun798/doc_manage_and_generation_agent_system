@@ -61,6 +61,17 @@ def section_text(section: GeneratedSection) -> str:
     return "\n".join(parts)
 
 
+def _section_body_text(section: GeneratedSection) -> str:
+    parts = list(section.paragraphs)
+    parts.extend(item for items in section.lists for item in items)
+    parts.extend(
+        " | ".join(row)
+        for table in section.tables
+        for row in (table.headers, *table.rows)
+    )
+    return "\n".join(parts)
+
+
 def _humanize_internal_codes(section: GeneratedSection) -> GeneratedSection:
     def humanize(text: str) -> str:
         for code, label in INTERNAL_CODE_LABELS.items():
@@ -168,6 +179,7 @@ def normalize_section_provenance(
                 if field in facts_by_field
             ),
             *(clause.text for clause in context.clauses),
+            context.revision_instruction,
         ]
     )
     allowed_numbers = set(NUMBER_RE.findall(allowed_number_text))
@@ -402,6 +414,31 @@ class ControlledSectionValidator:
         if section.section_code != context.section_code:
             issues.append(self._error("SECTION_CODE_MISMATCH", "章节编码与上下文不一致", context))
 
+        if context.revision_instruction:
+            normalized_previous = re.sub(r"\s+", "", context.previous_content)
+            normalized_current = re.sub(r"\s+", "", _section_body_text(section))
+            if normalized_previous and normalized_current == normalized_previous:
+                issues.append(
+                    self._error(
+                        "REVISION_CONTENT_UNCHANGED",
+                        "模型返回的正文与修订前完全一致，未落实本轮修改要求",
+                        context,
+                    )
+                )
+            missing_literals = [
+                literal
+                for literal in context.revision_required_literals
+                if literal not in text
+            ]
+            if missing_literals:
+                issues.append(
+                    self._error(
+                        "REVISION_LITERAL_MISSING",
+                        f"本轮明确要求加入的信息未写入正文：{','.join(missing_literals)}",
+                        context,
+                    )
+                )
+
         if context.objective.startswith("质量结构要求："):
             minimum_characters = ENTRY_PLAN_SECTION_MIN_CHARACTERS.get(context.section_code)
             content_character_count = len(re.sub(r"\s+", "", text))
@@ -544,6 +581,7 @@ class ControlledSectionValidator:
                     for field in sorted(used_fields & facts_by_field.keys())
                 ),
                 *(clause.text for clause in context.clauses),
+                context.revision_instruction,
             ]
         )
         allowed_numbers = set(NUMBER_RE.findall(allowed_number_text))

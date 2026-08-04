@@ -7,6 +7,7 @@ from typing import Any
 
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import IntegrityError, transaction
+from django.db.models import Q
 from django.utils import timezone
 from pydantic import ValidationError as PydanticValidationError
 from rest_framework.exceptions import PermissionDenied
@@ -54,10 +55,13 @@ from .models import (
 )
 from .permissions import can_review_generation, can_use_generation
 from .queues import stop_generation_job
+from .revision import revision_required_literals
 from .selectors import visible_source_version_for_user
 from .workflow_events import TaskWorkflowRecorder
 
 TECH_SOLUTION_CODE = "PUBLIC-TECH-SOLUTION"
+EXPORT_FILE_EXTENSION = ".docx"
+EXPORT_FILENAME_FORBIDDEN_CHARS = frozenset('\\/:*?"<>|')
 BLOCKED_SOURCE_FOLDER_CODES = {
     "PUBLIC-REPORT-TEMPLATE",
     "PUBLIC-ARCHIVE",
@@ -202,16 +206,10 @@ def _canonical_evidence_block(
     # parsed source block and only repair the locator if every selected code is
     # explicitly supported there.
     if fact.field == "inspection_method_codes" and isinstance(fact.value, list):
-        expected_codes = {
-            str(value).strip().upper()
-            for value in fact.value
-            if str(value).strip()
-        }
+        expected_codes = {str(value).strip().upper() for value in fact.value if str(value).strip()}
         if expected_codes:
             method_blocks = [
-                block
-                for block in document.blocks
-                if _block_supports_fact_value(fact, block)
+                block for block in document.blocks if _block_supports_fact_value(fact, block)
             ]
             if method_blocks:
                 return max(
@@ -228,14 +226,8 @@ def _normalize_evidence_text(value: str) -> str:
 def _block_supports_fact_value(fact: ConfirmedFact, block: ParsedBlock) -> bool:
     if fact.field != "inspection_method_codes" or not isinstance(fact.value, list):
         return True
-    expected_codes = {
-        str(value).strip().upper()
-        for value in fact.value
-        if str(value).strip()
-    }
-    return bool(expected_codes) and expected_codes.issubset(
-        set(infer_method_codes(block.text))
-    )
+    expected_codes = {str(value).strip().upper() for value in fact.value if str(value).strip()}
+    return bool(expected_codes) and expected_codes.issubset(set(infer_method_codes(block.text)))
 
 
 def _evidence_locator_similarity(expected: SourceLocator, block: ParsedBlock) -> int:
@@ -243,10 +235,7 @@ def _evidence_locator_similarity(expected: SourceLocator, block: ParsedBlock) ->
     score = 0
     if expected.table_index is not None and actual.table_index == expected.table_index:
         score += 4
-    if (
-        expected.paragraph_index is not None
-        and actual.paragraph_index == expected.paragraph_index
-    ):
+    if expected.paragraph_index is not None and actual.paragraph_index == expected.paragraph_index:
         score += 4
     if expected.page is not None and actual.page == expected.page:
         score += 3
@@ -1080,6 +1069,8 @@ def request_section_regeneration(
     actor: Any,
     task: GenerationTask,
     section_code: str,
+    instruction: str,
+    rag_chunk_ids: list[str] | None = None,
     request: Any = None,
 ) -> GenerationTask:
     from .queues import queue_generation_task
@@ -1101,6 +1092,27 @@ def request_section_regeneration(
                 "章节已锁定，不能重新生成",
                 status_code=409,
             )
+        clean_instruction = instruction.strip()
+        if not clean_instruction:
+            raise DocumentGenerationError(
+                "REVISION_INSTRUCTION_REQUIRED",
+                "请输入本章的修改要求",
+                status_code=400,
+            )
+        requested_rag_chunk_ids = list(dict.fromkeys(rag_chunk_ids or []))
+        required_literals = revision_required_literals(clean_instruction)
+        available_rag_chunk_ids = {
+            str(citation.get("chunk_id", "")).strip()
+            for citation in section.citations
+            if isinstance(citation, dict) and citation.get("chunk_id")
+        }
+        unavailable_rag_chunk_ids = sorted(set(requested_rag_chunk_ids) - available_rag_chunk_ids)
+        if unavailable_rag_chunk_ids:
+            raise DocumentGenerationError(
+                "RAG_REFERENCE_INVALID",
+                "所选RAG参考不属于本章当前已批准引用，请刷新后重试",
+                status_code=400,
+            )
         locked.pending_section_codes = [section_code]
         locked.status = GenerationTask.Status.QUEUED
         locked.operation = GenerationTask.Operation.GENERATE
@@ -1118,6 +1130,16 @@ def request_section_regeneration(
             task=locked,
             section=section,
             action=GenerationReview.Action.SECTION_REGENERATED,
+            comment=clean_instruction,
+            metadata={
+                "conversation_status": "queued",
+                "assistant_message": (
+                    "已收到修改要求，正在结合当前项目事实和已批准RAG重新生成本章。"
+                ),
+                "requested_rag_chunk_ids": requested_rag_chunk_ids,
+                "required_literals": required_literals,
+                "revision_before": section.revision,
+            },
             actor=actor,
         )
         transaction.on_commit(lambda: queue_generation_task(str(locked.pk)))
@@ -1127,7 +1149,12 @@ def request_section_regeneration(
             resource=section,
             result="success",
             request=request,
-            after_data={"task_id": str(locked.pk)},
+            after_data={
+                "task_id": str(locked.pk),
+                "instruction_length": len(clean_instruction),
+                "rag_reference_count": len(requested_rag_chunk_ids),
+                "required_literal_count": len(required_literals),
+            },
         )
     return locked
 
@@ -1295,6 +1322,7 @@ def export_generation_task(
     actor: Any,
     task: GenerationTask,
     idempotency_key: str,
+    filename: str | None = None,
     request: Any = None,
     storage: LocalDocumentStorage | None = None,
 ) -> GenerationTask:
@@ -1322,6 +1350,23 @@ def export_generation_task(
             )
         return locked
     _ensure_status(locked, {GenerationTask.Status.APPROVED})
+    folder = _generation_export_folder(locked)
+    export_filename = _normalize_export_filename(locked, filename)
+    export_title = export_filename[: -len(EXPORT_FILE_EXTENSION)]
+    existing_name = Document.objects.filter(
+        folder=folder,
+        deleted_at__isnull=True,
+    ).filter(Q(title=export_title) | Q(current_version__original_filename=export_filename))
+    if existing_name.exists():
+        agent_count = _agent_generated_document_count(folder)
+        raise DocumentGenerationError(
+            "EXPORT_NAME_CONFLICT",
+            (
+                f"当前“技术方案”目录已有 {agent_count} 份 Agent 生成文件，"
+                f"并且已存在同名文件“{export_filename}”，请修改文件名后重试。"
+            ),
+            status_code=409,
+        )
     template_version = locked.template.document_version
     backend = storage or LocalDocumentStorage()
     template_path = backend.resolve(template_version.storage_path)
@@ -1350,18 +1395,8 @@ def export_generation_task(
         raise
     except Exception as exc:
         raise DocumentGenerationError("EXPORT_FAILED", "Word文档渲染失败") from exc
-    folder = Folder.objects.filter(
-        project=locked.project,
-        code=TECH_SOLUTION_CODE,
-        is_active=True,
-    ).first()
-    if folder is None:
-        raise DocumentGenerationError(
-            "EXPORT_FOLDER_MISSING",
-            "当前项目缺少“技术方案”目录",
-        )
     upload = SimpleUploadedFile(
-        name=f"{locked.project.code}-四措两案-{str(locked.pk)[:8]}.docx",
+        name=export_filename,
         content=artifact.content,
         content_type=artifact.media_type,
     )
@@ -1369,7 +1404,7 @@ def export_generation_task(
         actor=actor,
         folder=folder,
         uploaded_file=upload,
-        title=f"{locked.project.name} 入场四措两案",
+        title=export_title,
         description="由入场资料编制Agent生成并经人工审核批准；不是检测报告或完工报告。",
         access_level=Document.AccessLevel.INTERNAL,
         request=request,
@@ -1405,6 +1440,71 @@ def export_generation_task(
         after_data=_task_snapshot(locked),
     )
     return locked
+
+
+def generation_export_info(task: GenerationTask) -> dict[str, Any]:
+    folder = _generation_export_folder(task)
+    return {
+        "target_folder": folder.name,
+        "agent_generated_count": _agent_generated_document_count(folder),
+        "default_filename": _normalize_export_filename(task, None),
+    }
+
+
+def _generation_export_folder(task: GenerationTask) -> Folder:
+    folder = Folder.objects.filter(
+        project=task.project,
+        code=TECH_SOLUTION_CODE,
+        is_active=True,
+    ).first()
+    if folder is None:
+        raise DocumentGenerationError(
+            "EXPORT_FOLDER_MISSING",
+            "当前项目缺少“技术方案”目录",
+        )
+    return folder
+
+
+def _agent_generated_document_count(folder: Folder) -> int:
+    return GenerationTask.objects.filter(
+        status=GenerationTask.Status.EXPORTED,
+        output_document_version__document__folder=folder,
+        output_document_version__document__deleted_at__isnull=True,
+    ).count()
+
+
+def _normalize_export_filename(
+    task: GenerationTask,
+    filename: str | None,
+) -> str:
+    default_suffix = f" 入场四措两案-{str(task.pk)[:8]}"
+    default_project_name = "".join(
+        "-" if char in EXPORT_FILENAME_FORBIDDEN_CHARS or ord(char) < 32 else char
+        for char in task.project.name.strip()
+    )
+    default_stem = f"{default_project_name[: 250 - len(default_suffix)]}{default_suffix}"
+    clean_name = filename.strip() if filename is not None else default_stem
+    if clean_name.lower().endswith(EXPORT_FILE_EXTENSION):
+        clean_name = clean_name[: -len(EXPORT_FILE_EXTENSION)].strip()
+    if not clean_name:
+        raise DocumentGenerationError("EXPORT_FILENAME_REQUIRED", "请输入导出文件名")
+    if (
+        clean_name in {".", ".."}
+        or clean_name.endswith(".")
+        or any(char in EXPORT_FILENAME_FORBIDDEN_CHARS for char in clean_name)
+        or any(ord(char) < 32 for char in clean_name)
+    ):
+        raise DocumentGenerationError(
+            "EXPORT_FILENAME_INVALID",
+            '文件名不能包含 \\ / : * ? " < > |，也不能以句点结尾',
+        )
+    export_filename = f"{clean_name}{EXPORT_FILE_EXTENSION}"
+    if len(export_filename) > 255:
+        raise DocumentGenerationError(
+            "EXPORT_FILENAME_TOO_LONG",
+            "导出文件名不能超过255个字符",
+        )
+    return export_filename
 
 
 def _section_for_export(section: GeneratedSection) -> ContractGeneratedSection:

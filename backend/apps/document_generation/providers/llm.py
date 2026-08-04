@@ -79,10 +79,10 @@ class PromptCatalog:
         return "fact_extraction/v2", self._read("fact_extraction/v2.md")
 
     def section_generation(self) -> tuple[str, str]:
-        return "section_generation/v2", self._read("section_generation/v2.md")
+        return "section_generation/v4", self._read("section_generation/v4.md")
 
     def section_revision(self) -> tuple[str, str]:
-        return "section_revision/v2", self._read("section_revision/v2.md")
+        return "section_revision/v3", self._read("section_revision/v3.md")
 
     def schema_repair(self) -> tuple[str, str]:
         return "schema_repair/v1", self._read("schema_repair/v1.md")

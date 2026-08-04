@@ -60,3 +60,15 @@ Django、MySQL 和 RQ，不要求额外部署 WebSocket 服务。
 记录会分别展示已索引和未识别章节。非标准单章资料或历史前置资料应只选择一个最相关章节，
 此时无法识别标准标题会整篇归入该章节。RAG 语料只提供历史写法和参考知识，当前项目的
 时间、地点、人员、设备等事实仍必须由该项目的入场前置资料或人工确认提供。
+
+可使用下列命令检查并补齐所有当前“技术方案”目录中的可用文档。默认只预检；确认清单后
+增加 `--execute` 才会创建任务。命令按文件 SHA-256 和章节检查已有知识及上传记录，不会
+重复生成已覆盖章节；只有标题但没有正文的章节会记为未识别，不再导致整份文件失败。
+
+```powershell
+python manage.py index_technical_solution_corpus --approved-by <系统管理员用户名>
+python manage.py index_technical_solution_corpus --approved-by <系统管理员用户名> --execute
+```
+
+批量索引与页面上传一致，只支持 DOCX 和文本型 PDF。旧版二进制 `.doc` 必须先由业务人员
+确认内容并转换为 DOCX 后再上传，生产环境不依赖桌面 Word 自动化。

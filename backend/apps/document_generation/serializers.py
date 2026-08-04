@@ -130,6 +130,39 @@ class KnowledgeCorpusUploadCreateSerializer(serializers.Serializer):
         return list(dict.fromkeys(values))
 
 
+class RagSectionCoverageSerializer(serializers.Serializer):
+    code = serializers.ChoiceField(choices=KnowledgeCorpusUpload.SectionCode.choices)
+    name = serializers.CharField()
+    chunk_count = serializers.IntegerField(min_value=0)
+
+
+class RagOperationsSerializer(serializers.Serializer):
+    status = serializers.ChoiceField(choices=["healthy", "processing", "attention"])
+    redis_status = serializers.ChoiceField(choices=["ok", "unavailable"])
+    worker_status = serializers.ChoiceField(choices=["idle", "busy", "offline", "unknown"])
+    queue_depth = serializers.IntegerField(min_value=0)
+    processing_uploads = serializers.IntegerField(min_value=0)
+    failed_uploads = serializers.IntegerField(min_value=0)
+    latest_upload_status = serializers.ChoiceField(
+        choices=KnowledgeCorpusUpload.Status.choices,
+        allow_null=True,
+    )
+    latest_upload_at = serializers.DateTimeField(allow_null=True)
+
+
+class RagOverviewSerializer(serializers.Serializer):
+    knowledge_status = serializers.ChoiceField(choices=["ready", "empty"])
+    knowledge_chunks = serializers.IntegerField(min_value=0)
+    source_documents = serializers.IntegerField(min_value=0)
+    covered_section_count = serializers.IntegerField(min_value=0)
+    total_section_count = serializers.IntegerField(min_value=0)
+    section_coverage = RagSectionCoverageSerializer(many=True)
+    last_indexed_at = serializers.DateTimeField(allow_null=True)
+    embedding_model_alias = serializers.CharField()
+    embedding_dimension = serializers.IntegerField(min_value=1)
+    operations = RagOperationsSerializer(allow_null=True)
+
+
 def _section_names(section_codes: list[str]) -> list[str]:
     labels = dict(KnowledgeCorpusUpload.SectionCode.choices)
     return [labels[code] for code in section_codes if code in labels]
@@ -339,6 +372,26 @@ class SectionLockSerializer(serializers.Serializer):
     locked = serializers.BooleanField(default=True)
 
 
+class SectionRegenerateSerializer(serializers.Serializer):
+    instruction = serializers.CharField(
+        trim_whitespace=True,
+        allow_blank=False,
+        max_length=4000,
+    )
+    rag_chunk_ids = serializers.ListField(
+        child=serializers.CharField(max_length=80),
+        required=False,
+        default=list,
+        max_length=8,
+    )
+
+    def validate_rag_chunk_ids(self, values: list[str]) -> list[str]:
+        cleaned = [value.strip() for value in values if value.strip()]
+        if len(cleaned) != len(set(cleaned)):
+            raise serializers.ValidationError("RAG片段不能重复选择")
+        return cleaned
+
+
 class ReviewActionSerializer(serializers.Serializer):
     comment = serializers.CharField(
         required=False,
@@ -350,6 +403,13 @@ class ReviewActionSerializer(serializers.Serializer):
 
 class ExportSerializer(serializers.Serializer):
     idempotency_key = serializers.CharField(max_length=120)
+    filename = serializers.CharField(max_length=255, required=False)
+
+
+class GenerationExportInfoSerializer(serializers.Serializer):
+    target_folder = serializers.CharField()
+    agent_generated_count = serializers.IntegerField(min_value=0)
+    default_filename = serializers.CharField()
 
 
 class TraceEventQuerySerializer(serializers.Serializer):

@@ -37,6 +37,36 @@ export interface KnowledgeCorpusUpload {
   updated_at: string
 }
 
+export interface RagSectionCoverage {
+  code: KnowledgeSectionCode
+  name: string
+  chunk_count: number
+}
+
+export interface RagOperations {
+  status: 'healthy' | 'processing' | 'attention'
+  redis_status: 'ok' | 'unavailable'
+  worker_status: 'idle' | 'busy' | 'offline' | 'unknown'
+  queue_depth: number
+  processing_uploads: number
+  failed_uploads: number
+  latest_upload_status: KnowledgeCorpusUploadStatus | null
+  latest_upload_at: string | null
+}
+
+export interface RagOverview {
+  knowledge_status: 'ready' | 'empty'
+  knowledge_chunks: number
+  source_documents: number
+  covered_section_count: number
+  total_section_count: number
+  section_coverage: RagSectionCoverage[]
+  last_indexed_at: string | null
+  embedding_model_alias: string
+  embedding_dimension: number
+  operations: RagOperations | null
+}
+
 export type GenerationTaskStatus =
   | 'draft'
   | 'extracting'
@@ -157,6 +187,12 @@ export interface GenerationReferenceSummary {
   approved_rag_source_files: number
   approved_clause_blocks: number
   used_rag_citations: number
+}
+
+export interface GenerationExportInfo {
+  target_folder: string
+  agent_generated_count: number
+  default_filename: string
 }
 
 export interface GenerationTask {

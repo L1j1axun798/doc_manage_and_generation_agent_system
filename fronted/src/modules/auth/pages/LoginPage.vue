@@ -4,11 +4,14 @@ import { reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { getErrorMessage } from '@/core/http/error-normalizer'
+import { setTheme } from '@/shared/composables/useTheme'
 import { useAuthStore } from '../stores/auth.store'
 
 const authStore = useAuthStore()
 const route = useRoute()
 const router = useRouter()
+
+setTheme('light')
 
 const loading = ref(false)
 const loginStep = ref<'idle' | 'password' | 'webauthn'>('idle')

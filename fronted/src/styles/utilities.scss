@@ -1,5 +1,17 @@
 .app-page-header h1 {
   margin: 0;
   color: var(--color-text-primary);
-  font-size: 24px;
+  font-size: var(--font-size-xl);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
+  margin: -1px;
+  white-space: nowrap;
 }

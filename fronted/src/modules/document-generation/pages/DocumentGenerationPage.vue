@@ -249,6 +249,7 @@ function closeKnowledgeUploadDialog(): void {
             filterable
             placeholder="请选择一个在执行项目"
             :loading="loading"
+            popper-class="document-generation-project-select-dropdown"
             style="width: 100%"
           >
             <el-option
@@ -422,6 +423,10 @@ function closeKnowledgeUploadDialog(): void {
 
 .document-generation-page__selector :deep(.el-form-item) {
   margin-bottom: 0;
+}
+
+:global(.document-generation-project-select-dropdown .el-select-dropdown__wrap) {
+  max-height: 250px;
 }
 
 .knowledge-upload-form {
