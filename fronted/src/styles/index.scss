@@ -75,33 +75,11 @@ a:hover {
 }
 
 .main-layout__brand-mark {
-  position: relative;
-  display: inline-grid;
+  display: block;
   flex: 0 0 auto;
   width: 36px;
   height: 36px;
-  place-items: center;
-  overflow: hidden;
-  border-radius: var(--radius-md);
-  color: var(--color-text-inverse);
-  background:
-    linear-gradient(
-      145deg,
-      var(--color-brand) 8%,
-      var(--color-brand-highlight) 58%,
-      var(--color-accent) 140%
-    );
-  box-shadow: var(--shadow-brand-sm);
-  font-size: var(--font-size-md);
-  font-weight: var(--font-weight-bold);
-}
-
-.main-layout__brand-mark::after {
-  position: absolute;
-  inset: 1px;
-  border: 1px solid var(--color-on-brand-border);
-  border-radius: calc(var(--radius-md) - 1px);
-  content: '';
+  object-fit: contain;
 }
 
 .main-layout__brand-copy {
@@ -519,16 +497,11 @@ a:hover {
 }
 
 .login-page__brand-mark {
-  display: inline-grid;
+  display: block;
+  flex: 0 0 auto;
   width: 42px;
   height: 42px;
-  place-items: center;
-  border-radius: var(--radius-md);
-  color: var(--color-text-inverse);
-  background: linear-gradient(135deg, var(--color-brand), var(--color-accent));
-  box-shadow: var(--shadow-brand-md);
-  font-size: 18px;
-  font-weight: var(--font-weight-bold);
+  object-fit: contain;
 }
 
 .login-page__brand p,

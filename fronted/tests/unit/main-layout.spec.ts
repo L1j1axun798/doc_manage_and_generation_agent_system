@@ -59,6 +59,7 @@ describe('main layout defaults', () => {
     })
 
     expect(wrapper.find('.main-layout__aside').classes()).not.toContain('is-collapsed')
+    expect(wrapper.find('.main-layout__brand-mark').attributes('src')).toBe('/brand-logo.png')
     expect(wrapper.find('.main-layout__sidebar-toggle').attributes('aria-pressed')).toBe('false')
     expect(wrapper.find('.main-layout__page-context strong').text()).toBe('四措两案 Agent V1.0')
     expect(wrapper.find('.main-layout__page-description').text()).toBe(

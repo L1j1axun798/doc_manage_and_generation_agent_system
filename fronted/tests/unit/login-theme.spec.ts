@@ -35,6 +35,7 @@ describe('login theme default', () => {
     expect(document.documentElement.dataset.theme).toBe('light')
     expect(document.documentElement.classList.contains('dark')).toBe(false)
     expect(window.localStorage.getItem('wind-doc-system.theme')).toBe('light')
+    expect(wrapper.find('.login-page__brand-mark').attributes('src')).toBe('/brand-logo.png')
     wrapper.unmount()
   })
 })

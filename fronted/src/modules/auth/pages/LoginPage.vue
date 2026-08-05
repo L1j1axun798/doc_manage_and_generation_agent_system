@@ -3,6 +3,7 @@ import { ElMessage } from 'element-plus'
 import { reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
+import { appConfig } from '@/config/app'
 import { getErrorMessage } from '@/core/http/error-normalizer'
 import { setTheme } from '@/shared/composables/useTheme'
 import { useAuthStore } from '../stores/auth.store'
@@ -54,7 +55,12 @@ async function submitLogin(): Promise<void> {
   <main class="login-page">
     <section class="login-page__panel" aria-labelledby="login-title">
       <div class="login-page__brand">
-        <span class="login-page__brand-mark" aria-hidden="true">W</span>
+        <img
+          class="login-page__brand-mark"
+          :src="appConfig.logoUrl"
+          alt=""
+          aria-hidden="true"
+        />
         <div>
           <!-- <p>Wind Document System</p> -->
           <h1 id="login-title">绿能信盾资料管理系统</h1>

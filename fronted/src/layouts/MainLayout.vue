@@ -113,9 +113,12 @@ async function handleCommand(command: string): Promise<void> {
       :width="asideWidth"
     >
       <div class="main-layout__brand">
-        <span class="main-layout__brand-mark" aria-hidden="true">
-          <span>W</span>
-        </span>
+        <img
+          class="main-layout__brand-mark"
+          :src="appConfig.logoUrl"
+          alt=""
+          aria-hidden="true"
+        />
         <span v-show="!isSidebarCollapsed" class="main-layout__brand-copy">
           <strong class="main-layout__brand-title">{{ appConfig.title }}</strong>
           <small>企业资料工作台</small>
