@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Close, Delete, Download } from '@element-plus/icons-vue'
+import { ArrowDown, Close, Delete, Download } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
@@ -656,6 +656,17 @@ async function handleCenterDownload(): Promise<void> {
   }
 }
 
+function handleDocumentCenterDownloadCommand(command: string | number | object): void {
+  if (command === 'folder') {
+    void handleFolderDownload()
+    return
+  }
+
+  if (command === 'center') {
+    void handleCenterDownload()
+  }
+}
+
 function openEditDialog(document: DocumentItem): void {
   actionDocument.value = document
   editVisible.value = true
@@ -813,23 +824,42 @@ async function handleRestore(document: DocumentItem): Promise<void> {
         v-if="showDocumentCenterDownloads"
         class="document-explorer__folder-download"
       >
-        <el-button
-          :disabled="effectiveFolderId === undefined || centerDownloadLoading"
-          :icon="Download"
-          :loading="folderDownloadLoading"
-          @click="handleFolderDownload"
+        <el-dropdown
+          :disabled="folderDownloadLoading || centerDownloadLoading"
+          :trigger="['click', 'hover']"
+          @command="handleDocumentCenterDownloadCommand"
         >
-          一键下载当前页资料
-        </el-button>
-        <el-button
-          :disabled="folderDownloadLoading"
-          :icon="Download"
-          :loading="centerDownloadLoading"
-          type="primary"
-          @click="handleCenterDownload"
-        >
-          一键下载中心全部资料
-        </el-button>
+          <el-button
+            :icon="Download"
+            :loading="folderDownloadLoading || centerDownloadLoading"
+            type="primary"
+          >
+            下载全部资料
+            <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+          </el-button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item
+                command="folder"
+                :disabled="
+                  effectiveFolderId === undefined ||
+                  folderDownloadLoading ||
+                  centerDownloadLoading
+                "
+                :icon="Download"
+              >
+                一键下载当前页资料
+              </el-dropdown-item>
+              <el-dropdown-item
+                command="center"
+                :disabled="folderDownloadLoading || centerDownloadLoading"
+                :icon="Download"
+              >
+                一键下载中心全部资料
+              </el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
       </div>
       <slot v-if="isEntryPreparationSelection" name="entry-preparation" />
 

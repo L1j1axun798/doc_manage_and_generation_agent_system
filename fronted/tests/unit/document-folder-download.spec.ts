@@ -35,7 +35,7 @@ afterEach(() => {
   vi.clearAllMocks()
 })
 
-it('supports current-page and center-wide downloads without duplicate clicks', async () => {
+it('keeps both download scopes in one click-or-hover dropdown without duplicate commands', async () => {
   const root: FolderTreeNode = {
     id: 7,
     project: null,
@@ -88,40 +88,47 @@ it('supports current-page and center-wide downloads without duplicate clicks', a
   })
   await flushPromises()
 
-  const downloadButton = wrapper.findAll('button').find(
-    (button) => button.text().includes('一键下载当前页资料'),
-  )
-  const centerDownloadButton = wrapper.findAll('button').find(
-    (button) => button.text().includes('一键下载中心全部资料'),
-  )
-  expect(downloadButton).toBeDefined()
-  expect(centerDownloadButton).toBeDefined()
-  await downloadButton?.trigger('click')
+  const dropdown = wrapper.findComponent({ name: 'ElDropdown' })
+  const downloadItems = wrapper.findAllComponents({ name: 'ElDropdownItem' })
+  const mainButton = wrapper.findAll('button').find((button) => button.text() === '下载全部资料')
+
+  expect(mainButton).toBeDefined()
+  expect(dropdown.props('trigger')).toEqual(['click', 'hover'])
+  expect(downloadItems.map((item) => item.text())).toEqual([
+    '一键下载当前页资料',
+    '一键下载中心全部资料',
+  ])
+
+  dropdown.vm.$emit('command', 'folder')
   await flushPromises()
 
   expect(documentApi.downloadFolder).toHaveBeenCalledTimes(1)
   expect(documentApi.downloadFolder).toHaveBeenCalledWith(7)
-  expect(downloadButton?.attributes('disabled')).toBeDefined()
-  expect(centerDownloadButton?.attributes('disabled')).toBeDefined()
-  await downloadButton?.trigger('click')
+  expect(dropdown.props('disabled')).toBe(true)
+  expect(downloadItems[0]?.props('disabled')).toBe(true)
+  expect(downloadItems[1]?.props('disabled')).toBe(true)
+  dropdown.vm.$emit('command', 'folder')
   expect(documentApi.downloadFolder).toHaveBeenCalledTimes(1)
 
   resolveDownload?.()
   await flushPromises()
-  expect(downloadButton?.attributes('disabled')).toBeUndefined()
-  expect(centerDownloadButton?.attributes('disabled')).toBeUndefined()
+  expect(dropdown.props('disabled')).toBe(false)
+  expect(downloadItems[0]?.props('disabled')).toBe(false)
+  expect(downloadItems[1]?.props('disabled')).toBe(false)
 
-  await centerDownloadButton?.trigger('click')
+  dropdown.vm.$emit('command', 'center')
   await flushPromises()
   expect(documentApi.downloadDocumentCenter).toHaveBeenCalledTimes(1)
-  expect(downloadButton?.attributes('disabled')).toBeDefined()
-  expect(centerDownloadButton?.attributes('disabled')).toBeDefined()
-  await centerDownloadButton?.trigger('click')
+  expect(dropdown.props('disabled')).toBe(true)
+  expect(downloadItems[0]?.props('disabled')).toBe(true)
+  expect(downloadItems[1]?.props('disabled')).toBe(true)
+  dropdown.vm.$emit('command', 'center')
   expect(documentApi.downloadDocumentCenter).toHaveBeenCalledTimes(1)
 
   resolveCenterDownload?.()
   await flushPromises()
-  expect(downloadButton?.attributes('disabled')).toBeUndefined()
-  expect(centerDownloadButton?.attributes('disabled')).toBeUndefined()
+  expect(dropdown.props('disabled')).toBe(false)
+  expect(downloadItems[0]?.props('disabled')).toBe(false)
+  expect(downloadItems[1]?.props('disabled')).toBe(false)
   wrapper.unmount()
 })

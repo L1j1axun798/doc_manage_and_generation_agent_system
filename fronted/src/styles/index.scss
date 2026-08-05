@@ -884,7 +884,7 @@ a:hover {
   gap: 10px;
 }
 
-.document-subfolder-panel__meta span {
+.document-subfolder-panel__meta > span {
   color: var(--color-text-secondary);
   font-size: 13px;
   white-space: nowrap;
