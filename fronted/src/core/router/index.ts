@@ -59,6 +59,7 @@ export const routes: RouteRecordRaw[] = [
         component: () => import('@/modules/documents/pages/RecycleBinPage.vue'),
         meta: {
           title: '回收站',
+          description: '查看已删除资料，并按后端权限恢复。',
           requiresAuth: true,
           activeMenu: '/documents',
           layout: 'main',
@@ -70,6 +71,7 @@ export const routes: RouteRecordRaw[] = [
         component: () => import('@/modules/projects/pages/ProjectListPage.vue'),
         meta: {
           title: '项目管理',
+          description: '查询当前账号可见项目，并进入项目详情维护成员和资料。',
           requiresAuth: true,
           layout: 'main',
         },
@@ -91,6 +93,7 @@ export const routes: RouteRecordRaw[] = [
         component: () => import('@/modules/document-generation/pages/DocumentGenerationPage.vue'),
         meta: {
           title: '入场资料Agent V1.0',
+          description: '在一个会话内完成模板、人员、资料、生成、修改与审核。',
           requiresAuth: true,
           layout: 'main',
         },
@@ -101,6 +104,7 @@ export const routes: RouteRecordRaw[] = [
         component: () => import('@/modules/access/pages/AccessManagementPage.vue'),
         meta: {
           title: '授权管理',
+          description: '查询可管理范围内的文档授权和临时访问授权。',
           requiresAuth: true,
           layout: 'main',
           roles: ['system_admin', 'project_manager'],
@@ -112,6 +116,7 @@ export const routes: RouteRecordRaw[] = [
         component: () => import('@/modules/users/pages/UserManagementPage.vue'),
         meta: {
           title: '用户管理',
+          description: '维护系统账号、角色、状态和首次登录改密要求。',
           requiresAuth: true,
           layout: 'main',
           roles: ['system_admin'],
@@ -123,6 +128,7 @@ export const routes: RouteRecordRaw[] = [
         component: () => import('@/modules/audit/pages/AuditLogPage.vue'),
         meta: {
           title: '审计中心',
+          description: '查询系统关键操作、权限拒绝、下载和授权记录。',
           requiresAuth: true,
           layout: 'main',
           roles: ['system_admin'],
@@ -134,6 +140,7 @@ export const routes: RouteRecordRaw[] = [
         component: () => import('@/modules/locations/pages/AdminLocationPage.vue'),
         meta: {
           title: '人员位置',
+          description: '查看员工最近一次上报位置，所有位置均以员工主动上报时间为准。',
           requiresAuth: true,
           layout: 'main',
           roles: ['system_admin'],
@@ -145,6 +152,7 @@ export const routes: RouteRecordRaw[] = [
         component: () => import('@/modules/notifications/pages/NotificationCenterPage.vue'),
         meta: {
           title: '通知中心',
+          description: '查看系统、文档和授权相关通知，并维护单条通知的已读状态。',
           requiresAuth: true,
           layout: 'main',
         },
@@ -155,6 +163,7 @@ export const routes: RouteRecordRaw[] = [
         component: () => import('@/modules/system/pages/SystemManagementPage.vue'),
         meta: {
           title: '系统管理',
+          description: '维护资料目录，查看后端健康状态；未开放的系统能力保持只读提示。',
           requiresAuth: true,
           layout: 'main',
           roles: ['system_admin'],
@@ -166,6 +175,7 @@ export const routes: RouteRecordRaw[] = [
         component: () => import('@/modules/auth/pages/ChangePasswordPage.vue'),
         meta: {
           title: '修改密码',
+          description: '首次登录或重置密码后，需要先更新密码。',
           requiresAuth: true,
           hideInMenu: true,
           layout: 'main',

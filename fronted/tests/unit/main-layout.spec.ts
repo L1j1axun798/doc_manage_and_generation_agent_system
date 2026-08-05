@@ -20,7 +20,10 @@ describe('main layout defaults', () => {
         {
           path: '/',
           component: { template: '<div />' },
-          meta: { title: '首页' },
+          meta: {
+            title: '四措两案 Agent V1.0',
+            description: '在一个会话内完成模板、人员、资料、生成、修改与审核。',
+          },
         },
       ],
     })
@@ -57,6 +60,10 @@ describe('main layout defaults', () => {
 
     expect(wrapper.find('.main-layout__aside').classes()).not.toContain('is-collapsed')
     expect(wrapper.find('.main-layout__sidebar-toggle').attributes('aria-pressed')).toBe('false')
+    expect(wrapper.find('.main-layout__page-context strong').text()).toBe('四措两案 Agent V1.0')
+    expect(wrapper.find('.main-layout__page-description').text()).toBe(
+      '在一个会话内完成模板、人员、资料、生成、修改与审核。',
+    )
 
     await wrapper.find('.main-layout__sidebar-toggle').trigger('click')
 

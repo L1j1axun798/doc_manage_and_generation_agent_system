@@ -218,3 +218,418 @@ def test_batch_download_rejects_total_size_over_limit(client, tmp_path, settings
     )
 
     assert response.status_code == 413
+
+
+@pytest.mark.django_db
+def test_folder_download_preserves_root_and_nested_folder_hierarchy(client, tmp_path, settings):
+    settings.FILE_STORAGE_ROOT = tmp_path
+    admin = make_user("admin", User.Role.SYSTEM_ADMIN)
+    root = Folder.objects.create(
+        name="资料根目录",
+        code="DOWNLOAD-ROOT",
+        is_system_root=True,
+        created_by=admin,
+    )
+    child = Folder.objects.create(parent=root, name="子目录", created_by=admin)
+    grandchild = Folder.objects.create(parent=child, name="孙目录", created_by=admin)
+    client.force_login(admin)
+    create_document(
+        client,
+        folder=root,
+        title="根文件",
+        filename="root.pdf",
+        content=b"root",
+    )
+    create_document(
+        client,
+        folder=child,
+        title="子文件",
+        filename="report.pdf",
+        content=b"child",
+    )
+    create_document(
+        client,
+        folder=grandchild,
+        title="孙文件",
+        filename="report.pdf",
+        content=b"grandchild",
+    )
+
+    response = client.post(
+        "/api/v1/documents/folder-download/",
+        {"folder": root.id},
+        content_type="application/json",
+    )
+
+    assert response.status_code == 200
+    assert response["X-Archive-Document-Count"] == "3"
+    assert "filename*=UTF-8''" in response["Content-Disposition"]
+    with ZipFile(BytesIO(response_body(response))) as archive:
+        assert sorted(archive.namelist()) == [
+            "资料根目录/root.pdf",
+            "资料根目录/子目录/report.pdf",
+            "资料根目录/子目录/孙目录/report.pdf",
+        ]
+        assert archive.read("资料根目录/root.pdf") == b"root"
+        assert archive.read("资料根目录/子目录/report.pdf") == b"child"
+        assert archive.read("资料根目录/子目录/孙目录/report.pdf") == b"grandchild"
+    assert AuditLog.objects.filter(
+        action="document.folder_download",
+        result="success",
+    ).exists()
+
+
+@pytest.mark.django_db
+def test_folder_download_is_not_limited_by_legacy_20_file_batch_limit(client, tmp_path, settings):
+    settings.FILE_STORAGE_ROOT = tmp_path
+    admin = make_user("admin", User.Role.SYSTEM_ADMIN)
+    root = Folder.objects.create(
+        name="全部资料",
+        code="DOWNLOAD-ROOT",
+        is_system_root=True,
+        created_by=admin,
+    )
+    client.force_login(admin)
+    for index in range(21):
+        create_document(
+            client,
+            folder=root,
+            title=f"资料-{index}",
+            filename=f"document-{index}.pdf",
+            content=f"content-{index}".encode(),
+        )
+
+    response = client.post(
+        "/api/v1/documents/folder-download/",
+        {"folder": root.id},
+        content_type="application/json",
+    )
+
+    assert response.status_code == 200
+    assert response["X-Archive-Document-Count"] == "21"
+    with ZipFile(BytesIO(response_body(response))) as archive:
+        assert len(archive.namelist()) == 21
+
+
+@pytest.mark.django_db
+def test_folder_download_only_includes_documents_user_can_download(client, tmp_path, settings):
+    settings.FILE_STORAGE_ROOT = tmp_path
+    admin = make_user("admin", User.Role.SYSTEM_ADMIN)
+    operator = make_user("operator", User.Role.DATA_OPERATOR)
+    root = Folder.objects.create(
+        name="公共资料",
+        code="DOWNLOAD-ROOT",
+        is_system_root=True,
+        created_by=admin,
+    )
+    allowed_folder = Folder.objects.create(parent=root, name="可下载", created_by=admin)
+    denied_folder = Folder.objects.create(parent=root, name="不可下载", created_by=admin)
+    client.force_login(admin)
+    allowed = create_document(
+        client,
+        folder=allowed_folder,
+        title="已授权",
+        filename="allowed.pdf",
+        content=b"allowed",
+    )
+    create_document(
+        client,
+        folder=denied_folder,
+        title="未授权",
+        filename="denied.pdf",
+        content=b"denied",
+    )
+    DocumentGrant.objects.create(
+        document_id=allowed["id"],
+        user=operator,
+        can_download=True,
+        created_by=admin,
+    )
+    client.force_login(operator)
+
+    response = client.post(
+        "/api/v1/documents/folder-download/",
+        {"folder": root.id},
+        content_type="application/json",
+    )
+
+    assert response.status_code == 200
+    assert response["X-Archive-Document-Count"] == "1"
+    with ZipFile(BytesIO(response_body(response))) as archive:
+        assert archive.namelist() == ["公共资料/可下载/allowed.pdf"]
+        assert archive.read("公共资料/可下载/allowed.pdf") == b"allowed"
+
+
+@pytest.mark.django_db
+def test_folder_download_reports_when_no_documents_are_downloadable(client, tmp_path, settings):
+    settings.FILE_STORAGE_ROOT = tmp_path
+    admin = make_user("admin", User.Role.SYSTEM_ADMIN)
+    operator = make_user("operator", User.Role.DATA_OPERATOR)
+    root = Folder.objects.create(
+        name="公共资料",
+        code="DOWNLOAD-ROOT",
+        is_system_root=True,
+        created_by=admin,
+    )
+    client.force_login(admin)
+    create_document(
+        client,
+        folder=root,
+        title="未授权",
+        filename="denied.pdf",
+        content=b"denied",
+    )
+    client.force_login(operator)
+
+    response = client.post(
+        "/api/v1/documents/folder-download/",
+        {"folder": root.id},
+        content_type="application/json",
+    )
+
+    assert response.status_code == 400
+    assert response.json()["message"] == "当前目录及子目录没有可下载文件"
+
+
+@pytest.mark.django_db
+def test_folder_download_rejects_folder_outside_user_scope(client, tmp_path, settings):
+    settings.FILE_STORAGE_ROOT = tmp_path
+    admin = make_user("admin", User.Role.SYSTEM_ADMIN)
+    operator = make_user("operator", User.Role.DATA_OPERATOR)
+    project = Project.objects.create(name="隐藏项目", code="P-HIDDEN", created_by=admin)
+    folder = Folder.objects.create(project=project, name="资料", created_by=admin)
+    client.force_login(operator)
+
+    response = client.post(
+        "/api/v1/documents/folder-download/",
+        {"folder": folder.id},
+        content_type="application/json",
+    )
+
+    assert response.status_code == 404
+
+
+@pytest.mark.django_db
+def test_folder_download_groups_equivalent_project_roots(client, tmp_path, settings):
+    settings.FILE_STORAGE_ROOT = tmp_path
+    admin = make_user("admin", User.Role.SYSTEM_ADMIN)
+    operator = make_user("operator", User.Role.DATA_OPERATOR)
+    public_root = Folder.objects.create(
+        name="技术方案",
+        code="PUBLIC-TECH-SOLUTION",
+        is_system_root=True,
+        created_by=admin,
+    )
+    project = Project.objects.create(name="风场项目", code="P001", created_by=admin)
+    ProjectMember.objects.create(project=project, user=operator)
+    project_root = Folder.objects.create(
+        project=project,
+        name="技术方案",
+        code="PUBLIC-TECH-SOLUTION",
+        created_by=admin,
+    )
+    child = Folder.objects.create(
+        project=project, parent=project_root, name="报审版", created_by=admin
+    )
+    client.force_login(admin)
+    document = create_document(
+        client,
+        folder=child,
+        title="方案",
+        filename="方案.docx",
+        content=b"solution",
+    )
+    DocumentGrant.objects.create(
+        document_id=document["id"],
+        user=operator,
+        can_download=True,
+        created_by=admin,
+    )
+    client.force_login(operator)
+
+    response = client.post(
+        "/api/v1/documents/folder-download/",
+        {"folder": public_root.id},
+        content_type="application/json",
+    )
+
+    assert response.status_code == 200
+    with ZipFile(BytesIO(response_body(response))) as archive:
+        expected_path = "技术方案/P001 风场项目/报审版/方案.docx"
+        assert archive.namelist() == [expected_path]
+        assert archive.read(expected_path) == b"solution"
+
+
+@pytest.mark.django_db
+def test_center_download_includes_standard_roots_and_excludes_legacy_dev_root(
+    client, tmp_path, settings
+):
+    settings.FILE_STORAGE_ROOT = tmp_path
+    admin = make_user("admin", User.Role.SYSTEM_ADMIN)
+    company_root = Folder.objects.create(
+        name="公司资质",
+        code="PUBLIC-COMPANY",
+        is_system_root=True,
+        sort_order=1,
+        created_by=admin,
+    )
+    company_child = Folder.objects.create(
+        parent=company_root,
+        name="证照",
+        created_by=admin,
+    )
+    Folder.objects.create(
+        name="技术方案",
+        code="PUBLIC-TECH-SOLUTION",
+        is_system_root=True,
+        sort_order=2,
+        created_by=admin,
+    )
+    project = Project.objects.create(name="风场项目", code="P001", created_by=admin)
+    project_root = Folder.objects.create(
+        project=project,
+        name="技术方案",
+        code="PUBLIC-TECH-SOLUTION",
+        created_by=admin,
+    )
+    project_child = Folder.objects.create(
+        project=project,
+        parent=project_root,
+        name="报审版",
+        created_by=admin,
+    )
+    legacy_root = Folder.objects.create(
+        name="开发公共资料",
+        code="DEV_PUBLIC",
+        is_system_root=True,
+        sort_order=0,
+        created_by=admin,
+    )
+    client.force_login(admin)
+    create_document(
+        client,
+        folder=company_child,
+        title="营业执照",
+        filename="license.pdf",
+        content=b"license",
+    )
+    create_document(
+        client,
+        folder=project_child,
+        title="方案",
+        filename="方案.docx",
+        content=b"solution",
+    )
+    create_document(
+        client,
+        folder=legacy_root,
+        title="开发示例",
+        filename="dev-demo.pdf",
+        content=b"legacy-dev-data",
+    )
+
+    response = client.post(
+        "/api/v1/documents/center-download/",
+        {},
+        content_type="application/json",
+    )
+
+    assert response.status_code == 200
+    assert response["X-Archive-Document-Count"] == "2"
+    with ZipFile(BytesIO(response_body(response))) as archive:
+        assert sorted(archive.namelist()) == [
+            "公司资质/证照/license.pdf",
+            "技术方案/P001 风场项目/报审版/方案.docx",
+        ]
+        assert archive.read("公司资质/证照/license.pdf") == b"license"
+        assert archive.read("技术方案/P001 风场项目/报审版/方案.docx") == b"solution"
+    assert AuditLog.objects.filter(
+        action="document.center_download",
+        resource_type="DocumentCenter",
+        resource_id="all",
+        result="success",
+    ).exists()
+
+
+@pytest.mark.django_db
+def test_center_download_only_includes_documents_user_can_download(client, tmp_path, settings):
+    settings.FILE_STORAGE_ROOT = tmp_path
+    admin = make_user("admin", User.Role.SYSTEM_ADMIN)
+    operator = make_user("operator", User.Role.DATA_OPERATOR)
+    first_root = Folder.objects.create(
+        name="技术方案",
+        code="PUBLIC-TECH-SOLUTION",
+        is_system_root=True,
+        created_by=admin,
+    )
+    second_root = Folder.objects.create(
+        name="报告模板",
+        code="PUBLIC-REPORT-TEMPLATE",
+        is_system_root=True,
+        created_by=admin,
+    )
+    client.force_login(admin)
+    allowed = create_document(
+        client,
+        folder=first_root,
+        title="已授权",
+        filename="allowed.pdf",
+        content=b"allowed",
+    )
+    create_document(
+        client,
+        folder=second_root,
+        title="未授权",
+        filename="denied.pdf",
+        content=b"denied",
+    )
+    DocumentGrant.objects.create(
+        document_id=allowed["id"],
+        user=operator,
+        can_download=True,
+        created_by=admin,
+    )
+    client.force_login(operator)
+
+    response = client.post(
+        "/api/v1/documents/center-download/",
+        {},
+        content_type="application/json",
+    )
+
+    assert response.status_code == 200
+    assert response["X-Archive-Document-Count"] == "1"
+    with ZipFile(BytesIO(response_body(response))) as archive:
+        assert archive.namelist() == ["技术方案/allowed.pdf"]
+        assert archive.read("技术方案/allowed.pdf") == b"allowed"
+
+
+@pytest.mark.django_db
+def test_center_download_reports_when_no_documents_are_downloadable(client, tmp_path, settings):
+    settings.FILE_STORAGE_ROOT = tmp_path
+    admin = make_user("admin", User.Role.SYSTEM_ADMIN)
+    operator = make_user("operator", User.Role.DATA_OPERATOR)
+    root = Folder.objects.create(
+        name="报告模板",
+        code="PUBLIC-REPORT-TEMPLATE",
+        is_system_root=True,
+        created_by=admin,
+    )
+    client.force_login(admin)
+    create_document(
+        client,
+        folder=root,
+        title="未授权",
+        filename="denied.pdf",
+        content=b"denied",
+    )
+    client.force_login(operator)
+
+    response = client.post(
+        "/api/v1/documents/center-download/",
+        {},
+        content_type="application/json",
+    )
+
+    assert response.status_code == 400
+    assert response.json()["message"] == "资料中心没有可下载文件"

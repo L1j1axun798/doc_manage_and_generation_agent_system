@@ -133,13 +133,6 @@ function readableGrantPermissions(grant: DocumentGrant): string {
 
 <template>
   <section class="access-page">
-    <header class="access-page__header">
-      <div>
-        <h1>授权管理</h1>
-        <p>查询可管理范围内的文档授权和临时访问授权。</p>
-      </div>
-    </header>
-
     <div class="access-page__search">
       <el-input
         v-model="search"

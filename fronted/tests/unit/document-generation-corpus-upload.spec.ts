@@ -37,6 +37,33 @@ const baseUser: AuthUser = {
   created_at: '2026-07-29T08:00:00+08:00',
 }
 
+const project = {
+  id: 7,
+  name: '海上风电示范项目',
+  code: 'WF-007',
+  description: '',
+  manager: 1,
+  manager_name: '项目经理',
+  status: 'active' as const,
+  created_by: 1,
+  created_by_name: '系统管理员',
+  created_at: '2026-07-01T08:00:00+08:00',
+  updated_at: '2026-07-28T08:00:00+08:00',
+  archived_at: null,
+  archived_by: null,
+}
+
+const documentGenerationPanelStub = {
+  name: 'DocumentGenerationPanel',
+  props: ['project'],
+  template: `
+    <section class="document-generation-panel-stub">
+      <slot name="project-context" />
+      <slot name="page-actions" />
+    </section>
+  `,
+}
+
 function mountPage(user: AuthUser) {
   const pinia = createPinia()
   setActivePinia(pinia)
@@ -48,7 +75,7 @@ function mountPage(user: AuthUser) {
     global: {
       plugins: [pinia, ElementPlus],
       stubs: {
-        DocumentGenerationPanel: true,
+        DocumentGenerationPanel: documentGenerationPanelStub,
       },
     },
   })
@@ -106,6 +133,31 @@ describe('document generation RAG corpus upload', () => {
 
     expect(wrapper.text()).not.toContain('上传 RAG 资料')
     expect(mocks.fetchKnowledgeCorpusUploads).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('keeps one conversation panel mounted while the selected project changes', async () => {
+    mocks.fetchProjects.mockResolvedValue({
+      count: 1,
+      next: null,
+      previous: null,
+      results: [project],
+    })
+    const wrapper = mountPage(baseUser)
+    await flushPromises()
+
+    const panel = wrapper.get('.document-generation-panel-stub')
+    const panelElement = panel.element
+    const refreshButton = wrapper.get('button[aria-label="刷新项目"]')
+    expect(refreshButton.text()).toBe('')
+    expect(wrapper.text()).not.toContain('刷新项目')
+    expect(wrapper.getComponent({ name: 'DocumentGenerationPanel' }).props('project')).toBeNull()
+
+    await wrapper.getComponent({ name: 'ElSelect' }).vm.$emit('update:modelValue', project.id)
+    await flushPromises()
+
+    expect(wrapper.get('.document-generation-panel-stub').element).toBe(panelElement)
+    expect(wrapper.getComponent({ name: 'DocumentGenerationPanel' }).props('project')).toEqual(project)
     wrapper.unmount()
   })
 })

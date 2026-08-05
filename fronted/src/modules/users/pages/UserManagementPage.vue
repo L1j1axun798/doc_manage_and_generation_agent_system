@@ -211,11 +211,7 @@ async function copyWebauthnTicketUrl(): Promise<void> {
 
 <template>
   <section class="user-page">
-    <header class="user-page__header">
-      <div>
-        <h1>用户管理</h1>
-        <p>维护系统账号、角色、状态和首次登录改密要求。</p>
-      </div>
+    <header class="user-page__header page-action-bar">
       <div class="user-page__header-actions">
         <el-button type="primary" @click="openCreate">创建用户</el-button>
       </div>

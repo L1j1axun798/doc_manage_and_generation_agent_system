@@ -89,13 +89,6 @@ async function toggleRead(notification: AppNotification): Promise<void> {
 
 <template>
   <section class="notification-page">
-    <header class="notification-page__header">
-      <div>
-        <h1>通知中心</h1>
-        <p>查看系统、文档和授权相关通知，并维护单条通知的已读状态。</p>
-      </div>
-    </header>
-
     <section class="notification-page__filters">
       <el-input v-model="search" clearable placeholder="搜索标题或内容" @keyup.enter="submitSearch" />
       <el-select v-model="category" clearable placeholder="分类">

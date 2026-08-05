@@ -221,6 +221,7 @@ class GenerationTaskViewSet(
             business_type=data["business_type"],
             idempotency_key=data["idempotency_key"],
             initial_facts=data["facts"],
+            conversation_context=data["conversation_context"],
             request=request,
         )
         return Response(
@@ -251,6 +252,7 @@ class GenerationTaskViewSet(
             business_type=data["business_type"],
             idempotency_key=data["idempotency_key"],
             initial_facts=data["facts"],
+            conversation_context=data["conversation_context"],
             request=request,
         )
         return Response(

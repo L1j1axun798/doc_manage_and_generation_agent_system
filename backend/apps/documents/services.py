@@ -1,4 +1,6 @@
+import re
 import tempfile
+from collections.abc import Iterable
 from datetime import timedelta
 from pathlib import PurePath
 from typing import Any
@@ -497,6 +499,215 @@ def build_batch_download_zip(
     return archive, "documents.zip", total_size
 
 
+def build_folder_download_zip(
+    *,
+    actor: Any,
+    root_folder: Folder,
+    folders: list[Folder],
+    documents: Iterable[Document],
+    request: Any = None,
+    storage: LocalDocumentStorage | None = None,
+) -> tuple[Any, str, int, int, int]:
+    backend = storage or LocalDocumentStorage()
+    folder_paths = _folder_archive_paths(root_folder=root_folder, folders=folders)
+    root_path = _safe_archive_component(root_folder.name, fallback="资料目录")
+    return _build_authorized_download_zip(
+        actor=actor,
+        documents=documents,
+        folder_paths=folder_paths,
+        fallback_path=root_path,
+        archive_filename=f"{root_path}.zip",
+        empty_message="当前目录及子目录没有可下载文件",
+        audit_action="document.folder_download",
+        audit_resource=root_folder,
+        request=request,
+        storage=backend,
+    )
+
+
+def build_document_center_download_zip(
+    *,
+    actor: Any,
+    root_folders: list[Folder],
+    folders: list[Folder],
+    folder_root_ids: dict[int, int],
+    documents: Iterable[Document],
+    request: Any = None,
+    storage: LocalDocumentStorage | None = None,
+) -> tuple[Any, str, int, int, int]:
+    root_by_id = {folder.pk: folder for folder in root_folders}
+    folders_by_root: dict[int, list[Folder]] = {root_id: [] for root_id in root_by_id}
+    for folder in folders:
+        root_id = folder_root_ids.get(folder.pk)
+        if root_id in folders_by_root:
+            folders_by_root[root_id].append(folder)
+
+    folder_paths: dict[int, str] = {}
+    for root_id, root_folder in root_by_id.items():
+        folder_paths.update(
+            _folder_archive_paths(
+                root_folder=root_folder,
+                folders=folders_by_root[root_id],
+            )
+        )
+
+    return _build_authorized_download_zip(
+        actor=actor,
+        documents=documents,
+        folder_paths=folder_paths,
+        fallback_path="资料中心",
+        archive_filename="资料中心全部资料.zip",
+        empty_message="资料中心没有可下载文件",
+        audit_action="document.center_download",
+        audit_resource_type="DocumentCenter",
+        audit_resource_id="all",
+        request=request,
+        storage=storage or LocalDocumentStorage(),
+    )
+
+
+def _build_authorized_download_zip(
+    *,
+    actor: Any,
+    documents: Iterable[Document],
+    folder_paths: dict[int, str],
+    fallback_path: str,
+    archive_filename: str,
+    empty_message: str,
+    audit_action: str,
+    request: Any,
+    storage: LocalDocumentStorage,
+    audit_resource: Any = None,
+    audit_resource_type: str = "",
+    audit_resource_id: str = "",
+) -> tuple[Any, str, int, int, int]:
+    archive = tempfile.TemporaryFile()
+    used_paths: set[str] = set()
+    total_size = 0
+    document_count = 0
+
+    try:
+        with ZipFile(archive, mode="w", compression=ZIP_DEFLATED, allowZip64=True) as zip_file:
+            for document in documents:
+                if not can_download_document(actor, document):
+                    continue
+
+                version = document.current_version
+                if version is None:
+                    raise ValidationError("目录中包含没有可下载版本的文档")
+                if not storage.exists(version.storage_path):
+                    raise StoredFileMissing()
+
+                directory = folder_paths.get(document.folder_id, fallback_path)
+                archive_path = _unique_archive_path(
+                    directory=directory,
+                    filename=version.original_filename,
+                    used_paths=used_paths,
+                )
+                zip_file.write(storage.resolve(version.storage_path), arcname=archive_path)
+                total_size += version.file_size
+                document_count += 1
+
+        if document_count == 0:
+            audit_log(
+                user=actor,
+                action=audit_action,
+                resource=audit_resource,
+                resource_type=audit_resource_type,
+                resource_id=audit_resource_id,
+                result="failed",
+                request=request,
+                error_message=empty_message,
+            )
+            raise ValidationError(empty_message)
+
+        archive_size = archive.tell()
+        archive.seek(0)
+    except Exception:
+        archive.close()
+        raise
+
+    try:
+        audit_log(
+            user=actor,
+            action=audit_action,
+            resource=audit_resource,
+            resource_type=audit_resource_type,
+            resource_id=audit_resource_id,
+            result="success",
+            request=request,
+            after_data={
+                "document_count": document_count,
+                "total_size": total_size,
+            },
+        )
+    except Exception:
+        archive.close()
+        raise
+    return archive, archive_filename, total_size, archive_size, document_count
+
+
+def _folder_archive_paths(*, root_folder: Folder, folders: list[Folder]) -> dict[int, str]:
+    folder_by_id = {folder.pk: folder for folder in folders}
+    folder_by_id[root_folder.pk] = root_folder
+    root_path = _safe_archive_component(root_folder.name, fallback="资料目录")
+    resolved: dict[int, str] = {root_folder.pk: root_path}
+    resolving: set[int] = set()
+
+    def resolve(folder: Folder) -> str:
+        cached = resolved.get(folder.pk)
+        if cached is not None:
+            return cached
+        if folder.pk in resolving:
+            return root_path
+
+        resolving.add(folder.pk)
+        try:
+            parent = folder_by_id.get(folder.parent_id) if folder.parent_id else None
+            if parent is not None:
+                path = f"{resolve(parent)}/{_safe_archive_component(folder.name)}"
+            elif folder.project is not None:
+                project_label = f"{folder.project.code} {folder.project.name}".strip()
+                path = f"{root_path}/{_safe_archive_component(project_label, fallback='项目资料')}"
+            else:
+                path = f"{root_path}/{_safe_archive_component(folder.name)}"
+            resolved[folder.pk] = path
+            return path
+        finally:
+            resolving.discard(folder.pk)
+
+    for folder in folders:
+        resolve(folder)
+    return resolved
+
+
+def _safe_archive_component(value: str, fallback: str = "未命名") -> str:
+    component = re.sub(r'[\x00-\x1f<>:"/\\|?*]', "_", value).strip(" .")
+    if component in {"", ".", ".."}:
+        return fallback
+    return component
+
+
+def _unique_archive_path(*, directory: str, filename: str, used_paths: set[str]) -> str:
+    safe_filename = _safe_archive_component(filename, fallback="document")
+    candidate = f"{directory}/{safe_filename}"
+    normalized = candidate.casefold()
+    if normalized not in used_paths:
+        used_paths.add(normalized)
+        return candidate
+
+    stem = PurePath(safe_filename).stem or "document"
+    suffix = PurePath(safe_filename).suffix
+    counter = 2
+    while True:
+        candidate = f"{directory}/{stem} ({counter}){suffix}"
+        normalized = candidate.casefold()
+        if normalized not in used_paths:
+            used_paths.add(normalized)
+            return candidate
+        counter += 1
+
+
 def _ensure_upload_allowed(*, actor: Any, folder: Folder) -> None:
     if not folder.is_active:
         raise ValidationError("文件夹已停用，不能上传文件")
@@ -527,9 +738,7 @@ def _ensure_source_type_matches_folder(*, source_type: str, folder: Folder) -> N
     )
     if source_type == Document.SourceType.ENTRANCE_MATERIAL:
         if folder.project_id is None or not is_entry_preparation_folder:
-            raise ValidationError(
-                "入场前置资料必须上传到当前项目的“入场前置资料”目录"
-            )
+            raise ValidationError("入场前置资料必须上传到当前项目的“入场前置资料”目录")
         return
 
     if is_entry_preparation_folder:

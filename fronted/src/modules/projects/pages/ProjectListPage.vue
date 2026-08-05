@@ -105,11 +105,7 @@ async function removeProject(project: Project): Promise<void> {
 
 <template>
   <section class="project-page">
-    <header class="project-page__header">
-      <div>
-        <h1>项目管理</h1>
-        <p>查询当前账号可见项目，并进入项目详情维护成员和资料。</p>
-      </div>
+    <header v-if="authStore.isSystemAdmin" class="project-page__header page-action-bar">
       <el-button v-if="authStore.isSystemAdmin" type="primary" @click="openCreate">创建项目</el-button>
     </header>
 

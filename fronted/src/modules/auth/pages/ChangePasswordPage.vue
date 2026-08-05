@@ -45,11 +45,6 @@ async function submitChangePassword(): Promise<void> {
 
 <template>
   <section class="change-password-page">
-    <header class="change-password-page__header">
-      <h1>修改密码</h1>
-      <p>首次登录或重置密码后，需要先更新密码。</p>
-    </header>
-
     <el-form class="change-password-page__form" :model="form" @submit.prevent="submitChangePassword">
       <el-form-item label="原密码">
         <el-input

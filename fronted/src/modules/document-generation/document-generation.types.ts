@@ -128,6 +128,71 @@ export interface DocumentGenerationTemplate {
   required_fact_fields: string[]
 }
 
+export interface AgentPersonnelCertification {
+  name: string
+  certificate_number: string
+  valid_until: string | null
+}
+
+export interface AgentPersonnelContext {
+  id: string
+  name: string
+  job_title: string
+  department: string
+  contact: string
+  certifications: AgentPersonnelCertification[]
+  certificate_valid_until: string | null
+  additional_info: Record<string, unknown>
+}
+
+export interface AvailableAgentPersonnel extends AgentPersonnelContext {
+  user_id: number
+  project_member_id: number
+}
+
+export interface AgentTemplateContext {
+  id: string
+  code: string
+  name: string
+  filename: string
+  version: string
+  document_version_id: number
+  format_locked: boolean
+  constraints: {
+    preserve_section_order: boolean
+    preserve_heading_levels: boolean
+    preserve_tables: boolean
+    preserve_headers_and_footers: boolean
+    preserve_typography_and_numbering: boolean
+    fill_only_allowed_positions: boolean
+  }
+}
+
+export interface AgentConversationContext {
+  initial_message: string
+  personnel: AgentPersonnelContext[]
+  template: AgentTemplateContext | null
+}
+
+export interface GenerationConversationContextPayload {
+  initial_message: string
+  selected_personnel_ids: number[]
+}
+
+export interface ClientTemplateCandidate {
+  document_id: number
+  document_version_id: number
+  filename: string
+  title: string
+  registration_status: 'pending_registration'
+}
+
+export interface ConversationSourceAttachment {
+  document_version_id: number
+  title: string
+  filename: string
+}
+
 export interface GenerationSource {
   id: number
   document_version_id: number
@@ -206,6 +271,7 @@ export interface GenerationTask {
   status: GenerationTaskStatus
   operation: GenerationOperation
   progress: number
+  conversation_context: AgentConversationContext
   facts_snapshot: FactProposal[] | ConfirmedFactPayload[]
   fact_conflicts: Array<Record<string, unknown>>
   risk_profile: Record<string, unknown>
@@ -238,6 +304,7 @@ export interface CreateGenerationTaskPayload {
   document_purpose: typeof DOCUMENT_PURPOSE
   business_type: typeof BUSINESS_TYPE
   idempotency_key: string
+  conversation_context?: GenerationConversationContextPayload
   facts: Array<{
     field: string
     value: unknown

@@ -268,10 +268,6 @@ function uploadStatusLabel(status: KnowledgeCorpusUploadStatus | null): string {
 
 <template>
   <section class="dashboard-page">
-    <header class="dashboard-page__header">
-      <h1>绿能信盾资料管理系统</h1>
-    </header>
-
     <div class="dashboard-page__metrics" aria-label="首页概览">
       <article
         v-for="item in statusItems"

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 
 import { formatDateTime } from '@/shared/utils/format'
 import type {
@@ -13,6 +13,9 @@ const props = defineProps<{
   task: GenerationTask
   events: GenerationTraceEvent[]
 }>()
+
+const detailsExpanded = ref(false)
+const COLLAPSED_EVENT_COUNT = 3
 
 const stageLabels: Record<string, string> = {
   initialized: '准备编制任务',
@@ -59,6 +62,9 @@ const modelCount = computed(
 const ragCount = computed(
   () => props.events.filter((event) => event.event_type === 'rag').length,
 )
+const visibleEvents = computed(() => detailsExpanded.value
+  ? props.events
+  : props.events.slice(-COLLAPSED_EVENT_COUNT))
 
 function tagType(
   status: GenerationTraceStatus,
@@ -96,7 +102,7 @@ function displayDetail(detail: string): string {
 </script>
 
 <template>
-  <section class="workflow-trace">
+  <section class="workflow-trace" :class="{ 'is-expanded': detailsExpanded }">
     <div class="workflow-trace__heading">
       <div>
         <h3>Agent工作流</h3>
@@ -110,7 +116,15 @@ function displayDetail(detail: string): string {
       </el-tag>
     </div>
 
-    <div class="workflow-trace__metrics">
+    <div v-if="!detailsExpanded" class="workflow-trace__compact-meta">
+      <span>{{ task.model_alias || '模型尚未调用' }}</span>
+      <span>Tool {{ toolCount }}</span>
+      <span>模型事件 {{ modelCount }}</span>
+      <span>RAG {{ ragCount }}</span>
+      <span>共 {{ events.length }} 条状态</span>
+    </div>
+
+    <div v-else class="workflow-trace__metrics">
       <div>
         <span>模型状态</span>
         <strong>{{ task.model_alias || '尚未调用模型' }}</strong>
@@ -129,7 +143,7 @@ function displayDetail(detail: string): string {
       </div>
     </div>
 
-    <div class="workflow-trace__references">
+    <div v-if="detailsExpanded" class="workflow-trace__references">
       <el-tag effect="plain">
         当前项目事实资料 {{ task.reference_summary.project_source_files }} 份
       </el-tag>
@@ -152,7 +166,7 @@ function displayDetail(detail: string): string {
     />
     <el-timeline v-else class="workflow-trace__timeline">
       <el-timeline-item
-        v-for="event in events"
+        v-for="event in visibleEvents"
         :key="event.sequence"
         :timestamp="formatDateTime(event.created_at)"
         placement="top"
@@ -174,6 +188,16 @@ function displayDetail(detail: string): string {
         </div>
       </el-timeline-item>
     </el-timeline>
+    <div v-if="events.length" class="workflow-trace__expand-actions">
+      <el-button
+        link
+        type="primary"
+        :aria-expanded="detailsExpanded"
+        @click="detailsExpanded = !detailsExpanded"
+      >
+        {{ detailsExpanded ? '收起执行详情' : `展开全部执行详情（${events.length} 条）` }}
+      </el-button>
+    </div>
   </section>
 </template>
 
@@ -220,6 +244,21 @@ function displayDetail(detail: string): string {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
+.workflow-trace__compact-meta {
+  display: flex;
+  flex-wrap: wrap;
+  margin: 14px 0 12px;
+  gap: 7px;
+}
+
+.workflow-trace__compact-meta span {
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: var(--el-bg-color);
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+
 .workflow-trace__metrics > div {
   display: grid;
   padding: 12px;
@@ -240,9 +279,13 @@ function displayDetail(detail: string): string {
 }
 
 .workflow-trace__timeline {
-  max-height: 460px;
+  max-height: 250px;
   overflow: auto;
   padding: 6px 4px 0;
+}
+
+.workflow-trace.is-expanded .workflow-trace__timeline {
+  max-height: min(50vh, 460px);
 }
 
 .workflow-trace__event {
@@ -254,6 +297,19 @@ function displayDetail(detail: string): string {
 
 .workflow-trace__event p {
   margin: 8px 0 4px;
+}
+
+.workflow-trace:not(.is-expanded) .workflow-trace__event p {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.workflow-trace__expand-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 2px;
 }
 
 @media (max-width: 900px) {

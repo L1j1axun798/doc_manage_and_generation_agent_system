@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Close, Delete } from '@element-plus/icons-vue'
+import { Close, Delete, Download } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
@@ -9,7 +9,9 @@ import { useAuthStore } from '@/modules/auth/stores/auth.store'
 import type { ApiPage } from '@/shared/types/api.types'
 import {
   deleteDocument,
+  downloadDocumentCenter,
   downloadDocument,
+  downloadFolder,
   fetchDocuments,
   fetchDocument,
   fetchTrashDocuments,
@@ -96,6 +98,8 @@ const editVisible = ref(false)
 const moveVisible = ref(false)
 const versionVisible = ref(false)
 const mutationLoading = ref(false)
+const folderDownloadLoading = ref(false)
+const centerDownloadLoading = ref(false)
 const suppressNextFolderReload = ref(false)
 const hiddenDocumentResultsFolderId = ref<number>()
 
@@ -204,6 +208,9 @@ const subfolderPanelEmptyText = computed(() =>
 )
 const canUpload = computed(
   () => !isTrashMode.value && !isSubfolderPanelRootLanding.value && !isArchiveSelection.value,
+)
+const showDocumentCenterDownloads = computed(
+  () => isTopPublicFolderMode.value && !isTrashMode.value,
 )
 const canCreateSubfolder = computed(
   () => authStore.isSystemAdmin && (isCompanyRoot.value || isStaffRoot.value),
@@ -616,6 +623,39 @@ async function handleDownload(document: DocumentItem): Promise<void> {
   }
 }
 
+async function handleFolderDownload(): Promise<void> {
+  const folderId = effectiveFolderId.value
+  if (folderId === undefined || folderDownloadLoading.value || centerDownloadLoading.value) {
+    return
+  }
+
+  folderDownloadLoading.value = true
+  try {
+    await downloadFolder(folderId)
+    ElMessage.success('当前页资料压缩包已下载')
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error))
+  } finally {
+    folderDownloadLoading.value = false
+  }
+}
+
+async function handleCenterDownload(): Promise<void> {
+  if (folderDownloadLoading.value || centerDownloadLoading.value) {
+    return
+  }
+
+  centerDownloadLoading.value = true
+  try {
+    await downloadDocumentCenter()
+    ElMessage.success('资料中心全部资料压缩包已下载')
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error))
+  } finally {
+    centerDownloadLoading.value = false
+  }
+}
+
 function openEditDialog(document: DocumentItem): void {
   actionDocument.value = document
   editVisible.value = true
@@ -769,6 +809,28 @@ async function handleRestore(document: DocumentItem): Promise<void> {
 
     <div class="document-explorer__workspace">
       <slot name="header" />
+      <div
+        v-if="showDocumentCenterDownloads"
+        class="document-explorer__folder-download"
+      >
+        <el-button
+          :disabled="effectiveFolderId === undefined || centerDownloadLoading"
+          :icon="Download"
+          :loading="folderDownloadLoading"
+          @click="handleFolderDownload"
+        >
+          一键下载当前页资料
+        </el-button>
+        <el-button
+          :disabled="folderDownloadLoading"
+          :icon="Download"
+          :loading="centerDownloadLoading"
+          type="primary"
+          @click="handleCenterDownload"
+        >
+          一键下载中心全部资料
+        </el-button>
+      </div>
       <slot v-if="isEntryPreparationSelection" name="entry-preparation" />
 
       <section

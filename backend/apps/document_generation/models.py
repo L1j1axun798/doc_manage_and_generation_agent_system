@@ -318,6 +318,7 @@ class GenerationTask(models.Model):
     progress = models.PositiveSmallIntegerField("进度", default=0)
     idempotency_key = models.CharField("创建幂等键", max_length=120)
     request_fingerprint = models.CharField("请求指纹", max_length=64)
+    conversation_context = models.JSONField("会话上下文快照", default=dict)
     facts_snapshot = models.JSONField("事实快照", default=list)
     fact_conflicts = models.JSONField("事实冲突", default=list)
     risk_profile = models.JSONField("风险画像", default=dict)

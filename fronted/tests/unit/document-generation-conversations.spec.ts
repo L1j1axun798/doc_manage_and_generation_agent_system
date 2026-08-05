@@ -1,10 +1,12 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import ElementPlus, { ElMessageBox } from 'element-plus'
-import { createPinia } from 'pinia'
+import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { GenerationTask } from '@/modules/document-generation'
 import DocumentGenerationPanel from '@/modules/document-generation/components/DocumentGenerationPanel.vue'
+import { useConversationContextStore } from '@/modules/document-generation/stores/conversation-context.store'
+import type { DocumentItem } from '@/modules/documents/documents.types'
 import type { Project } from '@/modules/projects/projects.types'
 
 const mocks = vi.hoisted(() => ({
@@ -13,9 +15,12 @@ const mocks = vi.hoisted(() => ({
   fetchGenerationEvents: vi.fn(),
   fetchGenerationTemplates: vi.fn(),
   fetchDocuments: vi.fn(),
+  fetchAvailableAgentPersonnel: vi.fn(),
   stopGenerationTask: vi.fn(),
   deleteGenerationTask: vi.fn(),
   regenerateSection: vi.fn(),
+  startGenerationPipeline: vi.fn(),
+  uploadConversationAttachment: vi.fn(),
 }))
 
 vi.mock('@/modules/document-generation/api/document-generation.api', () => ({
@@ -32,7 +37,7 @@ vi.mock('@/modules/document-generation/api/document-generation.api', () => ({
   regenerateSection: mocks.regenerateSection,
   retryGenerationTask: vi.fn(),
   setGeneratedSectionLock: vi.fn(),
-  startGenerationPipeline: vi.fn(),
+  startGenerationPipeline: mocks.startGenerationPipeline,
   stopGenerationTask: mocks.stopGenerationTask,
   submitGenerationReview: vi.fn(),
   updateGeneratedSection: vi.fn(),
@@ -42,6 +47,15 @@ vi.mock('@/modules/documents/api/documents.api', () => ({
   downloadDocument: vi.fn(),
   fetchDocument: vi.fn(),
   fetchDocuments: mocks.fetchDocuments,
+}))
+
+vi.mock('@/modules/document-generation/services/personnel.service', () => ({
+  fetchAvailableAgentPersonnel: mocks.fetchAvailableAgentPersonnel,
+}))
+
+vi.mock('@/modules/document-generation/services/client-template.service', () => ({
+  uploadClientTemplateCandidate: vi.fn(),
+  uploadConversationAttachment: mocks.uploadConversationAttachment,
 }))
 
 const project: Project = {
@@ -71,6 +85,11 @@ const task: GenerationTask = {
   status: 'draft',
   operation: 'extract',
   progress: 0,
+  conversation_context: {
+    initial_message: '请开始编制四措两案',
+    personnel: [],
+    template: null,
+  },
   facts_snapshot: [],
   fact_conflicts: [],
   risk_profile: {},
@@ -103,9 +122,71 @@ const task: GenerationTask = {
   },
 }
 
+function makeEntryDocument(index: number, filename = `entry-${index}.docx`): DocumentItem {
+  return {
+    id: 100 + index,
+    project: project.id,
+    project_name: project.name,
+    folder: 2,
+    folder_name: '入场前置资料',
+    title: `参考资料 ${index}`,
+    description: '',
+    access_level: 'internal',
+    source_type: 'entrance_material',
+    current_version: {
+      id: 200 + index,
+      document: 100 + index,
+      version_number: 1,
+      original_filename: filename,
+      content_type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      file_size: 128,
+      sha256: String(index).repeat(64).slice(0, 64),
+      uploaded_by: 1,
+      uploaded_by_name: '张工',
+      created_at: '2026-08-05T10:00:00+08:00',
+    },
+    can_download: true,
+    can_update: true,
+    can_delete: false,
+    can_restore: false,
+    can_create_version: true,
+    lock_version: 1,
+    deleted_at: null,
+    deleted_by: null,
+    deleted_by_name: null,
+    created_by: 1,
+    created_by_name: '张工',
+    created_at: '2026-08-05T10:00:00+08:00',
+    updated_at: '2026-08-05T10:00:00+08:00',
+  }
+}
+
 describe('document generation conversation directory', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.fetchAvailableAgentPersonnel.mockResolvedValue([])
+  })
+
+  it('keeps the complete conversation interface visible and disabled before project selection', async () => {
+    mocks.fetchGenerationTemplates.mockResolvedValue([])
+
+    const wrapper = mount(DocumentGenerationPanel, {
+      props: { project: null },
+      global: {
+        plugins: [createPinia(), ElementPlus],
+      },
+    })
+    await flushPromises()
+
+    expect(wrapper.find('.doc-agent__workbench').exists()).toBe(true)
+    expect(wrapper.text()).toContain('请先选择项目')
+    expect(wrapper.text()).toContain('项目相关操作已禁用')
+    expect(wrapper.get('[data-test="chat-send"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('.conversation-sidebar__header button').attributes('disabled')).toBeDefined()
+    expect(mocks.fetchGenerationTasks).not.toHaveBeenCalled()
+    expect(mocks.fetchDocuments).not.toHaveBeenCalled()
+
+    wrapper.unmount()
   })
 
   it('lists historical conversations without automatically opening task details', async () => {
@@ -133,9 +214,9 @@ describe('document generation conversation directory', () => {
     })
     await flushPromises()
 
-    expect(wrapper.text()).toContain('历史会话')
+    expect(wrapper.text()).toContain('编制会话')
     expect(wrapper.text()).toContain(task.template_name)
-    expect(wrapper.find('.doc-agent__conversation-directory').exists()).toBe(true)
+    expect(wrapper.find('.conversation-sidebar').exists()).toBe(true)
     expect(wrapper.find('.doc-agent__task').exists()).toBe(false)
     expect(mocks.fetchGenerationTask).not.toHaveBeenCalled()
 
@@ -143,9 +224,242 @@ describe('document generation conversation directory', () => {
     await flushPromises()
 
     expect(mocks.fetchGenerationTask).toHaveBeenCalledWith(task.id)
-    expect(wrapper.find('.doc-agent__conversation-directory').exists()).toBe(false)
     expect(wrapper.find('.doc-agent__task').exists()).toBe(true)
+    expect(wrapper.find('.doc-agent__message-turn--agent .doc-agent__task').exists()).toBe(true)
 
+    wrapper.unmount()
+  })
+
+  it('refreshes only the selected history item from the conversation sidebar', async () => {
+    const anotherTask: GenerationTask = {
+      ...task,
+      id: 'ca019b25-a270-42de-a80e-feb6b0da2102',
+      progress: 30,
+      template_name: '另一份四措两案模板',
+    }
+    const refreshedTask: GenerationTask = {
+      ...anotherTask,
+      progress: 55,
+      updated_at: '2026-08-05T14:00:00+08:00',
+    }
+    mocks.fetchGenerationTemplates.mockResolvedValue([])
+    mocks.fetchDocuments.mockResolvedValue({
+      count: 0,
+      next: null,
+      previous: null,
+      results: [],
+    })
+    mocks.fetchGenerationTasks.mockResolvedValue({
+      count: 2,
+      next: null,
+      previous: null,
+      results: [task, anotherTask],
+    })
+    mocks.fetchGenerationTask.mockResolvedValue(refreshedTask)
+
+    const wrapper = mount(DocumentGenerationPanel, {
+      props: { project },
+      global: {
+        plugins: [createPinia(), ElementPlus],
+      },
+    })
+    await flushPromises()
+
+    const refreshButtons = wrapper.findAll('[data-test="refresh-conversation"]')
+    expect(refreshButtons).toHaveLength(2)
+    await refreshButtons[1]!.trigger('click')
+    await flushPromises()
+
+    expect(mocks.fetchGenerationTask).toHaveBeenCalledTimes(1)
+    expect(mocks.fetchGenerationTask).toHaveBeenCalledWith(anotherTask.id)
+    expect(mocks.fetchGenerationTasks).toHaveBeenCalledTimes(1)
+    expect(mocks.fetchGenerationEvents).not.toHaveBeenCalled()
+
+    wrapper.unmount()
+  })
+
+  it('shows selected and uploaded reference files and enforces the five-file limit', async () => {
+    const initialDocuments = Array.from({ length: 6 }, (_, index) => makeEntryDocument(index + 1))
+    const uploadedDocument = makeEntryDocument(7, 'uploaded-reference.pdf')
+    mocks.fetchGenerationTemplates.mockResolvedValue([])
+    mocks.fetchDocuments.mockResolvedValue({
+      count: initialDocuments.length,
+      next: null,
+      previous: null,
+      results: initialDocuments,
+    })
+    mocks.fetchGenerationTasks.mockResolvedValue({
+      count: 0,
+      next: null,
+      previous: null,
+      results: [],
+    })
+    mocks.uploadConversationAttachment.mockResolvedValue(uploadedDocument)
+
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const wrapper = mount(DocumentGenerationPanel, {
+      props: { project },
+      global: { plugins: [pinia, ElementPlus] },
+    })
+    await flushPromises()
+
+    const draft = useConversationContextStore().forProject(project.id)
+    expect(draft.sourceVersionIds).toHaveLength(5)
+    expect(wrapper.text()).toContain('选择系统内参考资料')
+    expect(wrapper.text()).toContain('entry-1.docx')
+    expect(wrapper.text()).toContain('entry-5.docx')
+    expect(wrapper.text()).not.toContain('entry-6.docx')
+    expect(wrapper.text()).toContain('参考资料 5/5 份')
+
+    const fileInput = wrapper.get<HTMLInputElement>('input[type="file"]')
+    Object.defineProperty(fileInput.element, 'files', {
+      configurable: true,
+      value: [new File(['a'], 'extra-a.pdf'), new File(['b'], 'extra-b.pdf')],
+    })
+    await fileInput.trigger('change')
+    await flushPromises()
+    expect(mocks.uploadConversationAttachment).not.toHaveBeenCalled()
+
+    draft.sourceVersionIds.pop()
+    await wrapper.vm.$nextTick()
+    Object.defineProperty(fileInput.element, 'files', {
+      configurable: true,
+      value: [new File(['content'], 'uploaded-reference.pdf')],
+    })
+    await fileInput.trigger('change')
+    await flushPromises()
+
+    expect(mocks.uploadConversationAttachment).toHaveBeenCalledTimes(1)
+    expect(draft.sourceVersionIds).toHaveLength(5)
+    expect(wrapper.text()).toContain('uploaded-reference.pdf')
+    expect(wrapper.text()).toContain('参考资料 5/5 份')
+
+    wrapper.unmount()
+  })
+
+  it('submits the first chat message with conversation-scoped template and personnel context', async () => {
+    const template = {
+      id: 3,
+      code: 'T001',
+      client_name: '示例甲方',
+      display_name: task.template_name,
+      business_type: 'wind_turbine_inspection_four_measures_two_plans' as const,
+      version: 'v1',
+      document_version_id: 10,
+      filename: 'template.docx',
+      field_mapping: {},
+      section_order: ['overview'],
+      required_fact_fields: ['project_name'],
+    }
+    mocks.fetchGenerationTemplates.mockResolvedValue([template])
+    mocks.fetchDocuments.mockResolvedValue({
+      count: 1,
+      next: null,
+      previous: null,
+      results: [{
+        id: 31,
+        project: project.id,
+        project_name: project.name,
+        folder: 2,
+        folder_name: '入场前置资料',
+        title: '入场任务通知',
+        description: '',
+        access_level: 'internal',
+        source_type: 'entrance_material',
+        current_version: {
+          id: 194,
+          document: 31,
+          version_number: 1,
+          original_filename: 'entry.docx',
+          content_type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          file_size: 128,
+          sha256: '1'.repeat(64),
+          uploaded_by: 1,
+          uploaded_by_name: '张工',
+          created_at: '2026-07-30T10:00:00+08:00',
+        },
+        can_download: true,
+        can_update: true,
+        can_delete: false,
+        can_restore: false,
+        can_create_version: true,
+        lock_version: 1,
+        deleted_at: null,
+        deleted_by: null,
+        deleted_by_name: null,
+        created_by: 1,
+        created_by_name: '张工',
+        created_at: '2026-07-30T10:00:00+08:00',
+        updated_at: '2026-07-30T10:00:00+08:00',
+      }],
+    })
+    mocks.fetchGenerationTasks.mockResolvedValue({
+      count: 0,
+      next: null,
+      previous: null,
+      results: [],
+    })
+    mocks.fetchAvailableAgentPersonnel.mockResolvedValue([{
+      id: '22',
+      user_id: 22,
+      project_member_id: 8,
+      name: '项目成员',
+      job_title: '项目操作人员',
+      department: '',
+      contact: '',
+      certifications: [],
+      certificate_valid_until: null,
+      additional_info: { project_role: 'operator' },
+    }])
+    const createdTask: GenerationTask = {
+      ...task,
+      status: 'extracting',
+      progress: 5,
+      conversation_context: {
+        initial_message: '请重点核对人员分工后开始编制',
+        personnel: [{
+          id: '22',
+          name: '项目成员',
+          job_title: '项目操作人员',
+          department: '',
+          contact: '',
+          certifications: [],
+          certificate_valid_until: null,
+          additional_info: { project_role: 'operator' },
+        }],
+        template: null,
+      },
+    }
+    mocks.startGenerationPipeline.mockResolvedValue(createdTask)
+    mocks.fetchGenerationEvents.mockResolvedValue([])
+
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const wrapper = mount(DocumentGenerationPanel, {
+      props: { project },
+      global: { plugins: [pinia, ElementPlus] },
+    })
+    await flushPromises()
+    const contextStore = useConversationContextStore()
+    const draft = contextStore.forProject(project.id)
+    draft.templateId = template.id
+    draft.personnelIds = [22]
+    draft.message = '请重点核对人员分工后开始编制'
+    await wrapper.vm.$nextTick()
+    await wrapper.get('[data-test="chat-send"]').trigger('click')
+    await flushPromises()
+
+    expect(mocks.startGenerationPipeline).toHaveBeenCalledWith(expect.objectContaining({
+      template_id: template.id,
+      document_version_ids: [194],
+      conversation_context: {
+        initial_message: '请重点核对人员分工后开始编制',
+        selected_personnel_ids: [22],
+      },
+    }))
+    expect(wrapper.text()).toContain('项目成员')
+    expect(wrapper.text()).toContain('本次生成将严格使用当前模板')
     wrapper.unmount()
   })
 
@@ -223,12 +537,16 @@ describe('document generation conversation directory', () => {
 
     expect(wrapper.text()).toContain('与 Agent 修改本章')
     expect(wrapper.text()).toContain('特别参照的RAG信息')
+    expect(wrapper.get('.chat-composer').classes()).toContain('is-collapsed')
+    await wrapper.get('button[aria-label="展开聊天框"]').trigger('click')
+    expect(wrapper.get('.chat-composer').classes()).not.toContain('is-collapsed')
+    expect(wrapper.get('button[aria-label="收起聊天框"]').exists()).toBe(true)
     await wrapper.get('.doc-agent__rag-chips button').trigger('click')
     const composer = wrapper.get(
-      'textarea[placeholder="输入修改方向、需要加入的信息或其他调整指令…"]',
+      'textarea[placeholder="输入对目标章节的修改要求…"]',
     )
     await composer.setValue('补充岗位分工')
-    await wrapper.get('.doc-agent__composer-footer .el-button').trigger('click')
+    await wrapper.get('[data-test="chat-send"]').trigger('click')
     await flushPromises()
 
     expect(mocks.regenerateSection).toHaveBeenCalledWith(

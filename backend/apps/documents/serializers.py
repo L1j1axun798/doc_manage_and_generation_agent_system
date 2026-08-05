@@ -127,6 +127,10 @@ class DocumentBatchDownloadSerializer(serializers.Serializer):
     )
 
 
+class DocumentFolderDownloadSerializer(serializers.Serializer):
+    folder = serializers.IntegerField(min_value=1)
+
+
 class DocumentUploadSerializer(serializers.Serializer):
     folder = serializers.PrimaryKeyRelatedField(queryset=Folder.objects.filter(is_active=True))
     file = serializers.FileField()

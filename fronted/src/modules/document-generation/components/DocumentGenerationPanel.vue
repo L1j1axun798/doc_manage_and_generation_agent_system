@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue'
 
 import { getErrorMessage } from '@/core/http/error-normalizer'
 import { useAuthStore } from '@/modules/auth/stores/auth.store'
@@ -31,7 +31,10 @@ import {
 import {
   BUSINESS_TYPE,
   DOCUMENT_PURPOSE,
+  type AgentPersonnelContext,
+  type AvailableAgentPersonnel,
   type ConfirmedFactPayload,
+  type ConversationSourceAttachment,
   type DocumentGenerationTemplate,
   type FactProposal,
   type GeneratedSection,
@@ -42,7 +45,16 @@ import {
   type GenerationTraceEvent,
   type SourceLocator,
 } from '../document-generation.types'
+import { uploadClientTemplateCandidate, uploadConversationAttachment } from '../services/client-template.service'
+import { fetchAvailableAgentPersonnel } from '../services/personnel.service'
+import { useConversationContextStore } from '../stores/conversation-context.store'
+import AgentStatusIndicator from './AgentStatusIndicator.vue'
+import ChatComposer from './ChatComposer.vue'
+import ContextAttachmentBar from './ContextAttachmentBar.vue'
+import ConversationSidebar from './ConversationSidebar.vue'
 import GenerationWorkflowTrace from './GenerationWorkflowTrace.vue'
+import PersonnelSelector from './PersonnelSelector.vue'
+import TemplateSelector from './TemplateSelector.vue'
 import {
   factFieldDefinition,
   GENERATION_POLL_INTERVAL_MS,
@@ -67,21 +79,32 @@ interface FactDraft {
 }
 
 const props = defineProps<{
-  project: Project
+  project: Project | null
 }>()
 
 const authStore = useAuthStore()
+const conversationContextStore = useConversationContextStore()
 const loading = ref(false)
 const actionLoading = ref(false)
+const uploadLoading = ref(false)
 const openingTaskId = ref<string | null>(null)
 const conversationActionTaskId = ref<string | null>(null)
-const createDialogVisible = ref(false)
+const refreshingTaskId = ref<string | null>(null)
+const templateSelectorVisible = ref(false)
+const personnelSelectorVisible = ref(false)
+const sourceDialogVisible = ref(false)
+const messagesContainer = ref<HTMLElement>()
+const followingLatest = ref(true)
+const composerCollapsed = ref(false)
+const personnelLoading = ref(false)
+const personnelError = ref('')
 const exportDialogVisible = ref(false)
 const exportInfoLoading = ref(false)
 const exportInfo = ref<GenerationExportInfo | null>(null)
 const exportFilename = ref('')
 const templates = ref<DocumentGenerationTemplate[]>([])
 const documents = ref<DocumentItem[]>([])
+const availablePersonnel = ref<AvailableAgentPersonnel[]>([])
 const tasks = ref<GenerationTask[]>([])
 const selectedTask = ref<GenerationTask | null>(null)
 const workflowEvents = ref<GenerationTraceEvent[]>([])
@@ -89,14 +112,9 @@ const factDrafts = ref<FactDraft[]>([])
 const sectionDrafts = reactive<Record<string, string>>({})
 const revisionDrafts = reactive<Record<string, string>>({})
 const selectedRagChunks = reactive<Record<string, string[]>>({})
-const createForm = reactive<{
-  templateId: number | null
-  sourceVersionIds: number[]
-}>({
-  templateId: null,
-  sourceVersionIds: [],
-})
+const selectedRevisionSectionCode = ref('')
 let pollTimer: number | undefined
+let projectLoadSequence = 0
 
 const sectionNames: Record<string, string> = {
   overview: '工程概况与编制依据',
@@ -108,17 +126,18 @@ const sectionNames: Record<string, string> = {
   emergency_plan: '应急预案',
   environmental_measures: '环境保护与文明施工',
 }
-const runningConversationStatuses = new Set<GenerationTaskStatus>([
-  'extracting',
-  'queued',
-  'generating',
-])
 const revisionQuickCommands = [
   '精简重复表述，突出本章关键动作',
   '补充岗位分工、检查要求和记录留存',
   '强化风险预控措施及责任闭环',
   '调整为正式、清晰的技术方案语言',
   '优先吸收已批准RAG中的专业做法',
+]
+const MAX_CONVERSATION_SOURCE_COUNT = 5
+const starterPrompts = [
+  '请分析已选入场资料，提取关键事实并编制四措两案初稿。',
+  '请重点核对入场人员分工、资质要求和安全责任后开始编制。',
+  '请结合当前项目风险和甲方要求，生成便于技术负责人审核的初稿。',
 ]
 const showSectionReview = computed(
   () => Boolean(
@@ -127,6 +146,118 @@ const showSectionReview = computed(
   ),
 )
 const eligibleDocuments = computed(() => documents.value.filter(isEligibleEntrySource))
+const activeProjectId = computed(() => props.project?.id ?? 0)
+const draftContext = computed(() => conversationContextStore.forProject(activeProjectId.value))
+const draftTemplate = computed(
+  () => templates.value.find((template) => template.id === draftContext.value.templateId) || null,
+)
+const draftPersonnel = computed<AgentPersonnelContext[]>(() =>
+  draftContext.value.personnelIds
+    .map((id) => availablePersonnel.value.find((person) => person.user_id === id))
+    .filter((person): person is AvailableAgentPersonnel => Boolean(person)),
+)
+const activePersonnel = computed<AgentPersonnelContext[]>(() =>
+  selectedTask.value?.conversation_context?.personnel || draftPersonnel.value,
+)
+const activeTemplate = computed(() => selectedTask.value ? selectedTemplate.value : draftTemplate.value)
+const activeTemplateName = computed(() => selectedTask.value?.template_name || activeTemplate.value?.display_name || '')
+const activeSources = computed<ConversationSourceAttachment[]>(() => {
+  if (selectedTask.value) {
+    return selectedTask.value.sources.map((source) => ({
+      document_version_id: source.document_version_id,
+      title: source.document_title,
+      filename: source.filename,
+    }))
+  }
+  const candidateVersionIds = new Set(
+    draftContext.value.pendingTemplateCandidates.map((candidate) => candidate.document_version_id),
+  )
+  return draftContext.value.sourceVersionIds
+    .filter((versionId) => !candidateVersionIds.has(versionId))
+    .map((versionId) => {
+      const document = documents.value.find((item) => item.current_version?.id === versionId)
+      return {
+        document_version_id: versionId,
+        title: document?.title || `资料 ${versionId}`,
+        filename: document?.current_version?.original_filename || document?.title || `资料 ${versionId}`,
+      }
+    })
+})
+const activeSourceCount = computed(
+  () => selectedTask.value?.sources.length ?? draftContext.value.sourceVersionIds.length,
+)
+const composerMessage = computed({
+  get: () => {
+    if (selectedTask.value?.status === 'review_required' && selectedRevisionSectionCode.value) {
+      return revisionDrafts[selectedRevisionSectionCode.value] || ''
+    }
+    return selectedTask.value ? '' : draftContext.value.message
+  },
+  set: (value: string) => {
+    if (selectedTask.value?.status === 'review_required' && selectedRevisionSectionCode.value) {
+      revisionDrafts[selectedRevisionSectionCode.value] = value
+      return
+    }
+    if (!selectedTask.value) draftContext.value.message = value
+  },
+})
+const revisionTargetOptions = computed(() =>
+  (selectedTask.value?.sections || [])
+    .filter((section) => !section.is_locked)
+    .map((section) => ({ value: section.section_code, label: section.title })),
+)
+const composerDisabled = computed(() => Boolean(
+  !props.project || (selectedTask.value && selectedTask.value.status !== 'review_required'),
+))
+const composerCanSend = computed(() => {
+  if (!props.project || actionLoading.value || !composerMessage.value.trim()) return false
+  if (selectedTask.value) {
+    const target = selectedTask.value.sections.find(
+      (section) => section.section_code === selectedRevisionSectionCode.value,
+    )
+    return selectedTask.value.status === 'review_required'
+      && Boolean(target)
+      && !target!.is_locked
+      && !isSectionRegenerating(target!)
+  }
+  return Boolean(
+    isProjectActive.value
+    && draftContext.value.templateId
+    && draftContext.value.sourceVersionIds.length,
+  )
+})
+const composerHelperText = computed(() => {
+  if (!props.project) return '请先选择项目，选择后将在当前界面加载对应会话和资料'
+  if (!selectedTask.value) return 'Enter 发送并开始分析 · Shift + Enter 换行'
+  if (selectedTask.value.status === 'review_required') return '选择目标章节后发送修改要求'
+  return '当前阶段请完成上方操作，Agent 状态变化后输入区会自动恢复'
+})
+const sourceSelectionModel = computed({
+  get: () => selectedTask.value
+    ? selectedTask.value.sources.map((source) => source.document_version_id)
+    : draftContext.value.sourceVersionIds,
+  set: (value: number[]) => {
+    if (selectedTask.value) return
+    const uniqueValues = [...new Set(value)]
+    if (uniqueValues.length > MAX_CONVERSATION_SOURCE_COUNT) {
+      ElMessage.warning(`当前会话最多选择 ${MAX_CONVERSATION_SOURCE_COUNT} 份参考资料`)
+    }
+    draftContext.value.sourceVersionIds = uniqueValues.slice(0, MAX_CONVERSATION_SOURCE_COUNT)
+  },
+})
+const latestStateSignature = computed(() => {
+  const task = selectedTask.value
+  if (!task) return ''
+  return [
+    task.id,
+    task.status,
+    task.progress,
+    task.updated_at,
+    workflowEvents.value.length,
+    task.sections.length,
+    task.reviews.length,
+  ].join(':')
+})
 const criticalFactDrafts = computed(() => factDrafts.value.filter((fact) => fact.isRequired))
 const supplementalFactDrafts = computed(() => factDrafts.value.filter((fact) => !fact.isRequired))
 const invalidEvidenceFields = computed(
@@ -156,7 +287,7 @@ const recoveryGuidance = computed(() => {
   }
   return ''
 })
-const isProjectActive = computed(() => props.project.status === 'active')
+const isProjectActive = computed(() => props.project?.status === 'active')
 const canApprove = computed(
   () =>
     authStore.user?.role === 'system_admin'
@@ -207,36 +338,105 @@ const statusLabels: Record<GenerationTaskStatus, string> = {
   cancelled: '已停止',
 }
 
-onMounted(loadInitialData)
 onBeforeUnmount(stopPolling)
+watch(
+  () => props.project?.id ?? null,
+  () => {
+    void loadInitialData()
+  },
+  { immediate: true },
+)
+watch(
+  () => [selectedTask.value?.id || null, selectedTask.value?.status || null] as const,
+  ([taskId, status], [previousTaskId, previousStatus]) => {
+    if (!taskId) {
+      composerCollapsed.value = false
+      return
+    }
+    if (taskId !== previousTaskId) {
+      composerCollapsed.value = status === 'review_required'
+      return
+    }
+    if (status === 'review_required' && previousStatus !== 'review_required') {
+      composerCollapsed.value = true
+    }
+  },
+)
+watch(
+  () => selectedTask.value?.id,
+  () => {
+    followingLatest.value = true
+    scrollMessagesToLatest(true)
+  },
+  { flush: 'post' },
+)
+watch(latestStateSignature, () => scrollMessagesToLatest(), { flush: 'post' })
+
+function handleMessagesScroll(): void {
+  const container = messagesContainer.value
+  if (!container) return
+  const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight
+  followingLatest.value = distanceFromBottom <= 80
+}
+
+function scrollMessagesToLatest(force = false): void {
+  if (!force && !followingLatest.value) return
+  void nextTick(() => {
+    const container = messagesContainer.value
+    if (!container) return
+    if (typeof container.scrollTo === 'function') {
+      container.scrollTo({ top: container.scrollHeight, behavior: force ? 'auto' : 'smooth' })
+    } else {
+      container.scrollTop = container.scrollHeight
+    }
+    followingLatest.value = true
+  })
+}
 
 async function loadInitialData(): Promise<void> {
+  const loadSequence = ++projectLoadSequence
+  const projectId = props.project?.id ?? null
   stopPolling()
   selectedTask.value = null
   workflowEvents.value = []
   factDrafts.value = []
+  documents.value = []
+  tasks.value = []
+  availablePersonnel.value = []
+  composerCollapsed.value = false
   loading.value = true
   try {
     const [templateRows, documentRows, taskRows] = await Promise.all([
       fetchGenerationTemplates(),
-      fetchAllProjectDocuments(),
-      fetchAllGenerationTasks(),
+      projectId ? fetchAllProjectDocuments(projectId) : Promise.resolve([]),
+      projectId ? fetchAllGenerationTasks(projectId) : Promise.resolve([]),
     ])
+    if (loadSequence !== projectLoadSequence) return
     templates.value = templateRows
     documents.value = documentRows
     tasks.value = taskRows
+    if (projectId && !draftContext.value.sourceVersionIds.length) {
+      draftContext.value.sourceVersionIds = eligibleDocuments.value
+        .map((document) => document.current_version?.id)
+        .filter((id): id is number => typeof id === 'number')
+        .slice(0, MAX_CONVERSATION_SOURCE_COUNT)
+    } else if (draftContext.value.sourceVersionIds.length > MAX_CONVERSATION_SOURCE_COUNT) {
+      draftContext.value.sourceVersionIds = draftContext.value.sourceVersionIds
+        .slice(0, MAX_CONVERSATION_SOURCE_COUNT)
+    }
+    if (projectId) await loadAvailablePersonnel(projectId)
   } catch (error) {
     ElMessage.error(getErrorMessage(error))
   } finally {
-    loading.value = false
+    if (loadSequence === projectLoadSequence) loading.value = false
   }
 }
 
-async function fetchAllGenerationTasks(): Promise<GenerationTask[]> {
+async function fetchAllGenerationTasks(projectId: number): Promise<GenerationTask[]> {
   const rows: GenerationTask[] = []
   let page = 1
   while (page <= 50) {
-    const response = await fetchGenerationTasks(props.project.id, page)
+    const response = await fetchGenerationTasks(projectId, page)
     rows.push(...response.results)
     if (!response.next || rows.length >= response.count) {
       break
@@ -246,12 +446,12 @@ async function fetchAllGenerationTasks(): Promise<GenerationTask[]> {
   return rows
 }
 
-async function fetchAllProjectDocuments(): Promise<DocumentItem[]> {
+async function fetchAllProjectDocuments(projectId: number): Promise<DocumentItem[]> {
   const rows: DocumentItem[] = []
   let page = 1
   while (page <= 50) {
     const response = await fetchDocuments({
-      project: props.project.id,
+      project: projectId,
       source_type: 'entrance_material',
       page,
       ordering: 'title',
@@ -266,7 +466,27 @@ async function fetchAllProjectDocuments(): Promise<DocumentItem[]> {
 }
 
 async function refreshTasks(): Promise<void> {
-  tasks.value = await fetchAllGenerationTasks()
+  const projectId = props.project?.id
+  tasks.value = projectId ? await fetchAllGenerationTasks(projectId) : []
+}
+
+async function loadAvailablePersonnel(projectId = props.project?.id): Promise<void> {
+  if (!projectId) {
+    availablePersonnel.value = []
+    personnelError.value = ''
+    return
+  }
+  personnelLoading.value = true
+  personnelError.value = ''
+  try {
+    const personnel = await fetchAvailableAgentPersonnel(projectId)
+    if (props.project?.id === projectId) availablePersonnel.value = personnel
+  } catch (error) {
+    availablePersonnel.value = []
+    personnelError.value = getErrorMessage(error)
+  } finally {
+    personnelLoading.value = false
+  }
 }
 
 async function openConversation(task: GenerationTask): Promise<void> {
@@ -275,6 +495,7 @@ async function openConversation(task: GenerationTask): Promise<void> {
     selectedTask.value = await fetchGenerationTask(task.id)
     workflowEvents.value = await fetchGenerationEvents(task.id)
     hydrateTaskDrafts()
+    selectDefaultRevisionTarget()
     configurePolling()
   } catch (error) {
     selectedTask.value = null
@@ -285,26 +506,57 @@ async function openConversation(task: GenerationTask): Promise<void> {
   }
 }
 
-function returnToConversationList(): void {
+function startNewConversation(): void {
+  if (!props.project) {
+    ElMessage.warning('请先选择项目')
+    return
+  }
   stopPolling()
   selectedTask.value = null
   workflowEvents.value = []
   factDrafts.value = []
-  void refreshTasks().catch((error) => {
-    ElMessage.error(getErrorMessage(error))
-  })
+  selectedRevisionSectionCode.value = ''
+  composerCollapsed.value = false
+  const draft = conversationContextStore.reset(props.project.id)
+  draft.sourceVersionIds = eligibleDocuments.value
+    .map((document) => document.current_version?.id)
+    .filter((id): id is number => typeof id === 'number')
+    .slice(0, MAX_CONVERSATION_SOURCE_COUNT)
 }
 
 function conversationTitle(task: GenerationTask): string {
   return `四措两案编制 · ${formatDateTime(task.created_at)}`
 }
 
-function isConversationRunning(task: GenerationTask): boolean {
-  return runningConversationStatuses.has(task.status)
+function agentStatusMessage(task: GenerationTask): string {
+  if (task.status === 'needs_confirmation') return '资料分析已完成，请核对下方关键事实后继续。'
+  if (task.status === 'review_required') return '初稿已生成，请逐章复核；需要修改时在底部选择章节并发送要求。'
+  if (task.status === 'pending_approval') return '人工复核已完成，正在等待技术负责人批准。'
+  if (task.status === 'approved') return '文档已批准，可以导出到当前项目“技术方案”目录。'
+  if (task.status === 'exported') return '正式 Word 已归档，可直接下载。'
+  if (task.status === 'failed') return '本次处理未完成，请查看错误和恢复建议后重试。'
+  if (task.status === 'cancelled') return '本会话已停止，已产生的中间内容仍保留。'
+  return 'Agent 正在分析资料并执行当前编制步骤，完成后会自动更新。'
 }
 
-async function refreshCurrentConversation(): Promise<void> {
-  await runAction(refreshSelectedTask)
+function useStarterPrompt(prompt: string): void {
+  draftContext.value.message = prompt
+}
+
+async function refreshConversation(task: GenerationTask): Promise<void> {
+  refreshingTaskId.value = task.id
+  try {
+    if (selectedTask.value?.id === task.id) {
+      await refreshSelectedTask()
+    } else {
+      const refreshedTask = await fetchGenerationTask(task.id)
+      tasks.value = tasks.value.map((item) => item.id === task.id ? refreshedTask : item)
+    }
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error))
+  } finally {
+    refreshingTaskId.value = null
+  }
 }
 
 async function refreshSelectedTask(): Promise<void> {
@@ -320,15 +572,23 @@ async function refreshSelectedTask(): Promise<void> {
     ),
   ])
   selectedTask.value = task
+  tasks.value = tasks.value.map((item) => item.id === task.id ? task : item)
   workflowEvents.value.push(...newEvents)
   if (
     selectedTask.value.status !== previousStatus
     || selectedTask.value.status === 'review_required'
   ) {
     hydrateTaskDrafts()
-    await refreshTasks()
+    selectDefaultRevisionTarget()
   }
   configurePolling()
+}
+
+function selectDefaultRevisionTarget(): void {
+  const options = revisionTargetOptions.value
+  if (!options.some((option) => option.value === selectedRevisionSectionCode.value)) {
+    selectedRevisionSectionCode.value = options[0]?.value || ''
+  }
 }
 
 function hydrateTaskDrafts(): void {
@@ -443,39 +703,176 @@ function stopPolling(): void {
   }
 }
 
-function openCreateDialog(): void {
-  createForm.templateId = templates.value[0]?.id ?? null
-  createForm.sourceVersionIds = eligibleDocuments.value
-    .map((document) => document.current_version?.id)
-    .filter((id): id is number => typeof id === 'number')
-  createDialogVisible.value = true
+function openTemplateSelector(): void {
+  if (!selectedTask.value && requireSelectedProject()) templateSelectorVisible.value = true
+}
+
+function openPersonnelSelector(): void {
+  if (!selectedTask.value && requireSelectedProject()) personnelSelectorVisible.value = true
+}
+
+function openSourceDialog(): void {
+  if (!selectedTask.value && !requireSelectedProject()) return
+  sourceDialogVisible.value = true
+}
+
+function requireSelectedProject(): Project | null {
+  if (!props.project) {
+    ElMessage.warning('请先选择项目')
+    return null
+  }
+  return props.project
+}
+
+function selectDraftTemplate(templateId: number | null): void {
+  draftContext.value.templateId = templateId
+}
+
+function selectDraftPersonnel(personnelIds: number[]): void {
+  draftContext.value.personnelIds = personnelIds
+}
+
+function removeDraftPersonnel(personnelId: string): void {
+  const numericId = Number(personnelId)
+  draftContext.value.personnelIds = draftContext.value.personnelIds.filter(
+    (id) => id !== numericId,
+  )
+}
+
+function removeDraftSource(versionId: number): void {
+  draftContext.value.sourceVersionIds = draftContext.value.sourceVersionIds
+    .filter((sourceVersionId) => sourceVersionId !== versionId)
+}
+
+function removeTemplateCandidate(versionId: number): void {
+  draftContext.value.pendingTemplateCandidates = draftContext.value.pendingTemplateCandidates
+    .filter((candidate) => candidate.document_version_id !== versionId)
+  draftContext.value.sourceVersionIds = draftContext.value.sourceVersionIds
+    .filter((sourceVersionId) => sourceVersionId !== versionId)
+}
+
+async function handleTemplateUpload(file: File): Promise<void> {
+  const project = requireSelectedProject()
+  if (!project) return
+  if (draftContext.value.sourceVersionIds.length >= MAX_CONVERSATION_SOURCE_COUNT) {
+    ElMessage.warning(`当前会话最多添加 ${MAX_CONVERSATION_SOURCE_COUNT} 份资料`)
+    return
+  }
+  uploadLoading.value = true
+  try {
+    const candidate = await uploadClientTemplateCandidate(project.id, file)
+    draftContext.value.pendingTemplateCandidates = [
+      ...draftContext.value.pendingTemplateCandidates.filter(
+        (item) => item.document_version_id !== candidate.document_version_id,
+      ),
+      candidate,
+    ]
+    if (!draftContext.value.sourceVersionIds.includes(candidate.document_version_id)) {
+      draftContext.value.sourceVersionIds.push(candidate.document_version_id)
+    }
+    documents.value = await fetchAllProjectDocuments(project.id)
+    ElMessage.success('甲方模板已同步到“入场前置资料”，完成管理员登记后可作为正式模板使用')
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error))
+  } finally {
+    uploadLoading.value = false
+  }
+}
+
+async function handleAttachmentUpload(files: File[]): Promise<void> {
+  const project = requireSelectedProject()
+  if (!project) return
+  const remainingCount = MAX_CONVERSATION_SOURCE_COUNT - draftContext.value.sourceVersionIds.length
+  if (remainingCount <= 0) {
+    ElMessage.warning(`当前会话最多添加 ${MAX_CONVERSATION_SOURCE_COUNT} 份资料`)
+    return
+  }
+  if (files.length > remainingCount) {
+    ElMessage.warning(`当前会话还可上传 ${remainingCount} 份资料，请重新选择`)
+    return
+  }
+  uploadLoading.value = true
+  let uploadedCount = 0
+  const uploadErrors: string[] = []
+  try {
+    for (const file of files) {
+      try {
+        const document = await uploadConversationAttachment(project.id, file)
+        documents.value = [document, ...documents.value.filter((item) => item.id !== document.id)]
+        const versionId = document.current_version?.id
+        if (versionId && !draftContext.value.sourceVersionIds.includes(versionId)) {
+          draftContext.value.sourceVersionIds.push(versionId)
+          uploadedCount += 1
+        }
+      } catch (error) {
+        uploadErrors.push(`${file.name}：${getErrorMessage(error)}`)
+      }
+    }
+    if (uploadedCount) {
+      ElMessage.success(`已上传并加入当前会话 ${uploadedCount} 份资料`)
+    }
+    if (uploadErrors.length) {
+      ElMessage.error(`有 ${uploadErrors.length} 份资料上传失败：${uploadErrors[0]}`)
+    }
+  } finally {
+    uploadLoading.value = false
+  }
+}
+
+async function sendComposerMessage(): Promise<void> {
+  if (selectedTask.value) {
+    const section = selectedTask.value.sections.find(
+      (item) => item.section_code === selectedRevisionSectionCode.value,
+    )
+    if (!section) {
+      ElMessage.warning('请选择需要修改的章节')
+      return
+    }
+    await regenerate(section)
+    return
+  }
+  await createAndExtract()
 }
 
 async function createAndExtract(): Promise<void> {
-  if (!createForm.templateId || createForm.sourceVersionIds.length === 0) {
+  const project = requireSelectedProject()
+  if (!project) return
+  if (!draftContext.value.templateId || draftContext.value.sourceVersionIds.length === 0) {
     ElMessage.warning('请选择模板和至少一份当前项目的入场前置资料')
+    return
+  }
+  if (draftContext.value.sourceVersionIds.length > MAX_CONVERSATION_SOURCE_COUNT) {
+    ElMessage.warning(`当前会话最多添加 ${MAX_CONVERSATION_SOURCE_COUNT} 份资料`)
+    return
+  }
+  const initialMessage = draftContext.value.message.trim()
+  if (!initialMessage) {
+    ElMessage.warning('请输入本次四措两案的编制要求')
     return
   }
   actionLoading.value = true
   try {
     const task = await startGenerationPipeline({
-      project_id: props.project.id,
-      template_id: createForm.templateId,
-      document_version_ids: createForm.sourceVersionIds,
+      project_id: project.id,
+      template_id: draftContext.value.templateId,
+      document_version_ids: [...draftContext.value.sourceVersionIds],
       document_purpose: DOCUMENT_PURPOSE,
       business_type: BUSINESS_TYPE,
       idempotency_key: window.crypto.randomUUID(),
+      conversation_context: {
+        initial_message: initialMessage,
+        selected_personnel_ids: [...draftContext.value.personnelIds],
+      },
       facts: [
-        { field: 'project_name', value: props.project.name, value_type: 'string' },
-        { field: 'project_code', value: props.project.code, value_type: 'string' },
+        { field: 'project_name', value: project.name, value_type: 'string' },
+        { field: 'project_code', value: project.code, value_type: 'string' },
       ],
     })
-    createDialogVisible.value = false
     selectedTask.value = task
     workflowEvents.value = await fetchGenerationEvents(task.id)
     await refreshTasks()
     configurePolling()
-    ElMessage.success('已提交事实提取，页面会自动刷新进度')
+    ElMessage.success('消息已发送，Agent 正在分析当前会话资料')
   } catch (error) {
     ElMessage.error(getErrorMessage(error))
   } finally {
@@ -611,17 +1008,6 @@ function parseFactValue(value: string, valueType: string): unknown {
 
 function serializeFactValue(value: unknown): string {
   return typeof value === 'string' ? value : JSON.stringify(value, null, 2)
-}
-
-function templateHint(template: DocumentGenerationTemplate): string {
-  const name = `${template.display_name} ${template.filename}`
-  if (name.includes('扫塔') || name.includes('塔筒')) {
-    return '适用于扫塔、塔筒焊缝或塔筒部件探伤的Word版式'
-  }
-  if (name.includes('主机')) {
-    return '适用于主机设备出质保检测的Word版式'
-  }
-  return '适用于风电机组质保期满综合检测的Word版式'
 }
 
 async function startGeneration(): Promise<void> {
@@ -777,6 +1163,7 @@ function revisionStatus(review: GenerationReview): string {
 }
 
 function appendRevisionCommand(sectionCode: string, command: string): void {
+  selectedRevisionSectionCode.value = sectionCode
   const current = (revisionDrafts[sectionCode] || '').trim()
   revisionDrafts[sectionCode] = current ? `${current}\n${command}` : command
 }
@@ -821,14 +1208,6 @@ function isSectionRegenerating(section: GeneratedSection): boolean {
     && ['queued', 'generating'].includes(task.status)
     && task.pending_section_codes.includes(section.section_code),
   )
-}
-
-function handleRevisionKeydown(event: KeyboardEvent, section: GeneratedSection): void {
-  if (event.key !== 'Enter' || event.shiftKey || event.isComposing) {
-    return
-  }
-  event.preventDefault()
-  void regenerate(section)
 }
 
 async function submitReview(): Promise<void> {
@@ -927,132 +1306,80 @@ async function runAction(action: () => Promise<void>): Promise<void> {
 
 <template>
   <section class="doc-agent" v-loading="loading">
-    <el-alert
-      class="doc-agent__notice"
-      title="本功能只生成入场资料（四措两案）初稿，不生成检测报告、实测结论或完工报告。"
-      type="warning"
-      :closable="false"
-      show-icon
-    />
+    <div class="doc-agent__workbench">
+      <ConversationSidebar
+        :tasks="tasks"
+        :active-task-id="selectedTask?.id || null"
+        :opening-task-id="openingTaskId"
+        :action-task-id="conversationActionTaskId"
+        :refreshing-task-id="refreshingTaskId"
+        :loading="loading"
+        :project-selected="Boolean(project)"
+        :status-labels="statusLabels"
+        @new="startNewConversation"
+        @open="openConversation"
+        @refresh="refreshConversation"
+        @stop="stopConversation"
+        @delete="deleteConversation"
+      />
 
-    <div class="doc-agent__toolbar">
-      <div>
-        <h2 v-if="selectedTask">{{ conversationTitle(selectedTask) }}</h2>
-        <h2 v-else>{{ project.name }}的编制会话</h2>
-        <p v-if="selectedTask">查看本次会话的编制进度，并继续完成事实确认、审核或导出。</p>
-        <p v-else>历史编制按会话列出；Agent只读取当前项目且你有权查看的入场前置资料。</p>
-      </div>
-      <div class="doc-agent__toolbar-actions">
-        <el-button v-if="selectedTask" @click="returnToConversationList">返回会话列表</el-button>
-        <el-button
-          v-if="selectedTask"
-          :loading="actionLoading"
-          @click="refreshCurrentConversation"
-        >
-          刷新当前会话
-        </el-button>
-        <el-button
-          v-if="selectedTask && isConversationRunning(selectedTask)"
-          type="warning"
-          :loading="conversationActionTaskId === selectedTask.id"
-          @click="stopConversation(selectedTask)"
-        >
-          停止会话
-        </el-button>
-        <el-button
-          v-if="selectedTask && !isConversationRunning(selectedTask)"
-          type="danger"
-          plain
-          :loading="conversationActionTaskId === selectedTask.id"
-          @click="deleteConversation(selectedTask)"
-        >
-          删除会话
-        </el-button>
-        <el-button v-if="!selectedTask" :loading="loading" @click="loadInitialData">
-          刷新列表
-        </el-button>
-        <el-button
-          v-if="!selectedTask"
-          type="primary"
-          :disabled="!isProjectActive || templates.length === 0"
-          @click="openCreateDialog"
-        >
-          新建会话
-        </el-button>
-      </div>
-    </div>
-
-    <section v-if="!selectedTask" class="doc-agent__conversation-directory">
-      <div class="doc-agent__directory-heading">
-        <div>
-          <h3>历史会话</h3>
-          <span>{{ tasks.length }} 项</span>
-        </div>
-        <p>此处只展示会话名称和状态，不预览会话详情。</p>
-      </div>
-      <el-empty v-if="!tasks.length && !loading" description="暂无四措两案编制会话" />
-      <div v-else class="doc-agent__conversation-list" aria-label="历史编制会话">
-        <div
-          v-for="task in tasks"
-          :key="task.id"
-          class="doc-agent__conversation-row"
-        >
-          <button
-            class="doc-agent__conversation-item"
-            type="button"
-            :disabled="openingTaskId !== null || conversationActionTaskId !== null"
-            @click="openConversation(task)"
-          >
-            <span class="doc-agent__conversation-copy">
-              <strong>{{ conversationTitle(task) }}</strong>
-              <small>{{ task.template_name || '默认四措两案模板' }}</small>
-            </span>
-            <span class="doc-agent__conversation-state">
-              <el-tag
-                size="small"
-                :type="
-                  task.status === 'failed'
-                    ? 'danger'
-                    : task.status === 'exported'
-                      ? 'success'
-                      : task.status === 'cancelled'
-                        ? 'warning'
-                        : 'info'
-                "
-              >
-                {{ statusLabels[task.status] }}
-              </el-tag>
-              <small v-if="openingTaskId === task.id">正在打开…</small>
-              <small v-else>{{ task.created_by_name || '当前用户' }}</small>
-            </span>
-          </button>
-          <div class="doc-agent__conversation-actions">
-            <el-button
-              v-if="isConversationRunning(task)"
-              data-test="stop-conversation"
-              type="warning"
-              link
-              :loading="conversationActionTaskId === task.id"
-              @click="stopConversation(task)"
-            >
-              停止
-            </el-button>
-            <el-button
-              v-else
-              data-test="delete-conversation"
-              type="danger"
-              link
-              :loading="conversationActionTaskId === task.id"
-              @click="deleteConversation(task)"
-            >
-              删除
-            </el-button>
+      <main class="doc-agent__conversation">
+        <header class="doc-agent__conversation-header">
+          <div class="doc-agent__project-context"><slot name="project-context" /></div>
+          <div class="doc-agent__toolbar-actions">
+            <slot name="page-actions" />
           </div>
-        </div>
-      </div>
-    </section>
+        </header>
 
-    <el-card v-if="selectedTask" class="doc-agent__task" shadow="never">
+        <div
+          ref="messagesContainer"
+          class="doc-agent__messages"
+          aria-live="polite"
+          @scroll.passive="handleMessagesScroll"
+        >
+          <section v-if="!selectedTask" class="doc-agent__welcome">
+            <span class="doc-agent__welcome-mark">AI</span>
+            <h2>{{ project ? '开始编制本项目的四措两案' : '请先选择项目' }}</h2>
+            <p v-if="project">选择已批准的甲方模板、入场人员和来源资料，然后发送编制要求。系统会在同一会话内完成事实核对、生成、修改、批准和导出。</p>
+            <p v-else>请在上方项目选择框中选择一个在执行项目。选择后，会话记录、模板、人员和资料将在当前界面直接加载。</p>
+            <div v-if="project" class="doc-agent__starter-prompts">
+              <button v-for="prompt in starterPrompts" :key="prompt" type="button" @click="useStarterPrompt(prompt)">
+                {{ prompt }}
+              </button>
+            </div>
+            <el-alert
+              :title="
+                project
+                  ? '本功能仅编制入场前四措两案，不生成检测报告、实测结论或完工资料。'
+                  : '未选择项目，发送消息及模板、人员、资料等项目相关操作已禁用。'
+              "
+              type="warning"
+              :closable="false"
+              show-icon
+            />
+          </section>
+
+          <template v-else>
+            <div class="doc-agent__message-turn doc-agent__message-turn--user">
+              <div class="doc-agent__avatar">我</div>
+              <div>
+                <p>{{ selectedTask.conversation_context?.initial_message || '请基于所选资料开始四措两案编制。' }}</p>
+                <small>{{ selectedTask.created_by_name }} · {{ formatDateTime(selectedTask.created_at) }}</small>
+              </div>
+            </div>
+            <div class="doc-agent__message-turn doc-agent__message-turn--agent">
+              <div class="doc-agent__avatar">AI</div>
+              <div class="doc-agent__ai-response">
+                <div class="doc-agent__ai-summary">
+                  <AgentStatusIndicator
+                    :status="selectedTask.status"
+                    :progress="selectedTask.progress"
+                    :label="statusLabels[selectedTask.status]"
+                  />
+                  <p>{{ agentStatusMessage(selectedTask) }}</p>
+                </div>
+
+    <el-card class="doc-agent__task" shadow="never">
       <template #header>
         <div class="doc-agent__task-header">
           <strong>{{ conversationTitle(selectedTask) }}</strong>
@@ -1424,38 +1751,14 @@ async function runAction(action: () => Promise<void>): Promise<void> {
                   </div>
                 </div>
 
-                <div class="doc-agent__chat-composer">
-                  <p class="doc-agent__revision-scope">
-                    明确新增的人员、编号等信息将视为审核人本轮确认内容，仅用于当前任务章节，不写入RAG。
-                  </p>
-                  <el-input
-                    v-model="revisionDrafts[section.section_code]"
-                    type="textarea"
-                    :autosize="{ minRows: 3, maxRows: 7 }"
-                    maxlength="4000"
-                    show-word-limit
-                    resize="none"
-                    placeholder="输入修改方向、需要加入的信息或其他调整指令…"
-                    :disabled="section.is_locked || isSectionRegenerating(section)"
-                    @keydown="handleRevisionKeydown($event, section)"
-                  />
-                  <div class="doc-agent__composer-footer">
-                    <span>Enter 发送 · Shift + Enter 换行</span>
-                    <el-button
-                      type="primary"
-                      :disabled="
-                        section.is_locked
-                        || isSectionRegenerating(section)
-                        || selectedTask.status !== 'review_required'
-                        || !(revisionDrafts[section.section_code] || '').trim()
-                      "
-                      :loading="actionLoading && isSectionRegenerating(section)"
-                      @click="regenerate(section)"
-                    >
-                      发送并重新生成
-                    </el-button>
-                  </div>
-                </div>
+                <button
+                  class="doc-agent__use-bottom-composer"
+                  type="button"
+                  :disabled="section.is_locked || isSectionRegenerating(section)"
+                  @click="selectedRevisionSectionCode = section.section_code"
+                >
+                  在底部输入框中修改“{{ section.title }}”
+                </button>
               </aside>
             </div>
           </el-collapse-item>
@@ -1515,6 +1818,90 @@ async function runAction(action: () => Promise<void>): Promise<void> {
         </el-button>
       </div>
     </el-card>
+              </div>
+            </div>
+          </template>
+        </div>
+
+        <footer class="doc-agent__composer-shell">
+          <div v-if="selectedTask && !followingLatest" class="doc-agent__latest-action">
+            <el-button
+              class="doc-agent__latest-button"
+              type="primary"
+              plain
+              round
+              @click="scrollMessagesToLatest(true)"
+            >
+              ↓ 回到最新状态
+            </el-button>
+          </div>
+          <ChatComposer
+            v-model="composerMessage"
+            v-model:collapsed="composerCollapsed"
+            :loading="actionLoading"
+            :upload-loading="uploadLoading"
+            :disabled="composerDisabled"
+            :can-send="composerCanSend"
+            :template-missing="Boolean(project) && !selectedTask && !draftTemplate"
+            :helper-text="composerHelperText"
+            :editable-context="Boolean(project) && !selectedTask"
+            :source-count="draftContext.sourceVersionIds.length"
+            :max-source-count="MAX_CONVERSATION_SOURCE_COUNT"
+            :placeholder="
+              !project
+                ? '请先选择项目'
+                : selectedTask?.status === 'review_required'
+                ? '输入对目标章节的修改要求…'
+                : selectedTask
+                  ? '当前阶段暂不接收新消息'
+                  : '描述本次编制重点、甲方要求或需要特别关注的事项…'
+            "
+            @send="sendComposerMessage"
+            @template="openTemplateSelector"
+            @personnel="openPersonnelSelector"
+            @sources="openSourceDialog"
+            @upload="handleAttachmentUpload"
+          >
+            <template #attachments>
+              <ContextAttachmentBar
+                :template="activeTemplate"
+                :template-name="activeTemplateName"
+                :personnel="activePersonnel"
+                :sources="activeSources"
+                :source-count="activeSourceCount"
+                :max-source-count="MAX_CONVERSATION_SOURCE_COUNT"
+                :candidates="selectedTask ? [] : draftContext.pendingTemplateCandidates"
+                :editable="!selectedTask"
+                @template="openTemplateSelector"
+                @personnel="openPersonnelSelector"
+                @sources="openSourceDialog"
+                @remove-template="draftContext.templateId = null"
+                @remove-personnel="removeDraftPersonnel"
+                @remove-source="removeDraftSource"
+                @remove-candidate="removeTemplateCandidate"
+              />
+            </template>
+            <template v-if="selectedTask?.status === 'review_required'" #context-extra>
+              <div class="doc-agent__revision-target">
+                <span>本条消息将修改</span>
+                <el-select
+                  v-model="selectedRevisionSectionCode"
+                  placeholder="选择目标章节"
+                  style="width: min(360px, 100%)"
+                >
+                  <el-option
+                    v-for="option in revisionTargetOptions"
+                    :key="option.value"
+                    :label="option.label"
+                    :value="option.value"
+                  />
+                </el-select>
+              </div>
+            </template>
+          </ChatComposer>
+        </footer>
+      </main>
+    </div>
 
     <el-dialog
       v-model="exportDialogVisible"
@@ -1571,73 +1958,64 @@ async function runAction(action: () => Promise<void>): Promise<void> {
       </template>
     </el-dialog>
 
-    <el-dialog v-model="createDialogVisible" title="开始编制四措两案" width="720px">
-      <el-form label-position="top">
-        <el-form-item label="当前项目的入场前置资料">
-          <el-select
-            v-model="createForm.sourceVersionIds"
-            multiple
-            filterable
-            style="width: 100%"
-            placeholder="选择合同、任务通知、技术要求等入场前置资料"
-            :disabled="eligibleDocuments.length === 0"
-          >
-            <el-option
-              v-for="document in eligibleDocuments"
-              :key="document.current_version!.id"
-              :label="`${document.folder_name} / ${document.title}`"
-              :value="document.current_version!.id"
-            />
-          </el-select>
-          <div v-if="eligibleDocuments.length" class="doc-agent__field-help">
-            已自动全选 {{ eligibleDocuments.length }} 份合格资料；无需逐份添加，可取消明显无关的文件。
-          </div>
-          <el-alert
-            v-if="eligibleDocuments.length === 0"
-            title="该项目暂无入场前置资料，请先到“资料中心 → 入场前置资料”上传。"
-            type="warning"
-            :closable="false"
-            show-icon
-          />
-        </el-form-item>
-        <el-collapse class="doc-agent__advanced">
-          <el-collapse-item title="高级设置：Word版式（通常无需修改）" name="layout">
-            <el-form-item label="输出版式">
-              <el-select v-model="createForm.templateId" style="width: 100%">
-                <el-option
-                  v-for="template in templates"
-                  :key="template.id"
-                  :label="template.display_name"
-                  :value="template.id"
-                >
-                  <div class="doc-agent__template-option">
-                    <strong>{{ template.display_name }}</strong>
-                    <small>{{ templateHint(template) }}</small>
-                  </div>
-                </el-option>
-              </el-select>
-              <div class="doc-agent__field-help">
-                这里选择的是Word页面和样式基线，不决定四措两案的业务内容。
-              </div>
-            </el-form-item>
-          </el-collapse-item>
-        </el-collapse>
-        <el-alert
-          title="Agent会同时使用两层参考：当前项目资料用于确定事实；系统内已批准的条款和RAG案例用于组织专业正文。"
-          type="info"
-          :closable="false"
-        />
-      </el-form>
-      <template #footer>
-        <el-button @click="createDialogVisible = false">取消</el-button>
-        <el-button
-          type="primary"
-          :loading="actionLoading"
-          :disabled="eligibleDocuments.length === 0"
-          @click="createAndExtract"
+    <TemplateSelector
+      v-model="templateSelectorVisible"
+      :templates="templates"
+      :selected-id="draftContext.templateId"
+      :candidates="draftContext.pendingTemplateCandidates"
+      :uploading="uploadLoading"
+      @select="selectDraftTemplate"
+      @upload="handleTemplateUpload"
+    />
+
+    <PersonnelSelector
+      v-model="personnelSelectorVisible"
+      :personnel="availablePersonnel"
+      :selected-ids="draftContext.personnelIds"
+      :loading="personnelLoading"
+      :error="personnelError"
+      @confirm="selectDraftPersonnel"
+      @retry="loadAvailablePersonnel"
+    />
+
+    <el-dialog
+      v-model="sourceDialogVisible"
+      :title="selectedTask ? '本会话来源资料' : '选择系统内参考资料'"
+      width="min(760px, 94vw)"
+    >
+      <el-alert
+        :title="`只显示当前项目中你有权读取的“入场前置资料”；最多选择 ${MAX_CONVERSATION_SOURCE_COUNT} 份，检测报告、完工资料和报告模板不会进入 Agent。`"
+        type="info"
+        :closable="false"
+        show-icon
+      />
+      <el-checkbox-group v-model="sourceSelectionModel" class="doc-agent__source-list">
+        <el-checkbox
+          v-for="document in eligibleDocuments"
+          :key="document.current_version!.id"
+          :value="document.current_version!.id"
+          :disabled="Boolean(selectedTask) || (
+            sourceSelectionModel.length >= MAX_CONVERSATION_SOURCE_COUNT
+            && !sourceSelectionModel.includes(document.current_version!.id)
+          )"
+          class="doc-agent__source-item"
         >
-          一键开始分析
-        </el-button>
+          <span>
+            <strong>{{ document.title }}</strong>
+            <small>{{ document.current_version!.original_filename }}</small>
+          </span>
+        </el-checkbox>
+      </el-checkbox-group>
+      <el-empty
+        v-if="!eligibleDocuments.length"
+        :image-size="72"
+        description="当前项目暂无可用入场前置资料"
+      />
+      <template #footer>
+        <span class="doc-agent__source-count">
+          已选择 {{ sourceSelectionModel.length }}/{{ MAX_CONVERSATION_SOURCE_COUNT }} 份
+        </span>
+        <el-button type="primary" @click="sourceDialogVisible = false">完成</el-button>
       </template>
     </el-dialog>
   </section>
@@ -1645,12 +2023,242 @@ async function runAction(action: () => Promise<void>): Promise<void> {
 
 <style scoped>
 .doc-agent {
-  display: grid;
-  gap: 18px;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
 }
 
-.doc-agent__notice {
-  margin-bottom: 4px;
+.doc-agent__workbench {
+  display: grid;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-surface);
+  box-shadow: var(--shadow-1);
+  grid-template-columns: 286px minmax(0, 1fr);
+}
+
+.doc-agent__conversation {
+  display: flex;
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.doc-agent__conversation-header {
+  display: flex;
+  align-items: center;
+  min-height: 66px;
+  padding: 10px 22px;
+  border-bottom: 1px solid var(--color-border-light);
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.doc-agent__project-context {
+  min-width: 0;
+  flex: 1;
+}
+
+.doc-agent__messages {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 28px clamp(18px, 4vw, 58px) 36px;
+  flex: 1;
+  scrollbar-width: thin;
+}
+
+.doc-agent__welcome {
+  display: grid;
+  max-width: 760px;
+  min-height: 100%;
+  margin: 0 auto;
+  place-content: center;
+  text-align: center;
+}
+
+.doc-agent__welcome-mark {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  margin: 0 auto 14px;
+  border-radius: var(--radius-md);
+  background: var(--color-brand);
+  color: var(--color-text-inverse);
+  font-size: 14px;
+  font-weight: 700;
+  place-items: center;
+}
+
+.doc-agent__welcome h2,
+.doc-agent__welcome p {
+  margin: 0;
+}
+
+.doc-agent__welcome p {
+  max-width: 680px;
+  margin-top: 10px;
+  color: var(--color-text-secondary);
+  line-height: 1.7;
+}
+
+.doc-agent__starter-prompts {
+  display: grid;
+  margin: 24px 0 18px;
+  gap: 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.doc-agent__starter-prompts button {
+  min-height: 76px;
+  padding: 11px 13px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font: inherit;
+  line-height: 1.55;
+  text-align: left;
+  transition: border-color var(--duration-fast), background-color var(--duration-fast);
+}
+
+.doc-agent__starter-prompts button:hover {
+  border-color: var(--color-brand);
+  background: var(--color-brand-soft);
+  color: var(--color-brand);
+}
+
+.doc-agent__message-turn {
+  display: grid;
+  max-width: 980px;
+  margin: 0 auto 22px;
+  align-items: flex-start;
+  gap: 12px;
+  grid-template-columns: 34px minmax(0, 1fr);
+}
+
+.doc-agent__message-turn > div:last-child {
+  min-width: 0;
+  padding: 12px 15px;
+  border-radius: var(--radius-lg);
+}
+
+.doc-agent__message-turn p {
+  margin: 6px 0 0;
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+
+.doc-agent__message-turn small {
+  color: var(--color-text-tertiary);
+}
+
+.doc-agent__message-turn--user > div:last-child {
+  background: var(--color-brand-soft);
+}
+
+.doc-agent__message-turn--agent > div:last-child {
+  border: 1px solid var(--color-border-light);
+  background: var(--color-bg-surface-secondary);
+}
+
+.doc-agent__message-turn--agent {
+  max-width: 1180px;
+}
+
+.doc-agent__message-turn--agent > .doc-agent__ai-response {
+  padding: 0;
+}
+
+.doc-agent__ai-summary {
+  position: sticky;
+  z-index: 3;
+  top: 0;
+  padding: 13px 16px;
+  border-bottom: 1px solid var(--color-border-light);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  background: color-mix(in srgb, var(--color-bg-surface-secondary) 96%, transparent);
+  backdrop-filter: blur(8px);
+}
+
+.doc-agent__latest-action {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 8px;
+}
+
+.doc-agent__latest-button {
+  box-shadow: var(--shadow-2);
+}
+
+.doc-agent__avatar {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-md);
+  background: var(--color-text-primary);
+  color: var(--color-bg-surface);
+  font-size: 12px;
+  font-weight: 700;
+  place-items: center;
+}
+
+.doc-agent__message-turn--agent .doc-agent__avatar {
+  background: var(--color-brand);
+  color: var(--color-text-inverse);
+}
+
+.doc-agent__composer-shell {
+  padding: 12px clamp(16px, 4vw, 48px) 16px;
+  border-top: 1px solid var(--color-border-light);
+  background: color-mix(in srgb, var(--color-bg-surface) 94%, transparent);
+}
+
+.doc-agent__revision-target {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.doc-agent__revision-target span,
+.doc-agent__source-count {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.doc-agent__source-list {
+  display: grid;
+  max-height: 420px;
+  margin-top: 16px;
+  overflow-y: auto;
+  gap: 7px;
+}
+
+.doc-agent__source-item {
+  width: 100%;
+  height: auto;
+  min-height: 54px;
+  margin-right: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+}
+
+.doc-agent__source-item > span {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.doc-agent__source-item small {
+  overflow: hidden;
+  color: var(--color-text-tertiary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .doc-agent__export-dialog {
@@ -1796,7 +2404,20 @@ async function runAction(action: () => Promise<void>): Promise<void> {
 }
 
 .doc-agent__task {
-  margin-top: 6px;
+  max-width: none;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.doc-agent__task :deep(.el-card__header) {
+  padding: 14px 16px;
+  border-bottom-color: var(--color-border-light);
+}
+
+.doc-agent__task :deep(.el-card__body) {
+  padding: 16px;
 }
 
 .doc-agent__meta {
@@ -2012,6 +2633,24 @@ async function runAction(action: () => Promise<void>): Promise<void> {
   padding: 14px 16px 16px;
 }
 
+.doc-agent__use-bottom-composer {
+  width: calc(100% - 32px);
+  margin: 14px 16px 16px;
+  padding: 9px 12px;
+  border: 1px solid var(--color-brand);
+  border-radius: var(--radius-sm);
+  background: var(--color-brand-soft);
+  color: var(--color-brand);
+  cursor: pointer;
+  font: inherit;
+}
+
+.doc-agent__use-bottom-composer:disabled {
+  border-color: var(--color-border);
+  color: var(--color-text-disabled);
+  cursor: not-allowed;
+}
+
 .doc-agent__revision-scope {
   margin: 0 0 9px;
   color: var(--el-text-color-secondary);
@@ -2095,6 +2734,21 @@ pre {
 }
 
 @media (max-width: 900px) {
+  .doc-agent {
+    height: auto;
+  }
+
+  .doc-agent__workbench {
+    height: auto;
+    min-height: 780px;
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(620px, 1fr);
+  }
+
+  .doc-agent__starter-prompts {
+    grid-template-columns: 1fr;
+  }
+
   .doc-agent__toolbar {
     align-items: flex-start;
     flex-direction: column;
@@ -2111,6 +2765,24 @@ pre {
 }
 
 @media (max-width: 640px) {
+  .doc-agent__conversation-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .doc-agent__messages {
+    padding: 22px 14px 28px;
+  }
+
+  .doc-agent__composer-shell {
+    padding: 10px;
+  }
+
+  .doc-agent__revision-target {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
   .doc-agent__conversation-row {
     align-items: stretch;
     flex-direction: column;

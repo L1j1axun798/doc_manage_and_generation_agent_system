@@ -361,6 +361,49 @@ class RetrievalResult(ContractModel):
     embedding_dimension: int = Field(gt=0)
 
 
+class PersonnelCertificationContext(ContractModel):
+    name: str = ""
+    certificate_number: str = ""
+    valid_until: str | None = None
+
+
+class PersonnelContext(ContractModel):
+    id: NonBlankString
+    name: NonBlankString
+    job_title: str = ""
+    department: str = ""
+    contact: str = ""
+    certifications: tuple[PersonnelCertificationContext, ...] = ()
+    certificate_valid_until: str | None = None
+    additional_info: dict[str, JsonValue] = Field(default_factory=dict)
+
+
+class TemplateFormatConstraints(ContractModel):
+    preserve_section_order: bool = True
+    preserve_heading_levels: bool = True
+    preserve_tables: bool = True
+    preserve_headers_and_footers: bool = True
+    preserve_typography_and_numbering: bool = True
+    fill_only_allowed_positions: bool = True
+
+
+class AgentTemplateContext(ContractModel):
+    id: NonBlankString
+    code: NonBlankString
+    name: NonBlankString
+    filename: NonBlankString
+    version: NonBlankString
+    document_version_id: int = Field(gt=0)
+    format_locked: bool = True
+    constraints: TemplateFormatConstraints = Field(default_factory=TemplateFormatConstraints)
+
+
+class AgentConversationContext(ContractModel):
+    initial_message: str = Field(default="", max_length=4000)
+    personnel: tuple[PersonnelContext, ...] = Field(default=(), max_length=50)
+    template: AgentTemplateContext | None = None
+
+
 class SectionContext(ContractModel):
     section_code: NonBlankString
     objective: NonBlankString
@@ -368,6 +411,7 @@ class SectionContext(ContractModel):
     risk_profile: RiskProfile
     clauses: tuple[ClauseSelection, ...] = ()
     references: tuple[RetrievedSection, ...] = ()
+    conversation_context: AgentConversationContext = Field(default_factory=AgentConversationContext)
     revision_instruction: str = ""
     revision_conversation: tuple[str, ...] = ()
     revision_required_literals: tuple[str, ...] = ()
@@ -507,16 +551,13 @@ class GenerationRequest(ContractModel):
     template: TemplateDocument
     sources: tuple[SourceDocument, ...] = Field(min_length=1)
     confirmed_facts: tuple[ConfirmedFact, ...] = ()
+    conversation_context: AgentConversationContext = Field(default_factory=AgentConversationContext)
     required_fact_fields: tuple[str, ...] = ()
     section_codes: tuple[str, ...] = Field(min_length=1)
     force_regenerate_section_codes: tuple[str, ...] = ()
     section_revision_instructions: dict[str, str] = Field(default_factory=dict)
-    section_revision_conversations: dict[str, tuple[str, ...]] = Field(
-        default_factory=dict
-    )
-    section_revision_required_literals: dict[str, tuple[str, ...]] = Field(
-        default_factory=dict
-    )
+    section_revision_conversations: dict[str, tuple[str, ...]] = Field(default_factory=dict)
+    section_revision_required_literals: dict[str, tuple[str, ...]] = Field(default_factory=dict)
     section_previous_contents: dict[str, str] = Field(default_factory=dict)
     section_priority_references: dict[str, tuple[RetrievedSection, ...]] = Field(
         default_factory=dict

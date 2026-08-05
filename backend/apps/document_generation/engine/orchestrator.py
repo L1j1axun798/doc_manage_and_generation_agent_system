@@ -7,6 +7,7 @@ from hashlib import sha256
 from typing import TypeVar
 
 from .contracts import (
+    AgentConversationContext,
     ClauseSelection,
     ConfirmedFact,
     GeneratedSection,
@@ -102,11 +103,7 @@ class _TraceBuilder:
         try:
             result = function()
         except Exception as exc:
-            failed_detail = (
-                f"{detail}:{type(exc).__name__}"
-                if detail
-                else type(exc).__name__
-            )
+            failed_detail = f"{detail}:{type(exc).__name__}" if detail else type(exc).__name__
             self.add(stage, tool, TraceStatus.FAILED, failed_detail)
             raise
         self.add(stage, tool, TraceStatus.SUCCEEDED, detail)
@@ -230,6 +227,7 @@ class GenerationOrchestrator:
                         risk_profile,
                         clauses,
                         retrieval,
+                        conversation_context=request.conversation_context,
                         revision_instruction=request.section_revision_instructions.get(
                             section_code,
                             "",
@@ -292,8 +290,7 @@ class GenerationOrchestrator:
                             and self.section_repository is not None
                             and (
                                 reusable_section != persisted.section
-                                or tuple(persisted_issues)
-                                != persisted.validation_issues
+                                or tuple(persisted_issues) != persisted.validation_issues
                             )
                         ):
                             trace.invoke(
@@ -386,9 +383,7 @@ class GenerationOrchestrator:
                         f"章节 {section_code} 未通过确定性校验",
                         details={
                             "section_code": section_code,
-                            "issues": [
-                                issue.model_dump(mode="json") for issue in blocking_issues
-                            ],
+                            "issues": [issue.model_dump(mode="json") for issue in blocking_issues],
                         },
                     )
                 if self.section_repository is not None:
@@ -472,6 +467,7 @@ class GenerationOrchestrator:
         clauses: tuple[ClauseSelection, ...],
         retrieval: RetrievalResult,
         *,
+        conversation_context: AgentConversationContext | None = None,
         revision_instruction: str = "",
         revision_conversation: tuple[str, ...] = (),
         revision_required_literals: tuple[str, ...] = (),
@@ -484,6 +480,7 @@ class GenerationOrchestrator:
             risk_profile=risk_profile,
             clauses=clauses,
             retrieval=retrieval,
+            conversation_context=conversation_context,
             revision_instruction=revision_instruction,
             revision_conversation=revision_conversation,
             revision_required_literals=revision_required_literals,
@@ -529,20 +526,14 @@ class GenerationOrchestrator:
             business_type=request.business_type,
             section_code=section_code,
             query_text=f"{section_code} {fact_text}".strip(),
-            client_code=(
-                str(values["client_code"]).strip()
-                if values.get("client_code")
-                else None
-            ),
+            client_code=(str(values["client_code"]).strip() if values.get("client_code") else None),
             component_tags=(
                 tuple(str(value) for value in component_tags)
                 if isinstance(component_tags, list)
                 else ()
             ),
             method_tags=(
-                tuple(str(value) for value in method_tags)
-                if isinstance(method_tags, list)
-                else ()
+                tuple(str(value) for value in method_tags) if isinstance(method_tags, list) else ()
             ),
             risk_tags=risk_tags,
         )
@@ -567,6 +558,7 @@ class GenerationOrchestrator:
                 for source in request.sources
             ],
             "confirmed_facts": [fact.model_dump(mode="json") for fact in request.confirmed_facts],
+            "conversation_context": request.conversation_context.model_dump(mode="json"),
             "required_fact_fields": request.required_fact_fields,
             "section_codes": request.section_codes,
             "force_regenerate_section_codes": request.force_regenerate_section_codes,

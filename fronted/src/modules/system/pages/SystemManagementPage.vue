@@ -205,13 +205,6 @@ async function disableCurrentFolder(folder: SystemFolder): Promise<void> {
 
 <template>
   <section class="system-page">
-    <header class="system-page__header">
-      <div>
-        <h1>系统管理</h1>
-        <p>维护资料目录，查看后端健康状态；未开放的系统能力保持只读提示。</p>
-      </div>
-    </header>
-
     <el-tabs v-model="activeTab" class="system-page__tabs">
       <el-tab-pane label="资料目录配置" name="directories">
         <section class="system-page__toolbar">

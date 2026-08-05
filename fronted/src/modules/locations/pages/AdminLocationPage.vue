@@ -60,11 +60,7 @@ function formatAccuracy(value: string | null | undefined): string {
 
 <template>
   <section class="location-page">
-    <header class="location-page__header">
-      <div>
-        <h1>人员位置</h1>
-        <p>查看员工最近一次上报位置，所有位置均以员工主动上报时间为准。</p>
-      </div>
+    <header class="location-page__header page-action-bar">
       <el-button :icon="Refresh" :loading="loading" type="primary" @click="loadLocations">
         刷新
       </el-button>

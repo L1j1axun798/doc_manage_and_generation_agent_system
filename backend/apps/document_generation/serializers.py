@@ -269,6 +269,7 @@ class GenerationTaskSerializer(serializers.ModelSerializer):
             "status",
             "operation",
             "progress",
+            "conversation_context",
             "facts_snapshot",
             "fact_conflicts",
             "risk_profile",
@@ -319,6 +320,28 @@ class GenerationTaskSerializer(serializers.ModelSerializer):
         }
 
 
+class GenerationConversationContextSerializer(serializers.Serializer):
+    initial_message = serializers.CharField(
+        required=False,
+        default="",
+        allow_blank=True,
+        trim_whitespace=True,
+        max_length=4000,
+    )
+    selected_personnel_ids = serializers.ListField(
+        child=serializers.IntegerField(min_value=1),
+        required=False,
+        default=list,
+        allow_empty=True,
+        max_length=50,
+    )
+
+    def validate_selected_personnel_ids(self, values: list[int]) -> list[int]:
+        if len(values) != len(set(values)):
+            raise serializers.ValidationError("所选人员不能重复")
+        return values
+
+
 class GenerationTaskCreateSerializer(serializers.Serializer):
     project_id = serializers.IntegerField(min_value=1)
     template_id = serializers.IntegerField(min_value=1)
@@ -336,6 +359,10 @@ class GenerationTaskCreateSerializer(serializers.Serializer):
         required=False,
         default=list,
         allow_empty=True,
+    )
+    conversation_context = GenerationConversationContextSerializer(
+        required=False,
+        default=dict,
     )
 
 

@@ -17,6 +17,7 @@ from common.storage import LocalDocumentStorage
 from .artifacts import TaskDraftArtifactStorage
 from .engine.canonical_facts import enrich_required_fact_candidates
 from .engine.contracts import (
+    AgentConversationContext,
     ConfirmedFact,
     FactCandidate,
     GenerationRequest,
@@ -735,8 +736,7 @@ def _build_request(task_id: str) -> GenerationRequest:
             (
                 candidate
                 for candidate in reversed(section_reviews)
-                if (candidate.metadata or {}).get("conversation_status")
-                in {"queued", "processing"}
+                if (candidate.metadata or {}).get("conversation_status") in {"queued", "processing"}
             ),
             None,
         )
@@ -750,10 +750,7 @@ def _build_request(task_id: str) -> GenerationRequest:
         ]
         instruction = review.comment.strip()
         if requested_chunk_ids:
-            instruction += (
-                "\n重点参照以下已批准RAG片段："
-                + "、".join(requested_chunk_ids)
-            )
+            instruction += "\n重点参照以下已批准RAG片段：" + "、".join(requested_chunk_ids)
             rows = {
                 row.chunk_id: row
                 for row in KnowledgeSection.objects.filter(
@@ -834,6 +831,9 @@ def _build_request(task_id: str) -> GenerationRequest:
         ),
         sources=sources,
         confirmed_facts=facts,
+        conversation_context=AgentConversationContext.model_validate(
+            task.conversation_context or {}
+        ),
         required_fact_fields=tuple(task.template.required_fact_fields),
         section_codes=section_codes,
         force_regenerate_section_codes=force_regenerate_section_codes,
@@ -1008,15 +1008,13 @@ def _record_failure(task_id: str, exc: Exception) -> None:
             issue_summary = "；".join(
                 issue["message"]
                 for issue in validation_issues
-                if issue["code"]
-                in {"REVISION_CONTENT_UNCHANGED", "REVISION_LITERAL_MISSING"}
+                if issue["code"] in {"REVISION_CONTENT_UNCHANGED", "REVISION_LITERAL_MISSING"}
             )
             task.status = GenerationTask.Status.REVIEW_REQUIRED
             task.progress = 90
             task.pending_section_codes = []
             message = (
-                f"本次修改未能落实到正文：{issue_summary}。"
-                "原章节已保留，请调整指令后重新发送。"
+                f"本次修改未能落实到正文：{issue_summary}。原章节已保留，请调整指令后重新发送。"
             )[:500]
         elif validation_recovery_required:
             task.pending_section_codes = _pending_validation_sections(
@@ -1047,11 +1045,7 @@ def _record_failure(task_id: str, exc: Exception) -> None:
                 "error_code",
                 "error_message",
                 *(["progress", "fact_conflicts"] if evidence_recovery_required else []),
-                *(
-                    ["progress", "pending_section_codes"]
-                    if revision_recovery_required
-                    else []
-                ),
+                *(["progress", "pending_section_codes"] if revision_recovery_required else []),
                 *(["pending_section_codes"] if validation_recovery_required else []),
                 "updated_at",
             ]

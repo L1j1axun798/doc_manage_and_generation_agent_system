@@ -122,7 +122,7 @@ test('shows the admin personnel map and RAG overview on the dashboard', async ({
 
   await page.goto('/dashboard')
 
-  await expect(page.getByRole('heading', { name: '绿能信盾资料管理系统' })).toBeVisible()
+  await expect(page.locator('.main-layout__page-context strong')).toHaveText('首页')
   await expect(page.getByRole('heading', { name: '人员位置概览' })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'RAG 知识库概览' })).toBeVisible()
   await expect(page.getByText('948', { exact: true })).toBeVisible()
@@ -133,7 +133,39 @@ test('shows the admin personnel map and RAG overview on the dashboard', async ({
 
   await page.getByRole('link', { name: '查看人员位置目录' }).click()
   await expect(page).toHaveURL(/\/locations\/admin/)
-  await expect(page.getByRole('heading', { name: '人员位置' })).toBeVisible()
+  await expect(page.locator('.main-layout__page-context strong')).toHaveText('人员位置')
+  await expect(page.locator('.main-layout__page-description')).toHaveText(
+    '查看员工最近一次上报位置，所有位置均以员工主动上报时间为准。',
+  )
+})
+
+test('moves the document agent description into the main header', async ({ page }) => {
+  await mockAuthenticatedSession(page)
+  await page.route('**/api/v1/projects/?**', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ count: 0, next: null, previous: null, results: [] }),
+    })
+  })
+
+  await page.goto('/document-generation')
+
+  await expect(page.locator('.main-layout__page-context strong')).toHaveText('入场资料Agent V1.0')
+  const pageDescription = page.locator('.main-layout__page-description')
+  await expect(pageDescription).toBeVisible()
+  await expect(pageDescription).toHaveText(
+    '在一个会话内完成模板、人员、资料、生成、修改与审核。',
+  )
+  expect(
+    await pageDescription.evaluate((element) =>
+      element.parentElement?.classList.contains('main-layout__header-context'),
+    ),
+  ).toBe(true)
+  await expect(page.locator('.document-generation-page h1')).toHaveCount(0)
+  await expect(page.locator('.document-generation-page')).not.toContainText(
+    '在一个会话内完成模板、人员、资料、生成、修改与审核。',
+  )
+  await expect(page.getByRole('button', { name: '上传 RAG 资料' })).toBeVisible()
 })
 
 test('shows document center with folder tree and document detail', async ({ page }) => {
@@ -412,7 +444,7 @@ test('shows document center with folder tree and document detail', async ({ page
   await expect(page.getByText('文档详情')).toBeHidden()
 
   const download = page.waitForEvent('download')
-  await page.getByRole('button', { name: '下载' }).click()
+  await page.getByRole('button', { name: '下载', exact: true }).click()
   await expect((await download).suggestedFilename()).toBe('license.pdf')
 
   await page.getByRole('button', { name: '上传资料' }).click()
@@ -495,7 +527,7 @@ test('shows archived year documents as read-only table', async ({ page }) => {
   await expect(page.getByRole('cell', { name: 'P002 归档项目' })).toBeVisible()
   await expect(page.getByRole('cell', { name: '竣工资料档案' })).toBeVisible()
   await expect(page.getByRole('button', { name: '上传资料' })).toHaveCount(0)
-  await expect(page.getByRole('button', { name: '下载' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '下载', exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: '修改' })).toHaveCount(0)
   await expect(page.getByRole('button', { name: '移动' })).toHaveCount(0)
   await expect(page.getByRole('button', { name: '新版本' })).toHaveCount(0)
@@ -653,7 +685,10 @@ test('shows global access management lists', async ({ page }) => {
 
   await page.goto('/access/internal')
 
-  await expect(page.getByRole('heading', { name: '授权管理' })).toBeVisible()
+  await expect(page.locator('.main-layout__page-context strong')).toHaveText('授权管理')
+  await expect(page.locator('.main-layout__page-description')).toHaveText(
+    '查询可管理范围内的文档授权和临时访问授权。',
+  )
   await expect(page.getByLabel('内部文件授权').getByText('安全生产许可证')).toBeVisible()
   await expect(page.getByRole('cell', { name: '授权用户 grant-user' })).toBeVisible()
   await page.getByRole('tab', { name: '临时访问授权' }).click()
@@ -699,7 +734,10 @@ test('shows user management and resets a user password', async ({ page }) => {
 
   await page.goto('/users')
 
-  await expect(page.getByRole('heading', { name: '用户管理' })).toBeVisible()
+  await expect(page.locator('.main-layout__page-context strong')).toHaveText('用户管理')
+  await expect(page.locator('.main-layout__page-description')).toHaveText(
+    '维护系统账号、角色、状态和首次登录改密要求。',
+  )
   await expect(page.getByRole('cell', { name: '资料整理员 operator' })).toBeVisible()
   await page.getByRole('button', { name: '详情' }).click()
   await expect(page.getByText('用户详情')).toBeVisible()
@@ -734,7 +772,10 @@ test('shows audit logs and audit details', async ({ page }) => {
 
   await page.goto('/audit')
 
-  await expect(page.getByRole('heading', { name: '审计中心' })).toBeVisible()
+  await expect(page.locator('.main-layout__page-context strong')).toHaveText('审计中心')
+  await expect(page.locator('.main-layout__page-description')).toHaveText(
+    '查询系统关键操作、权限拒绝、下载和授权记录。',
+  )
   await expect(page.getByRole('cell', { name: 'document.download' })).toBeVisible()
   await expect(page.getByRole('cell', { name: '成功' })).toBeVisible()
   await page.getByRole('button', { name: '详情' }).click()
@@ -777,7 +818,10 @@ test('shows notifications and toggles read state', async ({ page }) => {
 
   await page.goto('/notifications')
 
-  await expect(page.getByRole('heading', { name: '通知中心' })).toBeVisible()
+  await expect(page.locator('.main-layout__page-context strong')).toHaveText('通知中心')
+  await expect(page.locator('.main-layout__page-description')).toHaveText(
+    '查看系统、文档和授权相关通知，并维护单条通知的已读状态。',
+  )
   await expect(page.getByRole('button', { name: '受限文档授权已创建' })).toBeVisible()
   await page.getByRole('button', { name: '详情' }).click()
   await expect(page.getByText('通知详情')).toBeVisible()
@@ -835,7 +879,10 @@ test('shows system management directories, status and backup state', async ({ pa
 
   await page.goto('/system/status')
 
-  await expect(page.getByRole('heading', { name: '系统管理' })).toBeVisible()
+  await expect(page.locator('.main-layout__page-context strong')).toHaveText('系统管理')
+  await expect(page.locator('.main-layout__page-description')).toHaveText(
+    '维护资料目录，查看后端健康状态；未开放的系统能力保持只读提示。',
+  )
   await expect(page.getByRole('cell', { name: '公共根目录 ROOT' })).toBeVisible()
   await expect(page.getByRole('cell', { name: '运行资料 RUN' })).toBeVisible()
   await page.getByRole('button', { name: '创建目录' }).click()
@@ -937,7 +984,10 @@ test('shows project management detail, members, documents and archive', async ({
 
   await page.goto('/projects')
 
-  await expect(page.getByRole('heading', { name: '项目管理' })).toBeVisible()
+  await expect(page.locator('.main-layout__page-context strong')).toHaveText('项目管理')
+  await expect(page.locator('.main-layout__page-description')).toHaveText(
+    '查询当前账号可见项目，并进入项目详情维护成员和资料。',
+  )
   await expect(page.getByText('前端联调示例项目')).toBeVisible()
   await page.getByRole('button', { name: '详情' }).click()
 

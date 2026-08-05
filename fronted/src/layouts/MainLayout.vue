@@ -30,6 +30,10 @@ let compactViewportQuery: MediaQueryList | null = null
 const menuItems = computed(() => buildMainMenu(authStore.user?.role))
 const activeMenu = computed(() => String(route.meta.activeMenu || route.path))
 const currentPageTitle = computed(() => String(route.meta.title || appConfig.title))
+const currentPageDescription = computed(() => {
+  const description = route.meta.description
+  return typeof description === 'string' ? description : ''
+})
 const username = computed(() => authStore.user?.real_name || authStore.user?.username || '-')
 const accountName = computed(() => authStore.user?.username || '-')
 const roleLabel = computed(() => (authStore.user ? getRoleLabel(authStore.user.role) : ''))
@@ -170,6 +174,9 @@ async function handleCommand(command: string): Promise<void> {
             <span>WIND DOC · 工作台</span>
             <strong>{{ currentPageTitle }}</strong>
           </div>
+          <p v-if="currentPageDescription" class="main-layout__page-description">
+            {{ currentPageDescription }}
+          </p>
         </div>
 
         <div class="main-layout__header-actions">

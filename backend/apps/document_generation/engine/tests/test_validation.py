@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 from apps.document_generation.engine.contracts import (
+    AgentConversationContext,
+    AgentTemplateContext,
     ClauseSelection,
     ConfirmedFact,
     GeneratedSection,
+    PersonnelContext,
     RetrievalQuery,
     RetrievalResult,
     RiskProfile,
@@ -231,9 +234,7 @@ def test_revision_keeps_reviewer_confirmed_personnel_literals_and_verifies_chang
 
     normalized = normalize_section_provenance(revised, context)
     issues = ControlledSectionValidator().validate(normalized, context)
-    error_codes = {
-        issue.code for issue in issues if issue.severity == ValidationSeverity.ERROR
-    }
+    error_codes = {issue.code for issue in issues if issue.severity == ValidationSeverity.ERROR}
 
     assert "12345678" in "\n".join(normalized.paragraphs)
     assert "UNSOURCED_NUMBER" not in error_codes
@@ -252,9 +253,7 @@ def test_revision_rejects_unchanged_content_and_missing_required_literals() -> N
     )
 
     issues = ControlledSectionValidator().validate(original, context)
-    error_codes = {
-        issue.code for issue in issues if issue.severity == ValidationSeverity.ERROR
-    }
+    error_codes = {issue.code for issue in issues if issue.severity == ValidationSeverity.ERROR}
 
     assert "REVISION_CONTENT_UNCHANGED" in error_codes
     assert "REVISION_LITERAL_MISSING" in error_codes
@@ -397,3 +396,42 @@ def test_quality_context_rejects_short_and_unstructured_section() -> None:
     assert "确定性最低门禁为2600个中文字符" in quality_context.objective
     assert "SECTION_CONTENT_TOO_SHORT" in codes
     assert "SECTION_STRUCTURE_INCOMPLETE" in codes
+
+
+def test_section_context_includes_personnel_and_locked_template_constraints() -> None:
+    base_context = _context()
+    retrieval = RetrievalResult(
+        query=RetrievalQuery(
+            business_type="wind_turbine_inspection_four_measures_two_plans",
+            section_code="organization_measures",
+            query_text="组织措施",
+        ),
+        embedding_model_alias="fake",
+        embedding_dimension=1,
+    )
+    conversation_context = AgentConversationContext(
+        initial_message="重点核对人员分工",
+        personnel=(PersonnelContext(id="8", name="项目成员", job_title="资料整理员"),),
+        template=AgentTemplateContext(
+            id="3",
+            code="T001",
+            name="甲方四措两案模板",
+            filename="template.docx",
+            version="v1",
+            document_version_id=10,
+        ),
+    )
+
+    context = SectionContextBuilder().build(
+        section_code="organization_measures",
+        confirmed_facts=base_context.confirmed_facts,
+        risk_profile=base_context.risk_profile,
+        clauses=base_context.clauses,
+        retrieval=retrieval,
+        conversation_context=conversation_context,
+    )
+
+    assert context.conversation_context.personnel[0].name == "项目成员"
+    assert context.conversation_context.template is not None
+    assert context.conversation_context.template.format_locked is True
+    assert "严格使用当前批准模板" in context.objective

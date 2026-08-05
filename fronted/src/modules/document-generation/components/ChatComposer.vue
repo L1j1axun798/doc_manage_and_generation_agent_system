@@ -1,0 +1,244 @@
+<script setup lang="ts">
+import {
+  ArrowDown,
+  ArrowUp,
+  ChatDotRound,
+  DocumentAdd,
+  Paperclip,
+  User,
+} from '@element-plus/icons-vue'
+import { ref } from 'vue'
+
+const props = defineProps<{
+  modelValue: string
+  loading?: boolean
+  uploadLoading?: boolean
+  disabled?: boolean
+  canSend?: boolean
+  templateMissing?: boolean
+  placeholder?: string
+  helperText?: string
+  editableContext?: boolean
+  sourceCount?: number
+  maxSourceCount?: number
+  collapsed?: boolean
+}>()
+
+const emit = defineEmits<{
+  'update:modelValue': [value: string]
+  'update:collapsed': [value: boolean]
+  send: []
+  template: []
+  personnel: []
+  sources: []
+  upload: [files: File[]]
+}>()
+
+const fileInput = ref<HTMLInputElement>()
+
+function handleKeydown(event: KeyboardEvent): void {
+  if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return
+  event.preventDefault()
+  if (props.canSend && !props.loading) emit('send')
+}
+
+function handleFile(event: Event): void {
+  const input = event.target as HTMLInputElement
+  const files = Array.from(input.files || [])
+  if (files.length) emit('upload', files)
+  input.value = ''
+}
+</script>
+
+<template>
+  <div
+    class="chat-composer"
+    :class="{ 'is-disabled': disabled, 'is-collapsed': collapsed }"
+  >
+    <div class="chat-composer__collapse-row">
+      <div v-if="collapsed" class="chat-composer__collapsed-copy">
+        <strong>聊天框已收起</strong>
+        <span>{{ helperText || '点击右侧箭头展开聊天框' }}</span>
+      </div>
+      <span v-else aria-hidden="true" />
+      <el-tooltip :content="collapsed ? '展开聊天框' : '收起聊天框'" placement="top">
+        <el-button
+          class="chat-composer__collapse-button"
+          text
+          circle
+          :icon="collapsed ? ArrowUp : ArrowDown"
+          :aria-label="collapsed ? '展开聊天框' : '收起聊天框'"
+          @click="emit('update:collapsed', !collapsed)"
+        />
+      </el-tooltip>
+    </div>
+    <template v-if="!collapsed">
+      <slot name="attachments" />
+      <slot name="context-extra" />
+      <el-input
+        :model-value="modelValue"
+        type="textarea"
+        :autosize="{ minRows: 2, maxRows: 7 }"
+        maxlength="4000"
+        resize="none"
+        :disabled="disabled"
+        :placeholder="placeholder || '输入本次编制要求…'"
+        @update:model-value="emit('update:modelValue', $event)"
+        @keydown="handleKeydown"
+      />
+      <div class="chat-composer__footer">
+        <div class="chat-composer__tools">
+          <el-button :icon="DocumentAdd" :disabled="!editableContext" @click="emit('template')">甲方模板</el-button>
+          <el-button :icon="User" :disabled="!editableContext" @click="emit('personnel')">选择人员</el-button>
+          <el-button :icon="ChatDotRound" :disabled="!editableContext" @click="emit('sources')">
+            选择系统内参考资料
+          </el-button>
+          <input
+            ref="fileInput"
+            class="chat-composer__file-input"
+            type="file"
+            accept=".docx,.pdf"
+            multiple
+            @change="handleFile"
+          />
+          <el-button
+            :icon="Paperclip"
+            :loading="uploadLoading"
+            :disabled="!editableContext || uploadLoading || sourceCount === maxSourceCount"
+            :title="sourceCount === maxSourceCount ? `当前会话最多添加 ${maxSourceCount} 份资料` : ''"
+            @click="fileInput?.click()"
+          >
+            上传资料
+          </el-button>
+        </div>
+        <el-button
+          data-test="chat-send"
+          type="primary"
+          :loading="loading"
+          :disabled="!canSend"
+          @click="emit('send')"
+        >
+          发送
+        </el-button>
+      </div>
+      <div class="chat-composer__meta">
+        <span :class="{ 'is-warning': templateMissing }">
+          {{ templateMissing ? '请先选择甲方模板' : helperText || 'Enter 发送 · Shift + Enter 换行' }}
+        </span>
+        <span>{{ modelValue.length }}/4000</span>
+      </div>
+    </template>
+  </div>
+</template>
+
+<style scoped>
+.chat-composer {
+  display: grid;
+  padding: 12px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-surface);
+  box-shadow: var(--shadow-2);
+  gap: 10px;
+}
+
+.chat-composer:focus-within {
+  border-color: var(--color-brand);
+  box-shadow: var(--shadow-focus);
+}
+
+.chat-composer.is-disabled {
+  background: var(--color-bg-surface-secondary);
+}
+
+.chat-composer.is-collapsed {
+  padding-block: 8px;
+  gap: 0;
+}
+
+.chat-composer__collapse-row {
+  display: flex;
+  min-height: 26px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.chat-composer__collapsed-copy {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.chat-composer__collapsed-copy strong {
+  flex: 0 0 auto;
+  font-size: 12px;
+}
+
+.chat-composer__collapsed-copy span {
+  overflow: hidden;
+  color: var(--color-text-tertiary);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-composer__collapse-button {
+  flex: 0 0 auto;
+}
+
+.chat-composer :deep(.el-textarea__inner) {
+  padding: 4px 2px;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.chat-composer__footer,
+.chat-composer__tools,
+.chat-composer__meta {
+  display: flex;
+  align-items: center;
+}
+
+.chat-composer__footer,
+.chat-composer__meta {
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.chat-composer__tools {
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chat-composer__tools :deep(.el-button + .el-button) {
+  margin-left: 0;
+}
+
+.chat-composer__file-input {
+  display: none;
+}
+
+.chat-composer__meta {
+  color: var(--color-text-tertiary);
+  font-size: 11px;
+}
+
+.chat-composer__meta .is-warning {
+  color: var(--color-warning);
+}
+
+@media (max-width: 720px) {
+  .chat-composer__footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .chat-composer__footer > .el-button {
+    width: 100%;
+  }
+}
+</style>

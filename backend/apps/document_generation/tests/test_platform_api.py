@@ -566,6 +566,10 @@ def test_pipeline_endpoint_atomically_creates_sources_and_queues_extraction(
             "template_id": case["template"].pk,
             "idempotency_key": "pipeline-001",
             "document_version_ids": [case["source_version"].pk],
+            "conversation_context": {
+                "initial_message": "请重点核对入场人员分工后开始编制",
+                "selected_personnel_ids": [case["viewer"].pk],
+            },
             "facts": [
                 {
                     "field": "project_name",
@@ -584,10 +588,60 @@ def test_pipeline_endpoint_atomically_creates_sources_and_queues_extraction(
         case["source_version"].pk
     ]
     assert queued_ids == [str(task.pk)]
+    assert task.conversation_context["initial_message"] == ("请重点核对入场人员分工后开始编制")
+    assert task.conversation_context["personnel"] == [
+        {
+            "id": str(case["viewer"].pk),
+            "name": case["viewer"].real_name,
+            "job_title": "查看者",
+            "department": "",
+            "contact": "",
+            "certifications": [],
+            "certificate_valid_until": None,
+            "additional_info": {
+                "project_member_id": ProjectMember.objects.get(
+                    project=case["project"],
+                    user=case["viewer"],
+                ).pk,
+                "project_role": ProjectMember.Role.VIEWER,
+            },
+        }
+    ]
+    assert task.conversation_context["template"]["format_locked"] is True
+    assert response.json()["conversation_context"] == task.conversation_context
     assert GenerationTraceEvent.objects.filter(
         task=task,
         tool="queue_fact_extraction",
     ).exists()
+
+
+@pytest.mark.django_db(transaction=True)
+def test_pipeline_rejects_personnel_outside_the_current_project(client, tmp_path):
+    case = setup_generation_case(tmp_path)
+    outsider = make_user("outsider", User.Role.DATA_OPERATOR)
+    client.force_login(case["manager"])
+
+    response = client.post(
+        "/api/v1/document-generation/tasks/pipeline/",
+        {
+            "project_id": case["project"].pk,
+            "template_id": case["template"].pk,
+            "idempotency_key": "pipeline-invalid-personnel",
+            "document_version_ids": [case["source_version"].pk],
+            "conversation_context": {
+                "initial_message": "开始编制",
+                "selected_personnel_ids": [outsider.pk],
+            },
+        },
+        content_type="application/json",
+    )
+
+    assert response.status_code == 400
+    assert response.json()["code"] == "PERSONNEL_INVALID"
+    assert (
+        GenerationTask.objects.filter(idempotency_key="pipeline-invalid-personnel").exists()
+        is False
+    )
 
 
 @pytest.mark.django_db

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { Refresh } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import type { UploadUserFile } from 'element-plus'
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
@@ -216,41 +217,19 @@ function closeKnowledgeUploadDialog(): void {
 
 <template>
   <section class="document-generation-page">
-    <header class="document-generation-page__header">
-      <div>
-        <h1>入场资料Agent V1.0</h1>
-        <p>选择你有权访问的在执行项目，基于已有资料生成四措两案初稿，并完成事实确认、人工审核和 Word 导出。</p>
-      </div>
-      <div class="document-generation-page__header-actions">
-        <el-button :loading="loading" @click="loadProjects">刷新项目</el-button>
-        <el-button
-          v-if="isSystemAdmin"
-          type="primary"
-          plain
-          @click="openKnowledgeUploadDialog"
-        >
-          上传 RAG 资料
-        </el-button>
-      </div>
-    </header>
-
-    <el-alert
-      title="本Agent只生成入场资料（四(三)措两案）初稿，不生成检测报告、完工报告或实测结论。"
-      type="warning"
-      :closable="false"
-      show-icon
-    />
-
-    <el-card class="document-generation-page__selector" shadow="never">
-      <el-form label-position="top">
-        <el-form-item label="选择项目">
+    <DocumentGenerationPanel
+      class="document-generation-page__panel"
+      :project="selectedProject"
+    >
+      <template #project-context>
+        <div class="document-generation-page__project-picker">
           <el-select
             v-model="selectedProjectId"
             filterable
-            placeholder="请选择一个在执行项目"
+            placeholder="请先选择在执行项目"
             :loading="loading"
             popper-class="document-generation-project-select-dropdown"
-            style="width: 100%"
+            class="document-generation-page__project-select"
           >
             <el-option
               v-for="project in activeProjects"
@@ -259,16 +238,29 @@ function closeKnowledgeUploadDialog(): void {
               :value="project.id"
             />
           </el-select>
-        </el-form-item>
-      </el-form>
-      <el-empty
-        v-if="!loading && activeProjects.length === 0"
-        description="当前账号没有可用于编制的在执行项目"
-      />
-    </el-card>
-
-    <DocumentGenerationPanel v-if="selectedProject" :key="selectedProject.id" :project="selectedProject" />
-    <el-empty v-else-if="activeProjects.length" description="请先选择项目，再开始四措两案编制" />
+          <el-tooltip content="刷新项目" placement="bottom">
+            <el-button
+              class="document-generation-page__project-refresh"
+              :icon="Refresh"
+              :loading="loading"
+              circle
+              aria-label="刷新项目"
+              @click="loadProjects"
+            />
+          </el-tooltip>
+        </div>
+      </template>
+      <template #page-actions>
+        <el-button
+          v-if="isSystemAdmin"
+          type="primary"
+          plain
+          @click="openKnowledgeUploadDialog"
+        >
+          上传 RAG 资料
+        </el-button>
+      </template>
+    </DocumentGenerationPanel>
 
     <el-dialog
       v-model="uploadDialogVisible"
@@ -395,34 +387,29 @@ function closeKnowledgeUploadDialog(): void {
 <style scoped>
 .document-generation-page {
   display: grid;
-  gap: 18px;
+  height: calc(100dvh - var(--header-height) - var(--space-12));
+  min-height: 0;
+  grid-template-rows: minmax(0, 1fr);
 }
 
-.document-generation-page__header {
+.document-generation-page__panel {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.document-generation-page__project-picker {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
 }
 
-.document-generation-page__header h1,
-.document-generation-page__header p {
-  margin: 0;
+.document-generation-page__project-select {
+  width: min(520px, 48vw);
 }
 
-.document-generation-page__header p {
-  margin-top: 6px;
-  color: var(--el-text-color-secondary);
-}
-
-.document-generation-page__header-actions {
-  display: flex;
-  gap: 10px;
-  flex-shrink: 0;
-}
-
-.document-generation-page__selector :deep(.el-form-item) {
-  margin-bottom: 0;
+.document-generation-page__project-refresh {
+  flex: 0 0 auto;
 }
 
 :global(.document-generation-project-select-dropdown .el-select-dropdown__wrap) {
@@ -472,8 +459,18 @@ function closeKnowledgeUploadDialog(): void {
 }
 
 @media (max-width: 900px) {
-  .document-generation-page__header {
-    flex-direction: column;
+  .document-generation-page {
+    height: auto;
+    min-height: auto;
+    grid-template-rows: auto;
+  }
+
+  .document-generation-page__project-picker {
+    width: 100%;
+  }
+
+  .document-generation-page__project-select {
+    width: 100%;
   }
 
 }

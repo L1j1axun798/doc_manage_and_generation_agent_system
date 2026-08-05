@@ -1,5 +1,8 @@
+from urllib.parse import quote
+
 from django.db.models import Q
 from django.http import FileResponse
+from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import extend_schema
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
@@ -9,8 +12,14 @@ from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from apps.folders.defaults import ARCHIVE_ROOT, standard_root_for_code, standard_root_for_name
+from apps.folders.defaults import (
+    ARCHIVE_ROOT,
+    STANDARD_PUBLIC_ROOTS,
+    standard_root_for_code,
+    standard_root_for_name,
+)
 from apps.folders.models import Folder
+from apps.folders.selectors import active_visible_folders_for_user
 from common.downloads import protected_download_response
 
 from .models import Document
@@ -21,6 +30,7 @@ from .selectors import (
 )
 from .serializers import (
     DocumentBatchDownloadSerializer,
+    DocumentFolderDownloadSerializer,
     DocumentMoveSerializer,
     DocumentMutationSerializer,
     DocumentSerializer,
@@ -31,6 +41,8 @@ from .serializers import (
 )
 from .services import (
     build_batch_download_zip,
+    build_document_center_download_zip,
+    build_folder_download_zip,
     create_document,
     create_document_version,
     move_document,
@@ -99,6 +111,8 @@ class DocumentViewSet(
             return DocumentMutationSerializer
         if self.action == "batch_download":
             return DocumentBatchDownloadSerializer
+        if self.action == "folder_download":
+            return DocumentFolderDownloadSerializer
         return DocumentSerializer
 
     @extend_schema(request=DocumentUploadSerializer, responses=DocumentSerializer)
@@ -257,6 +271,99 @@ class DocumentViewSet(
         response["X-Archive-Uncompressed-Size"] = str(total_size)
         return response
 
+    @extend_schema(
+        request=None,
+        responses={(200, "application/zip"): OpenApiTypes.BINARY},
+    )
+    @action(detail=False, methods=["post"], url_path="center-download")
+    def center_download(self, request):
+        standard_root_codes = [
+            *(definition.code for definition in STANDARD_PUBLIC_ROOTS),
+            ARCHIVE_ROOT.code,
+        ]
+        root_folders = list(
+            active_visible_folders_for_user(request.user)
+            .filter(
+                project__isnull=True,
+                parent__isnull=True,
+                code__in=standard_root_codes,
+            )
+            .order_by("sort_order", "id")
+        )
+        folder_root_ids: dict[int, int] = {}
+        for root_folder in root_folders:
+            for folder_id in descendant_folder_ids(str(root_folder.pk)):
+                folder_root_ids.setdefault(folder_id, root_folder.pk)
+
+        folder_ids = list(folder_root_ids)
+        folders = list(
+            Folder.objects.filter(pk__in=folder_ids, is_active=True)
+            .select_related("project", "parent")
+            .order_by("sort_order", "id")
+        )
+        documents = (
+            visible_documents_for_user(request.user)
+            .filter(folder_id__in=folder_ids)
+            .order_by("folder_id", "id")
+            .iterator(chunk_size=200)
+        )
+        archive, filename, total_size, archive_size, document_count = (
+            build_document_center_download_zip(
+                actor=request.user,
+                root_folders=root_folders,
+                folders=folders,
+                folder_root_ids=folder_root_ids,
+                documents=documents,
+                request=request,
+            )
+        )
+        return _zip_download_response(
+            archive=archive,
+            filename=filename,
+            total_size=total_size,
+            archive_size=archive_size,
+            document_count=document_count,
+        )
+
+    @extend_schema(
+        request=DocumentFolderDownloadSerializer,
+        responses={(200, "application/zip"): OpenApiTypes.BINARY},
+    )
+    @action(detail=False, methods=["post"], url_path="folder-download")
+    def folder_download(self, request):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        folder = get_object_or_404(
+            active_visible_folders_for_user(request.user),
+            pk=serializer.validated_data["folder"],
+        )
+        folder_ids = descendant_folder_ids(str(folder.pk))
+        folders = list(
+            Folder.objects.filter(pk__in=folder_ids, is_active=True)
+            .select_related("project", "parent")
+            .order_by("sort_order", "id")
+        )
+        documents = (
+            visible_documents_for_user(request.user)
+            .filter(folder_id__in=folder_ids)
+            .order_by("folder_id", "id")
+            .iterator(chunk_size=200)
+        )
+        archive, filename, total_size, archive_size, document_count = build_folder_download_zip(
+            actor=request.user,
+            root_folder=folder,
+            folders=folders,
+            documents=documents,
+            request=request,
+        )
+        return _zip_download_response(
+            archive=archive,
+            filename=filename,
+            total_size=total_size,
+            archive_size=archive_size,
+            document_count=document_count,
+        )
+
     @extend_schema(request=None, responses={200: bytes})
     @action(detail=True, methods=["get"])
     def download(self, request, pk=None):
@@ -314,3 +421,24 @@ def descendant_folder_ids(raw_folder_id: str) -> list[int]:
         frontier = [child_id for child_id in child_ids if child_id not in folder_ids]
         folder_ids.extend(frontier)
     return folder_ids
+
+
+def _zip_download_response(
+    *,
+    archive,
+    filename: str,
+    total_size: int,
+    archive_size: int,
+    document_count: int,
+) -> FileResponse:
+    response = FileResponse(
+        archive,
+        as_attachment=True,
+        content_type="application/zip",
+    )
+    response["Content-Disposition"] = f"attachment; filename*=UTF-8''{quote(filename, safe='')}"
+    response["Content-Length"] = str(archive_size)
+    response["X-Archive-Uncompressed-Size"] = str(total_size)
+    response["X-Archive-Document-Count"] = str(document_count)
+    response["X-Content-Type-Options"] = "nosniff"
+    return response

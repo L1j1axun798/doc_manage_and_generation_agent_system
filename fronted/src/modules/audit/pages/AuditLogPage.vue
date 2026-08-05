@@ -77,13 +77,6 @@ async function openDetail(auditLog: AuditLog): Promise<void> {
 
 <template>
   <section class="audit-page">
-    <header class="audit-page__header">
-      <div>
-        <h1>审计中心</h1>
-        <p>查询系统关键操作、权限拒绝、下载和授权记录。</p>
-      </div>
-    </header>
-
     <section class="audit-page__filters">
       <el-input v-model="search" clearable placeholder="搜索动作、资源、错误或请求 ID" @keyup.enter="submitSearch" />
       <el-input v-model="action" clearable placeholder="动作，例如 document.download" />

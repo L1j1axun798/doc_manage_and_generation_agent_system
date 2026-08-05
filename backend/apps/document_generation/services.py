@@ -17,7 +17,7 @@ from apps.documents.models import Document, DocumentVersion
 from apps.documents.services import create_document
 from apps.folders.defaults import ENTRY_PREPARATION_ROOT_CODE
 from apps.folders.models import Folder
-from apps.projects.models import Project
+from apps.projects.models import Project, ProjectMember
 from common.storage import LocalDocumentStorage
 
 from .engine.canonical_facts import (
@@ -95,6 +95,7 @@ def _fingerprint(payload: Any) -> str:
 
 
 def _task_snapshot(task: GenerationTask) -> dict[str, Any]:
+    personnel = (task.conversation_context or {}).get("personnel", [])
     return {
         "id": str(task.pk),
         "project_id": task.project_id,
@@ -106,6 +107,7 @@ def _task_snapshot(task: GenerationTask) -> dict[str, Any]:
         "progress": task.progress,
         "error_code": task.error_code,
         "output_document_version_id": task.output_document_version_id,
+        "personnel_count": len(personnel) if isinstance(personnel, list) else 0,
         "deleted_at": task.deleted_at.isoformat() if task.deleted_at else None,
     }
 
@@ -309,6 +311,71 @@ def _normalize_initial_facts(facts: list[dict[str, Any]]) -> list[dict[str, Any]
     return normalized
 
 
+def _normalize_conversation_context(
+    *,
+    project: Project,
+    template: DocumentTemplate,
+    context: dict[str, Any] | None,
+) -> dict[str, Any]:
+    raw_context = context or {}
+    initial_message = str(raw_context.get("initial_message", "")).strip()
+    selected_ids = list(dict.fromkeys(raw_context.get("selected_personnel_ids", [])))
+    members = {
+        member.user_id: member
+        for member in ProjectMember.objects.select_related("user").filter(
+            project=project,
+            user_id__in=selected_ids,
+            user__is_active=True,
+        )
+    }
+    missing_ids = [personnel_id for personnel_id in selected_ids if personnel_id not in members]
+    if missing_ids:
+        raise DocumentGenerationError(
+            "PERSONNEL_INVALID",
+            "所选人员不属于当前项目或已停用，请刷新人员列表后重试",
+        )
+    personnel = []
+    for personnel_id in selected_ids:
+        member = members[personnel_id]
+        personnel.append(
+            {
+                "id": str(member.user_id),
+                "name": member.user.real_name.strip() or member.user.username,
+                "job_title": member.get_role_display(),
+                "department": "",
+                "contact": "",
+                "certifications": [],
+                "certificate_valid_until": None,
+                "additional_info": {
+                    "project_member_id": member.pk,
+                    "project_role": member.role,
+                },
+            }
+        )
+    return {
+        "initial_message": initial_message,
+        "personnel": personnel,
+        "template": {
+            "id": str(template.pk),
+            "code": template.code,
+            "name": str(template.field_mapping.get("template_name") or template.client_name).strip()
+            or template.document_version.original_filename,
+            "filename": template.document_version.original_filename,
+            "version": template.version,
+            "document_version_id": template.document_version_id,
+            "format_locked": True,
+            "constraints": {
+                "preserve_section_order": True,
+                "preserve_heading_levels": True,
+                "preserve_tables": True,
+                "preserve_headers_and_footers": True,
+                "preserve_typography_and_numbering": True,
+                "fill_only_allowed_positions": True,
+            },
+        },
+    }
+
+
 @transaction.atomic
 def create_generation_task(
     *,
@@ -319,6 +386,7 @@ def create_generation_task(
     business_type: str,
     idempotency_key: str,
     initial_facts: list[dict[str, Any]],
+    conversation_context: dict[str, Any] | None = None,
     request: Any = None,
 ) -> tuple[GenerationTask, bool]:
     if not can_use_generation(actor, project):
@@ -341,6 +409,11 @@ def create_generation_task(
     ):
         raise DocumentGenerationError("TEMPLATE_INVALID", "模板未批准或未启用")
     normalized_facts = _normalize_initial_facts(initial_facts)
+    normalized_context = _normalize_conversation_context(
+        project=project,
+        template=template,
+        context=conversation_context,
+    )
     clean_key = idempotency_key.strip()
     if not clean_key:
         raise DocumentGenerationError("IDEMPOTENCY_KEY_REQUIRED", "缺少创建幂等键")
@@ -351,6 +424,7 @@ def create_generation_task(
             "document_purpose": document_purpose,
             "business_type": business_type,
             "facts": normalized_facts,
+            "conversation_context": normalized_context,
         }
     )
     existing = GenerationTask.objects.filter(
@@ -373,6 +447,7 @@ def create_generation_task(
             business_type=business_type,
             idempotency_key=clean_key,
             request_fingerprint=request_fingerprint,
+            conversation_context=normalized_context,
             facts_snapshot=normalized_facts,
             pending_section_codes=list(template.section_order),
             created_by=actor,
@@ -530,6 +605,7 @@ def start_compilation_pipeline(
     business_type: str,
     idempotency_key: str,
     initial_facts: list[dict[str, Any]],
+    conversation_context: dict[str, Any] | None = None,
     request: Any = None,
 ) -> tuple[GenerationTask, bool]:
     """Create, bind sources and queue extraction as one database operation."""
@@ -541,6 +617,7 @@ def start_compilation_pipeline(
         business_type=business_type,
         idempotency_key=idempotency_key,
         initial_facts=initial_facts,
+        conversation_context=conversation_context,
         request=request,
     )
     if not created and task.status != GenerationTask.Status.DRAFT:

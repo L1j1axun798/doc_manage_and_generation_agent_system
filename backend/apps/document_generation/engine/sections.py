@@ -8,6 +8,7 @@ from .contracts import (
     ENTRY_PLAN_SECTION_BLUEPRINTS,
     ENTRY_PLAN_SECTION_MIN_CHARACTERS,
     ENTRY_PLAN_SECTION_TITLES,
+    AgentConversationContext,
     ClauseSelection,
     ConfirmedFact,
     GeneratedSection,
@@ -30,6 +31,7 @@ class SectionContextBuilder:
         risk_profile: RiskProfile,
         clauses: Sequence[ClauseSelection],
         retrieval: RetrievalResult,
+        conversation_context: AgentConversationContext | None = None,
         revision_instruction: str = "",
         revision_conversation: Sequence[str] = (),
         revision_required_literals: Sequence[str] = (),
@@ -53,6 +55,14 @@ class SectionContextBuilder:
                 f"确定性最低门禁为{minimum_characters}个中文字符"
             )
         quality_parts.append("资料不足时必须登记缺项，不得编造")
+        active_conversation_context = conversation_context or AgentConversationContext()
+        if (
+            active_conversation_context.template is not None
+            and active_conversation_context.template.format_locked
+        ):
+            quality_parts.append(
+                "严格使用当前批准模板，只填写允许位置，不得改变章节顺序、标题层级、表格和版式"
+            )
         references = tuple(
             {
                 reference.chunk_id: reference
@@ -66,6 +76,7 @@ class SectionContextBuilder:
             risk_profile=risk_profile,
             clauses=tuple(clauses),
             references=references,
+            conversation_context=active_conversation_context,
             revision_instruction=revision_instruction,
             revision_conversation=tuple(revision_conversation),
             revision_required_literals=tuple(revision_required_literals),

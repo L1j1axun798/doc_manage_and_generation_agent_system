@@ -838,6 +838,48 @@ paths:
                 type: string
                 format: binary
           description: ''
+  /api/v1/documents/center-download/:
+    post:
+      operationId: v1_documents_center_download_create
+      tags:
+      - v1
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+          description: ''
+  /api/v1/documents/folder-download/:
+    post:
+      operationId: v1_documents_folder_download_create
+      tags:
+      - v1
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/DocumentFolderDownload'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/DocumentFolderDownload'
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DocumentFolderDownload'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+          description: ''
   /api/v1/documents/trash/:
     get:
       operationId: v1_documents_trash_list
@@ -2357,6 +2399,14 @@ components:
           minItems: 1
       required:
       - document_ids
+    DocumentFolderDownload:
+      type: object
+      properties:
+        folder:
+          type: integer
+          minimum: 1
+      required:
+      - folder
     DocumentGrant:
       type: object
       properties:

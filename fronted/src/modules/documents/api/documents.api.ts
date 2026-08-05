@@ -94,6 +94,64 @@ export async function downloadDocument(document: DocumentItem): Promise<void> {
   saveBlob(response.data, filename)
 }
 
+export async function downloadFolder(folderId: number): Promise<void> {
+  await downloadArchive(
+    '/documents/folder-download/',
+    { folder: folderId },
+    '资料目录.zip',
+  )
+}
+
+export async function downloadDocumentCenter(): Promise<void> {
+  await downloadArchive(
+    '/documents/center-download/',
+    {},
+    '资料中心全部资料.zip',
+  )
+}
+
+async function downloadArchive(
+  url: string,
+  payload: Record<string, unknown>,
+  fallbackFilename: string,
+): Promise<void> {
+  const response = await apiClient.post<Blob>(
+    url,
+    payload,
+    {
+      responseType: 'blob',
+      validateStatus: () => true,
+    },
+  )
+  if (response.status < 200 || response.status >= 300) {
+    throw {
+      status: response.status,
+      detail: await readBlobErrorDetail(response.data),
+    }
+  }
+
+  const filename = getFilenameFromContentDisposition(response.headers['content-disposition'] ?? null)
+    || fallbackFilename
+  saveBlob(response.data, filename)
+}
+
+async function readBlobErrorDetail(blob: Blob): Promise<string> {
+  try {
+    const payload: unknown = JSON.parse(await blob.text())
+    if (typeof payload === 'object' && payload !== null) {
+      if ('message' in payload && typeof payload.message === 'string' && payload.message.trim()) {
+        return payload.message
+      }
+      if ('detail' in payload && typeof payload.detail === 'string' && payload.detail.trim()) {
+        return payload.detail
+      }
+    }
+  } catch {
+    // Fall through to a stable user-facing download error.
+  }
+  return '目录下载失败，请稍后重试'
+}
+
 function cleanQuery(query: DocumentListQuery): DocumentListQuery {
   return Object.fromEntries(
     Object.entries(query).filter(([, value]) => value !== undefined && value !== ''),
