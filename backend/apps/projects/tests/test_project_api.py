@@ -66,17 +66,38 @@ def test_system_admin_can_create_project_and_manager_membership(client):
 
 
 @pytest.mark.django_db
-def test_non_admin_cannot_create_project(client):
-    manager = make_user("manager", User.Role.PROJECT_MANAGER)
-    client.force_login(manager)
+@pytest.mark.parametrize(
+    "role",
+    [
+        User.Role.PROJECT_MANAGER,
+        User.Role.DATA_OPERATOR,
+        User.Role.TEMPORARY_USER,
+    ],
+)
+def test_authenticated_user_can_create_project_and_becomes_manager(client, role):
+    creator = make_user(f"creator-{role}", role)
+    other = make_user(f"other-{role}", role)
+    client.force_login(creator)
 
     response = client.post(
         "/api/v1/projects/",
-        {"name": "风场检测", "code": "P001"},
+        {
+            "name": "风场检测",
+            "code": f"P-{role}",
+            "manager": other.id,
+        },
         content_type="application/json",
     )
 
-    assert response.status_code == 403
+    assert response.status_code == 201
+    project = Project.objects.get(code=f"P-{role}")
+    membership = ProjectMember.objects.get(project=project, user=creator)
+    assert project.created_by == creator
+    assert project.manager == creator
+    assert membership.role == ProjectMember.Role.MANAGER
+    assert membership.can_manage_permission is True
+    assert not ProjectMember.objects.filter(project=project, user=other).exists()
+    assert client.get(f"/api/v1/projects/{project.pk}/").status_code == 200
 
 
 @pytest.mark.django_db

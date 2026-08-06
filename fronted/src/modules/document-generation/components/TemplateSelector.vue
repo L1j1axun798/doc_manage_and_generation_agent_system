@@ -1,16 +1,12 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 
-import type {
-  ClientTemplateCandidate,
-  DocumentGenerationTemplate,
-} from '../document-generation.types'
+import type { DocumentGenerationTemplate } from '../document-generation.types'
 
 const props = defineProps<{
   modelValue: boolean
   templates: DocumentGenerationTemplate[]
   selectedId: number | null
-  candidates: ClientTemplateCandidate[]
   uploading?: boolean
 }>()
 
@@ -69,7 +65,7 @@ function handleFile(event: Event): void {
 <template>
   <el-dialog v-model="visible" title="选择甲方模板" width="min(720px, 94vw)" destroy-on-close>
     <el-alert
-      title="正式生成只允许使用已审核登记的模板；上传的新模板会同步到当前项目“入场前置资料”，待管理员登记后再使用。"
+      title="普通用户和管理员均可自主选择或上传甲方提供的 DOCX 模板，无需审核即可用于生成；当前项目存在“入场前置资料”目录时会自动同步。"
       type="info"
       :closable="false"
       show-icon
@@ -99,14 +95,7 @@ function handleFile(event: Event): void {
         </span>
       </el-radio>
     </el-radio-group>
-    <el-empty v-else :image-size="72" description="没有匹配的已登记模板" />
-
-    <div v-if="candidates.length" class="template-selector__pending">
-      <strong>本会话已上传，待登记</strong>
-      <el-tag v-for="candidate in candidates" :key="candidate.document_version_id" type="warning">
-        {{ candidate.filename }}
-      </el-tag>
-    </div>
+    <el-empty v-else :image-size="72" description="没有匹配的可用模板" />
 
     <template #footer>
       <el-button @click="visible = false">取消</el-button>
@@ -162,15 +151,6 @@ function handleFile(event: Event): void {
   color: var(--color-text-secondary);
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.template-selector__pending {
-  display: flex;
-  margin-top: 16px;
-  padding-top: 14px;
-  border-top: 1px solid var(--color-border-light);
-  flex-wrap: wrap;
-  gap: 8px;
 }
 
 @media (max-width: 640px) {

@@ -6,42 +6,71 @@ import { getErrorMessage } from '@/core/http/error-normalizer'
 import type { ApiPage } from '@/shared/types/api.types'
 import { formatDateTime, formatFileSize } from '@/shared/utils/format'
 import { createFolder, disableFolder, fetchFolders, moveFolder, updateFolder } from '../api/folders.api'
+import { fetchPersonnel, updatePersonnel } from '../api/personnel.api'
 import { fetchHealthStatus, fetchLatestSystemBackup } from '../api/system.api'
 import FolderFormDialog from '../components/FolderFormDialog.vue'
 import FolderMoveDialog from '../components/FolderMoveDialog.vue'
 import FolderTable from '../components/FolderTable.vue'
+import PersonnelFormDialog from '../components/PersonnelFormDialog.vue'
+import PersonnelTable from '../components/PersonnelTable.vue'
 import type {
   FolderCreatePayload,
   FolderMovePayload,
   FolderUpdatePayload,
   HealthStatus,
+  PersonnelRecord,
+  PersonnelUpdatePayload,
   SystemBackupRun,
   SystemBackupStatus,
   SystemBackupTrigger,
   SystemFolder,
 } from '../system.types'
 
-const activeTab = ref('directories')
+const activeTab = ref('personnel')
 const folders = ref<SystemFolder[]>([])
+const personnel = ref<PersonnelRecord[]>([])
 const health = ref<HealthStatus | null>(null)
 const backup = ref<SystemBackupRun | null>(null)
 const total = ref(0)
 const page = ref(1)
+const personnelPage = ref(1)
 const search = ref('')
+const personnelSearch = ref('')
 const folderLoading = ref(false)
+const personnelLoading = ref(false)
 const healthLoading = ref(false)
 const backupLoading = ref(false)
 const mutationLoading = ref(false)
 const formVisible = ref(false)
+const personnelFormVisible = ref(false)
 const moveVisible = ref(false)
 const editingFolder = ref<SystemFolder | null>(null)
+const editingPerson = ref<PersonnelRecord | null>(null)
+const personnelTotal = ref(0)
 const movingFolder = ref<SystemFolder | null>(null)
 
 const statusType = computed(() => (health.value?.status === 'ok' ? 'success' : 'danger'))
 
 onMounted(async () => {
-  await Promise.all([loadFolders(), loadHealth(), loadBackup()])
+  await Promise.all([loadFolders(), loadPersonnel(), loadHealth(), loadBackup()])
 })
+
+async function loadPersonnel(): Promise<void> {
+  personnelLoading.value = true
+  try {
+    const response = await fetchPersonnel({
+      page: personnelPage.value,
+      search: personnelSearch.value,
+      ordering: 'sort_order',
+    })
+    personnel.value = response.results
+    personnelTotal.value = response.count
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error))
+  } finally {
+    personnelLoading.value = false
+  }
+}
 
 async function loadFolders(): Promise<void> {
   folderLoading.value = true
@@ -117,6 +146,36 @@ function submitSearch(): void {
 function resetSearch(): void {
   search.value = ''
   submitSearch()
+}
+
+function submitPersonnelSearch(): void {
+  personnelPage.value = 1
+  void loadPersonnel()
+}
+
+function resetPersonnelSearch(): void {
+  personnelSearch.value = ''
+  submitPersonnelSearch()
+}
+
+function openPersonnelEdit(person: PersonnelRecord): void {
+  editingPerson.value = person
+  personnelFormVisible.value = true
+}
+
+async function submitPersonnel(payload: PersonnelUpdatePayload): Promise<void> {
+  if (!editingPerson.value) return
+  personnelLoading.value = true
+  try {
+    await updatePersonnel(editingPerson.value.folder_id, payload)
+    personnelFormVisible.value = false
+    ElMessage.success('人员信息已保存')
+    await loadPersonnel()
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error))
+  } finally {
+    personnelLoading.value = false
+  }
 }
 
 function openCreate(): void {
@@ -206,6 +265,40 @@ async function disableCurrentFolder(folder: SystemFolder): Promise<void> {
 <template>
   <section class="system-page">
     <el-tabs v-model="activeTab" class="system-page__tabs">
+      <el-tab-pane label="人员信息" name="personnel">
+        <el-alert
+          title="人员名单来自“资料中心 → 人员资质”的一级人员目录；新增或改名请在资料目录配置中操作。"
+          type="info"
+          :closable="false"
+          show-icon
+        />
+        <section class="system-page__toolbar">
+          <el-input
+            v-model="personnelSearch"
+            clearable
+            placeholder="搜索姓名、身份证号或手机号"
+            @keyup.enter="submitPersonnelSearch"
+          />
+          <el-button :loading="personnelLoading" type="primary" @click="submitPersonnelSearch">查询</el-button>
+          <el-button @click="resetPersonnelSearch">重置</el-button>
+        </section>
+        <PersonnelTable
+          :personnel="personnel"
+          :loading="personnelLoading"
+          @edit="openPersonnelEdit"
+        />
+        <footer class="system-page__pagination">
+          <el-pagination
+            background
+            layout="prev, pager, next, total"
+            :current-page="personnelPage"
+            :page-size="20"
+            :total="personnelTotal"
+            @current-change="(nextPage: number) => { personnelPage = nextPage; void loadPersonnel() }"
+          />
+        </footer>
+      </el-tab-pane>
+
       <el-tab-pane label="资料目录配置" name="directories">
         <section class="system-page__toolbar">
           <el-input v-model="search" clearable placeholder="搜索目录名称或编码" @keyup.enter="submitSearch" />
@@ -328,6 +421,13 @@ async function disableCurrentFolder(folder: SystemFolder): Promise<void> {
       :loading="mutationLoading"
       :parent-options="folders"
       @submit="submitMove"
+    />
+
+    <PersonnelFormDialog
+      v-model="personnelFormVisible"
+      :person="editingPerson"
+      :loading="personnelLoading"
+      @submit="submitPersonnel"
     />
   </section>
 </template>

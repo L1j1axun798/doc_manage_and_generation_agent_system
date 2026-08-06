@@ -67,6 +67,11 @@ it('only accepts current entry-material documents as generation sources', () => 
     isEligibleEntrySource(documentItem({ title: '塔筒检测报告' })),
   ).toBe(false)
   expect(
+    isEligibleEntrySource(documentItem({
+      description: '四措两案 Agent 甲方模板同步副本，请勿作为生成来源资料。',
+    })),
+  ).toBe(false)
+  expect(
     isEligibleEntrySource(documentItem({ current_version: null })),
   ).toBe(false)
 })

@@ -2,6 +2,7 @@
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue'
 
+import { appConfig } from '@/config/app'
 import { getErrorMessage } from '@/core/http/error-normalizer'
 import { useAuthStore } from '@/modules/auth/stores/auth.store'
 import { downloadDocument, fetchDocument, fetchDocuments } from '@/modules/documents/api/documents.api'
@@ -23,6 +24,7 @@ import {
   regenerateSection,
   retryGenerationTask,
   setGeneratedSectionLock,
+  selectGenerationTemplate,
   startGenerationPipeline,
   stopGenerationTask,
   submitGenerationReview,
@@ -45,7 +47,7 @@ import {
   type GenerationTraceEvent,
   type SourceLocator,
 } from '../document-generation.types'
-import { uploadClientTemplateCandidate, uploadConversationAttachment } from '../services/client-template.service'
+import { uploadClientTemplate, uploadConversationAttachment } from '../services/client-template.service'
 import { fetchAvailableAgentPersonnel } from '../services/personnel.service'
 import { useConversationContextStore } from '../stores/conversation-context.store'
 import AgentStatusIndicator from './AgentStatusIndicator.vue'
@@ -134,11 +136,12 @@ const revisionQuickCommands = [
   '优先吸收已批准RAG中的专业做法',
 ]
 const MAX_CONVERSATION_SOURCE_COUNT = 5
-const starterPrompts = [
-  '请分析已选入场资料，提取关键事实并编制四措两案初稿。',
-  '请重点核对入场人员分工、资质要求和安全责任后开始编制。',
-  '请结合当前项目风险和甲方要求，生成便于技术负责人审核的初稿。',
-]
+const currentUsername = computed(
+  () => authStore.user?.real_name?.trim() || authStore.user?.username?.trim() || '用户',
+)
+const welcomeGreeting = computed(
+  () => props.project ? `hello,${currentUsername.value},今天从哪里开始？` : '请先选择项目',
+)
 const showSectionReview = computed(
   () => Boolean(
     selectedTask.value?.sections.length
@@ -153,7 +156,7 @@ const draftTemplate = computed(
 )
 const draftPersonnel = computed<AgentPersonnelContext[]>(() =>
   draftContext.value.personnelIds
-    .map((id) => availablePersonnel.value.find((person) => person.user_id === id))
+    .map((id) => availablePersonnel.value.find((person) => person.folder_id === id))
     .filter((person): person is AvailableAgentPersonnel => Boolean(person)),
 )
 const activePersonnel = computed<AgentPersonnelContext[]>(() =>
@@ -169,11 +172,7 @@ const activeSources = computed<ConversationSourceAttachment[]>(() => {
       filename: source.filename,
     }))
   }
-  const candidateVersionIds = new Set(
-    draftContext.value.pendingTemplateCandidates.map((candidate) => candidate.document_version_id),
-  )
   return draftContext.value.sourceVersionIds
-    .filter((versionId) => !candidateVersionIds.has(versionId))
     .map((versionId) => {
       const document = documents.value.find((item) => item.current_version?.id === versionId)
       return {
@@ -407,7 +406,7 @@ async function loadInitialData(): Promise<void> {
   loading.value = true
   try {
     const [templateRows, documentRows, taskRows] = await Promise.all([
-      fetchGenerationTemplates(),
+      fetchGenerationTemplates(projectId || undefined),
       projectId ? fetchAllProjectDocuments(projectId) : Promise.resolve([]),
       projectId ? fetchAllGenerationTasks(projectId) : Promise.resolve([]),
     ])
@@ -537,10 +536,6 @@ function agentStatusMessage(task: GenerationTask): string {
   if (task.status === 'failed') return '本次处理未完成，请查看错误和恢复建议后重试。'
   if (task.status === 'cancelled') return '本会话已停止，已产生的中间内容仍保留。'
   return 'Agent 正在分析资料并执行当前编制步骤，完成后会自动更新。'
-}
-
-function useStarterPrompt(prompt: string): void {
-  draftContext.value.message = prompt
 }
 
 async function refreshConversation(task: GenerationTask): Promise<void> {
@@ -724,8 +719,25 @@ function requireSelectedProject(): Project | null {
   return props.project
 }
 
-function selectDraftTemplate(templateId: number | null): void {
-  draftContext.value.templateId = templateId
+async function selectDraftTemplate(templateId: number | null): Promise<void> {
+  if (!templateId) {
+    draftContext.value.templateId = null
+    return
+  }
+  const project = requireSelectedProject()
+  if (!project) return
+  try {
+    const selected = await selectGenerationTemplate(templateId, project.id)
+    draftContext.value.templateId = selected.id
+    if (selected.sync_status === 'synced') {
+      documents.value = await fetchAllProjectDocuments(project.id)
+      ElMessage.success('甲方模板已选择并同步到“入场前置资料”')
+    } else if (selected.sync_status === 'folder_missing') {
+      ElMessage.success('甲方模板已选择；当前项目无“入场前置资料”目录，未执行同步')
+    }
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error))
+  }
 }
 
 function selectDraftPersonnel(personnelIds: number[]): void {
@@ -744,34 +756,24 @@ function removeDraftSource(versionId: number): void {
     .filter((sourceVersionId) => sourceVersionId !== versionId)
 }
 
-function removeTemplateCandidate(versionId: number): void {
-  draftContext.value.pendingTemplateCandidates = draftContext.value.pendingTemplateCandidates
-    .filter((candidate) => candidate.document_version_id !== versionId)
-  draftContext.value.sourceVersionIds = draftContext.value.sourceVersionIds
-    .filter((sourceVersionId) => sourceVersionId !== versionId)
-}
-
 async function handleTemplateUpload(file: File): Promise<void> {
   const project = requireSelectedProject()
   if (!project) return
-  if (draftContext.value.sourceVersionIds.length >= MAX_CONVERSATION_SOURCE_COUNT) {
-    ElMessage.warning(`当前会话最多添加 ${MAX_CONVERSATION_SOURCE_COUNT} 份资料`)
-    return
-  }
   uploadLoading.value = true
   try {
-    const candidate = await uploadClientTemplateCandidate(project.id, file)
-    draftContext.value.pendingTemplateCandidates = [
-      ...draftContext.value.pendingTemplateCandidates.filter(
-        (item) => item.document_version_id !== candidate.document_version_id,
-      ),
-      candidate,
+    const template = await uploadClientTemplate(project.id, file)
+    templates.value = [
+      template,
+      ...templates.value.filter((item) => item.id !== template.id),
     ]
-    if (!draftContext.value.sourceVersionIds.includes(candidate.document_version_id)) {
-      draftContext.value.sourceVersionIds.push(candidate.document_version_id)
-    }
+    draftContext.value.templateId = template.id
+    templateSelectorVisible.value = false
     documents.value = await fetchAllProjectDocuments(project.id)
-    ElMessage.success('甲方模板已同步到“入场前置资料”，完成管理员登记后可作为正式模板使用')
+    if (template.sync_status === 'synced') {
+      ElMessage.success('甲方模板已选择并同步到“入场前置资料”，可直接用于生成')
+    } else {
+      ElMessage.success('甲方模板已选择，可直接用于生成；当前项目无“入场前置资料”目录，未执行同步')
+    }
   } catch (error) {
     ElMessage.error(getErrorMessage(error))
   } finally {
@@ -1309,6 +1311,7 @@ async function runAction(action: () => Promise<void>): Promise<void> {
     <div class="doc-agent__workbench">
       <ConversationSidebar
         :tasks="tasks"
+        :username="currentUsername"
         :active-task-id="selectedTask?.id || null"
         :opening-task-id="openingTaskId"
         :action-task-id="conversationActionTaskId"
@@ -1338,25 +1341,21 @@ async function runAction(action: () => Promise<void>): Promise<void> {
           @scroll.passive="handleMessagesScroll"
         >
           <section v-if="!selectedTask" class="doc-agent__welcome">
-            <span class="doc-agent__welcome-mark">AI</span>
-            <h2>{{ project ? '开始编制本项目的四措两案' : '请先选择项目' }}</h2>
-            <p v-if="project">选择已批准的甲方模板、入场人员和来源资料，然后发送编制要求。系统会在同一会话内完成事实核对、生成、修改、批准和导出。</p>
+            <span class="doc-agent__welcome-logo" aria-hidden="true">
+              <img :src="appConfig.logoUrl" alt="" />
+            </span>
+            <h2 :key="welcomeGreeting" :aria-label="welcomeGreeting" class="doc-agent__welcome-greeting">
+              <span
+                v-for="(character, index) in Array.from(welcomeGreeting)"
+                :key="`${index}-${character}`"
+                class="doc-agent__welcome-character"
+                :style="{ animationDelay: `${index * 45}ms` }"
+                aria-hidden="true"
+              >{{ character }}</span>
+              <span class="doc-agent__welcome-cursor" aria-hidden="true" />
+            </h2>
+            <p v-if="project">自主选择或上传甲方模板，并选择入场人员和来源资料，然后发送编制要求。系统会在同一会话内完成事实核对、生成、修改、批准和导出。</p>
             <p v-else>请在上方项目选择框中选择一个在执行项目。选择后，会话记录、模板、人员和资料将在当前界面直接加载。</p>
-            <div v-if="project" class="doc-agent__starter-prompts">
-              <button v-for="prompt in starterPrompts" :key="prompt" type="button" @click="useStarterPrompt(prompt)">
-                {{ prompt }}
-              </button>
-            </div>
-            <el-alert
-              :title="
-                project
-                  ? '本功能仅编制入场前四措两案，不生成检测报告、实测结论或完工资料。'
-                  : '未选择项目，发送消息及模板、人员、资料等项目相关操作已禁用。'
-              "
-              type="warning"
-              :closable="false"
-              show-icon
-            />
           </section>
 
           <template v-else>
@@ -1842,7 +1841,6 @@ async function runAction(action: () => Promise<void>): Promise<void> {
             :upload-loading="uploadLoading"
             :disabled="composerDisabled"
             :can-send="composerCanSend"
-            :template-missing="Boolean(project) && !selectedTask && !draftTemplate"
             :helper-text="composerHelperText"
             :editable-context="Boolean(project) && !selectedTask"
             :source-count="draftContext.sourceVersionIds.length"
@@ -1870,7 +1868,6 @@ async function runAction(action: () => Promise<void>): Promise<void> {
                 :sources="activeSources"
                 :source-count="activeSourceCount"
                 :max-source-count="MAX_CONVERSATION_SOURCE_COUNT"
-                :candidates="selectedTask ? [] : draftContext.pendingTemplateCandidates"
                 :editable="!selectedTask"
                 @template="openTemplateSelector"
                 @personnel="openPersonnelSelector"
@@ -1878,7 +1875,6 @@ async function runAction(action: () => Promise<void>): Promise<void> {
                 @remove-template="draftContext.templateId = null"
                 @remove-personnel="removeDraftPersonnel"
                 @remove-source="removeDraftSource"
-                @remove-candidate="removeTemplateCandidate"
               />
             </template>
             <template v-if="selectedTask?.status === 'review_required'" #context-extra>
@@ -1962,7 +1958,6 @@ async function runAction(action: () => Promise<void>): Promise<void> {
       v-model="templateSelectorVisible"
       :templates="templates"
       :selected-id="draftContext.templateId"
-      :candidates="draftContext.pendingTemplateCandidates"
       :uploading="uploadLoading"
       @select="selectDraftTemplate"
       @upload="handleTemplateUpload"
@@ -2037,7 +2032,7 @@ async function runAction(action: () => Promise<void>): Promise<void> {
   border-radius: var(--radius-lg);
   background: var(--color-bg-surface);
   box-shadow: var(--shadow-1);
-  grid-template-columns: 286px minmax(0, 1fr);
+  grid-template-columns: 240px minmax(0, 1fr);
 }
 
 .doc-agent__conversation {
@@ -2080,17 +2075,46 @@ async function runAction(action: () => Promise<void>): Promise<void> {
   text-align: center;
 }
 
-.doc-agent__welcome-mark {
+.doc-agent__welcome-logo {
   display: grid;
-  width: 42px;
-  height: 42px;
-  margin: 0 auto 14px;
-  border-radius: var(--radius-md);
-  background: var(--color-brand);
-  color: var(--color-text-inverse);
-  font-size: 14px;
-  font-weight: 700;
+  position: relative;
+  width: 68px;
+  height: 68px;
+  margin: 0 auto 18px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--color-brand) 24%, var(--color-border-light));
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 8px 22px color-mix(in srgb, var(--color-brand) 18%, transparent);
   place-items: center;
+  transition: transform var(--duration-normal), box-shadow var(--duration-normal);
+}
+
+.doc-agent__welcome-logo::after {
+  position: absolute;
+  border: 1px solid color-mix(in srgb, var(--color-brand) 32%, transparent);
+  border-radius: inherit;
+  content: '';
+  inset: 4px;
+  opacity: 0;
+  transition: opacity var(--duration-normal), transform var(--duration-normal);
+}
+
+.doc-agent__welcome-logo:hover {
+  box-shadow: 0 12px 28px color-mix(in srgb, var(--color-brand) 26%, transparent);
+  transform: translateY(-3px) scale(1.04);
+}
+
+.doc-agent__welcome-logo:hover::after {
+  opacity: 1;
+  transform: scale(0.88);
+}
+
+.doc-agent__welcome-logo img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .doc-agent__welcome h2,
@@ -2105,31 +2129,48 @@ async function runAction(action: () => Promise<void>): Promise<void> {
   line-height: 1.7;
 }
 
-.doc-agent__starter-prompts {
-  display: grid;
-  margin: 24px 0 18px;
-  gap: 8px;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+.doc-agent__welcome-greeting {
+  min-height: 1.35em;
 }
 
-.doc-agent__starter-prompts button {
-  min-height: 76px;
-  padding: 11px 13px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-bg-surface);
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  font: inherit;
-  line-height: 1.55;
-  text-align: left;
-  transition: border-color var(--duration-fast), background-color var(--duration-fast);
+.doc-agent__welcome-character {
+  display: inline-block;
+  opacity: 0;
+  animation: doc-agent-stream-character 160ms ease-out forwards;
 }
 
-.doc-agent__starter-prompts button:hover {
-  border-color: var(--color-brand);
-  background: var(--color-brand-soft);
-  color: var(--color-brand);
+.doc-agent__welcome-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 3px;
+  background: var(--color-brand);
+  vertical-align: -0.08em;
+  animation: doc-agent-stream-cursor 720ms steps(1, end) infinite;
+}
+
+@keyframes doc-agent-stream-character {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes doc-agent-stream-cursor {
+  0%,
+  46% {
+    opacity: 1;
+  }
+
+  47%,
+  100% {
+    opacity: 0;
+  }
 }
 
 .doc-agent__message-turn {
@@ -2745,10 +2786,6 @@ pre {
     grid-template-rows: auto minmax(620px, 1fr);
   }
 
-  .doc-agent__starter-prompts {
-    grid-template-columns: 1fr;
-  }
-
   .doc-agent__toolbar {
     align-items: flex-start;
     flex-direction: column;
@@ -2809,6 +2846,23 @@ pre {
 
   .doc-agent__composer-footer .el-button {
     width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .doc-agent__welcome-logo,
+  .doc-agent__welcome-logo::after,
+  .doc-agent__welcome-character {
+    transition: none;
+    animation: none;
+  }
+
+  .doc-agent__welcome-character {
+    opacity: 1;
+  }
+
+  .doc-agent__welcome-cursor {
+    display: none;
   }
 }
 </style>

@@ -3,6 +3,8 @@ import ElementPlus, { ElMessageBox } from 'element-plus'
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import type { AuthUser } from '@/modules/auth/auth.types'
+import { useAuthStore } from '@/modules/auth/stores/auth.store'
 import type { GenerationTask } from '@/modules/document-generation'
 import DocumentGenerationPanel from '@/modules/document-generation/components/DocumentGenerationPanel.vue'
 import { useConversationContextStore } from '@/modules/document-generation/stores/conversation-context.store'
@@ -20,6 +22,8 @@ const mocks = vi.hoisted(() => ({
   deleteGenerationTask: vi.fn(),
   regenerateSection: vi.fn(),
   startGenerationPipeline: vi.fn(),
+  selectGenerationTemplate: vi.fn(),
+  uploadClientTemplate: vi.fn(),
   uploadConversationAttachment: vi.fn(),
 }))
 
@@ -37,6 +41,7 @@ vi.mock('@/modules/document-generation/api/document-generation.api', () => ({
   regenerateSection: mocks.regenerateSection,
   retryGenerationTask: vi.fn(),
   setGeneratedSectionLock: vi.fn(),
+  selectGenerationTemplate: mocks.selectGenerationTemplate,
   startGenerationPipeline: mocks.startGenerationPipeline,
   stopGenerationTask: mocks.stopGenerationTask,
   submitGenerationReview: vi.fn(),
@@ -54,7 +59,7 @@ vi.mock('@/modules/document-generation/services/personnel.service', () => ({
 }))
 
 vi.mock('@/modules/document-generation/services/client-template.service', () => ({
-  uploadClientTemplateCandidate: vi.fn(),
+  uploadClientTemplate: mocks.uploadClientTemplate,
   uploadConversationAttachment: mocks.uploadConversationAttachment,
 }))
 
@@ -72,6 +77,21 @@ const project: Project = {
   updated_at: '2026-07-28T08:00:00+08:00',
   archived_at: null,
   archived_by: null,
+}
+
+const currentUser: AuthUser = {
+  id: 1,
+  username: 'zhang.gong',
+  real_name: '张工',
+  employee_no: 'E001',
+  role: 'project_manager',
+  phone: '',
+  email: '',
+  is_active: true,
+  must_change_password: false,
+  webauthn_enabled: true,
+  webauthn_credentials_count: 1,
+  created_at: '2026-07-01T08:00:00+08:00',
 }
 
 const task: GenerationTask = {
@@ -180,7 +200,15 @@ describe('document generation conversation directory', () => {
 
     expect(wrapper.find('.doc-agent__workbench').exists()).toBe(true)
     expect(wrapper.text()).toContain('请先选择项目')
-    expect(wrapper.text()).toContain('项目相关操作已禁用')
+    expect(wrapper.text()).toContain('本功能仅编制入场前四措两案')
+    expect(wrapper.find('.doc-agent__welcome .el-alert').exists()).toBe(false)
+    expect(
+      wrapper.findAll('.context-attachment-bar__label').map((item) => item.text()),
+    ).toEqual(['模板', '材料', '人员'])
+    expect(wrapper.find('.chat-composer__meta').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('Enter 发送')
+    expect(wrapper.get('.chat-composer__count').text()).toBe('0/4000')
+    expect(wrapper.get('.chat-composer__actions [data-test="chat-send"]').text()).toBe('发送')
     expect(wrapper.get('[data-test="chat-send"]').attributes('disabled')).toBeDefined()
     expect(wrapper.get('.conversation-sidebar__header button').attributes('disabled')).toBeDefined()
     expect(mocks.fetchGenerationTasks).not.toHaveBeenCalled()
@@ -206,17 +234,28 @@ describe('document generation conversation directory', () => {
     mocks.fetchGenerationTask.mockResolvedValue(task)
     mocks.fetchGenerationEvents.mockResolvedValue([])
 
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    useAuthStore().user = currentUser
     const wrapper = mount(DocumentGenerationPanel, {
       props: { project },
       global: {
-        plugins: [createPinia(), ElementPlus],
+        plugins: [pinia, ElementPlus],
       },
     })
     await flushPromises()
 
     expect(wrapper.text()).toContain('编制会话')
-    expect(wrapper.text()).toContain(task.template_name)
+    expect(wrapper.text()).toContain('对话1-张工')
+    expect(wrapper.text()).not.toContain(task.template_name)
+    expect(wrapper.text()).not.toContain('2026/07/28 10:30')
     expect(wrapper.find('.conversation-sidebar').exists()).toBe(true)
+    expect(wrapper.get('.doc-agent__welcome-logo img').attributes('src')).toBe('/brand-logo.png')
+    expect(wrapper.get('.doc-agent__welcome-greeting').attributes('aria-label')).toBe(
+      'hello,张工,今天从哪里开始？',
+    )
+    expect(wrapper.find('.doc-agent__starter-prompts').exists()).toBe(false)
+    expect(wrapper.get('.conversation-sidebar__scope-note').text()).toContain('不生成检测报告')
     expect(wrapper.find('.doc-agent__task').exists()).toBe(false)
     expect(mocks.fetchGenerationTask).not.toHaveBeenCalled()
 
@@ -227,6 +266,64 @@ describe('document generation conversation directory', () => {
     expect(wrapper.find('.doc-agent__task').exists()).toBe(true)
     expect(wrapper.find('.doc-agent__message-turn--agent .doc-agent__task').exists()).toBe(true)
 
+    wrapper.unmount()
+  })
+
+  it('uses an uploaded client template immediately without adding it as a source', async () => {
+    const uploadedTemplate = {
+      id: 88,
+      code: 'CLIENT-7-abc',
+      client_name: '甲方提供',
+      display_name: '甲方现场模板',
+      business_type: 'wind_turbine_inspection_four_measures_two_plans' as const,
+      version: '自主上传',
+      document_version_id: 388,
+      filename: 'client-template.docx',
+      field_mapping: { self_service: true, project_id: project.id },
+      section_order: ['overview'],
+      required_fact_fields: ['project_name'],
+      sync_status: 'synced' as const,
+    }
+    mocks.fetchGenerationTemplates.mockResolvedValue([])
+    mocks.fetchDocuments.mockResolvedValue({
+      count: 0,
+      next: null,
+      previous: null,
+      results: [],
+    })
+    mocks.fetchGenerationTasks.mockResolvedValue({
+      count: 0,
+      next: null,
+      previous: null,
+      results: [],
+    })
+    mocks.uploadClientTemplate.mockResolvedValue(uploadedTemplate)
+
+    const pinia = createPinia()
+    const wrapper = mount(DocumentGenerationPanel, {
+      props: { project },
+      global: { plugins: [pinia, ElementPlus] },
+    })
+    await flushPromises()
+    const templateButton = wrapper.findAll('button').find((button) => button.text() === '甲方模板')
+    await templateButton?.trigger('click')
+    await wrapper.vm.$nextTick()
+    const fileInput = wrapper.get('.template-selector__file-input')
+    Object.defineProperty(fileInput.element, 'files', {
+      configurable: true,
+      value: [new File(['template'], 'client-template.docx')],
+    })
+    await fileInput.trigger('change')
+    await flushPromises()
+
+    const draft = useConversationContextStore(pinia).forProject(project.id)
+    expect(mocks.uploadClientTemplate).toHaveBeenCalledWith(
+      project.id,
+      expect.objectContaining({ name: 'client-template.docx' }),
+    )
+    expect(draft.templateId).toBe(uploadedTemplate.id)
+    expect(draft.sourceVersionIds).toEqual([])
+    expect(wrapper.text()).toContain(uploadedTemplate.display_name)
     wrapper.unmount()
   })
 

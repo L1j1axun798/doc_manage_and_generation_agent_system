@@ -2,10 +2,10 @@
 import { Delete, Plus, Refresh, VideoPause } from '@element-plus/icons-vue'
 
 import type { GenerationTask, GenerationTaskStatus } from '../document-generation.types'
-import { formatDateTime } from '@/shared/utils/format'
 
 const props = defineProps<{
   tasks: GenerationTask[]
+  username: string
   activeTaskId: string | null
   openingTaskId: string | null
   actionTaskId: string | null
@@ -55,7 +55,7 @@ function statusType(task: GenerationTask): 'danger' | 'success' | 'warning' | 'i
     />
     <div v-else class="doc-agent__conversation-list">
       <div
-        v-for="task in tasks"
+        v-for="(task, index) in tasks"
         :key="task.id"
         class="doc-agent__conversation-row"
         :class="{ 'is-active': task.id === activeTaskId }"
@@ -67,9 +67,7 @@ function statusType(task: GenerationTask): 'danger' | 'success' | 'warning' | 'i
           @click="emit('open', task)"
         >
           <span class="doc-agent__conversation-copy">
-            <strong>四措两案编制</strong>
-            <small>{{ formatDateTime(task.created_at) }}</small>
-            <small class="doc-agent__conversation-template">{{ task.template_name }}</small>
+            <strong>{{ `对话${index + 1}-${username}` }}</strong>
           </span>
           <span class="doc-agent__conversation-state">
             <el-tag size="small" :type="statusType(task)">
@@ -116,15 +114,24 @@ function statusType(task: GenerationTask): 'danger' | 'success' | 'warning' | 'i
         </div>
       </div>
     </div>
+
+    <p class="conversation-sidebar__scope-note">
+      本功能仅编制入场前四措两案，不生成检测报告、实测结论或完工资料。
+    </p>
   </aside>
 </template>
 
 <style scoped>
 .conversation-sidebar {
   display: flex;
+  width: 240px;
+  height: 100%;
   min-width: 0;
   min-height: 0;
+  max-height: 100%;
+  overflow: hidden;
   padding: 16px 12px;
+  box-sizing: border-box;
   border-right: 1px solid var(--color-border-light);
   background: var(--color-bg-surface-secondary);
   flex-direction: column;
@@ -154,15 +161,25 @@ function statusType(task: GenerationTask): 'danger' | 'success' | 'warning' | 'i
 }
 
 .conversation-sidebar__loading {
+  flex: 1 1 auto;
   padding: 24px 8px;
   text-align: center;
+}
+
+.conversation-sidebar :deep(.el-empty) {
+  min-height: 0;
+  flex: 1 1 auto;
 }
 
 .doc-agent__conversation-list {
   display: grid;
   min-height: 0;
-  overflow-y: auto;
+  overflow: hidden auto;
+  align-content: start;
+  flex: 1 1 auto;
   gap: 4px;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 .doc-agent__conversation-row {
@@ -183,6 +200,7 @@ function statusType(task: GenerationTask): 'danger' | 'success' | 'warning' | 'i
 
 .doc-agent__conversation-item {
   display: flex;
+  align-items: center;
   min-width: 0;
   padding: 11px 8px 11px 12px;
   border: 0;
@@ -211,21 +229,15 @@ function statusType(task: GenerationTask): 'danger' | 'success' | 'warning' | 'i
   flex: 1;
 }
 
-.doc-agent__conversation-copy strong,
-.doc-agent__conversation-copy small {
+.doc-agent__conversation-copy strong {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.doc-agent__conversation-copy small,
 .doc-agent__conversation-state small {
   color: var(--color-text-tertiary);
   font-size: 11px;
-}
-
-.doc-agent__conversation-template {
-  color: var(--color-text-secondary) !important;
 }
 
 .doc-agent__conversation-state {
@@ -245,8 +257,20 @@ function statusType(task: GenerationTask): 'danger' | 'success' | 'warning' | 'i
   margin-left: 0;
 }
 
+.conversation-sidebar__scope-note {
+  margin: 12px 4px 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-border-light);
+  color: var(--color-text-tertiary);
+  font-size: 11px;
+  line-height: 1.55;
+  text-align: left;
+}
+
 @media (max-width: 900px) {
   .conversation-sidebar {
+    width: 100%;
+    height: 230px;
     max-height: 230px;
     border-right: 0;
     border-bottom: 1px solid var(--color-border-light);

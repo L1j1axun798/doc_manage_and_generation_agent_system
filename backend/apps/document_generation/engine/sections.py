@@ -61,7 +61,7 @@ class SectionContextBuilder:
             and active_conversation_context.template.format_locked
         ):
             quality_parts.append(
-                "严格使用当前批准模板，只填写允许位置，不得改变章节顺序、标题层级、表格和版式"
+                "严格使用当前选定模板，只填写允许位置，不得改变章节顺序、标题层级、表格和版式"
             )
         references = tuple(
             {

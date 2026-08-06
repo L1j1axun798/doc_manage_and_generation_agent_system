@@ -1,15 +1,12 @@
 import { defineStore } from 'pinia'
 import { reactive } from 'vue'
 
-import type { ClientTemplateCandidate } from '../document-generation.types'
-
 export interface DraftConversationContext {
   projectId: number
   templateId: number | null
   personnelIds: number[]
   sourceVersionIds: number[]
   message: string
-  pendingTemplateCandidates: ClientTemplateCandidate[]
 }
 
 function emptyDraft(projectId: number): DraftConversationContext {
@@ -19,7 +16,6 @@ function emptyDraft(projectId: number): DraftConversationContext {
     personnelIds: [],
     sourceVersionIds: [],
     message: '',
-    pendingTemplateCandidates: [],
   }
 }
 

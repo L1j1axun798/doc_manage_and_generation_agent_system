@@ -11,6 +11,7 @@ import type {
   GenerationTraceEvent,
   KnowledgeCorpusUpload,
   RagOverview,
+  TemplateSelectionResult,
 } from '../document-generation.types'
 
 const TASKS = '/document-generation/tasks'
@@ -21,9 +22,37 @@ export async function fetchRagOverview(): Promise<RagOverview> {
   return response.data
 }
 
-export async function fetchGenerationTemplates(): Promise<DocumentGenerationTemplate[]> {
+export async function fetchGenerationTemplates(
+  projectId?: number,
+): Promise<DocumentGenerationTemplate[]> {
   const response = await apiClient.get<DocumentGenerationTemplate[]>(
     '/document-generation/templates/',
+    { params: projectId ? { project_id: projectId } : undefined },
+  )
+  return response.data
+}
+
+export async function uploadGenerationTemplate(
+  projectId: number,
+  file: File,
+): Promise<TemplateSelectionResult> {
+  const payload = new FormData()
+  payload.append('project_id', String(projectId))
+  payload.append('file', file)
+  const response = await apiClient.post<TemplateSelectionResult>(
+    '/document-generation/templates/',
+    payload,
+  )
+  return response.data
+}
+
+export async function selectGenerationTemplate(
+  templateId: number,
+  projectId: number,
+): Promise<TemplateSelectionResult> {
+  const response = await apiClient.post<TemplateSelectionResult>(
+    `/document-generation/templates/${templateId}/select/`,
+    { project_id: projectId },
   )
   return response.data
 }

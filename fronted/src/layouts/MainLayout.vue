@@ -27,6 +27,33 @@ const sidebarCollapsed = ref(false)
 const compactViewport = ref(false)
 let compactViewportQuery: MediaQueryList | null = null
 
+interface MenuBurstParticle {
+  id: number
+  color: string
+  delay: number
+  translateX: number
+  translateY: number
+}
+
+interface MenuBurst {
+  id: number
+  originX: number
+  originY: number
+  particles: MenuBurstParticle[]
+}
+
+const FEATURED_MENU_INDEX = '/document-generation'
+const MENU_BURST_PARTICLE_COUNT = 12
+const MENU_BURST_COLORS = [
+  'var(--color-menu-burst-primary)',
+  'var(--color-menu-burst-secondary)',
+  'var(--color-menu-burst-highlight)',
+  'var(--color-menu-burst-tertiary)',
+]
+const menuBursts = ref<Record<string, MenuBurst>>({})
+const burstCleanupTimers = new Map<string, number>()
+let menuBurstId = 0
+
 const menuItems = computed(() => buildMainMenu(authStore.user?.role))
 const activeMenu = computed(() => String(route.meta.activeMenu || route.path))
 const currentPageTitle = computed(() => String(route.meta.title || appConfig.title))
@@ -61,6 +88,8 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   compactViewportQuery?.removeEventListener('change', syncCompactViewport)
+  burstCleanupTimers.forEach((timer) => window.clearTimeout(timer))
+  burstCleanupTimers.clear()
 })
 
 function syncCompactViewport(event: MediaQueryList | MediaQueryListEvent): void {
@@ -73,6 +102,70 @@ function toggleSidebar(): void {
 
 function handleMenuSelect(index: string): void {
   void router.push(index)
+}
+
+function clearMenuBurst(index: string): void {
+  const cleanupTimer = burstCleanupTimers.get(index)
+  if (cleanupTimer !== undefined) {
+    window.clearTimeout(cleanupTimer)
+    burstCleanupTimers.delete(index)
+  }
+
+  if (menuBursts.value[index]) {
+    const remainingBursts = { ...menuBursts.value }
+    delete remainingBursts[index]
+    menuBursts.value = remainingBursts
+  }
+}
+
+function createMenuParticles(): MenuBurstParticle[] {
+  return Array.from({ length: MENU_BURST_PARTICLE_COUNT }, (_, index) => {
+    const angle = (index * Math.PI * 2) / MENU_BURST_PARTICLE_COUNT + (Math.random() * 0.4 - 0.2)
+    const distance = 22 + Math.random() * 20
+
+    return {
+      id: index,
+      color: MENU_BURST_COLORS[index % MENU_BURST_COLORS.length],
+      delay: Math.random() * 0.05,
+      translateX: Math.cos(angle) * distance,
+      translateY: Math.sin(angle) * distance,
+    }
+  })
+}
+
+function handleMenuClick(
+  event: MouseEvent | KeyboardEvent,
+  index: string,
+  disabled = false,
+): void {
+  const menuItem = event.currentTarget as HTMLElement | null
+  if (!menuItem || disabled) {
+    return
+  }
+
+  clearMenuBurst(index)
+
+  const bounds = menuItem.getBoundingClientRect()
+  const isPointerActivation = event instanceof MouseEvent && event.detail !== 0
+  const originX = isPointerActivation ? event.clientX - bounds.left : bounds.width / 2
+  const originY = isPointerActivation ? event.clientY - bounds.top : bounds.height / 2
+  const burst: MenuBurst = {
+    id: ++menuBurstId,
+    originX,
+    originY,
+    particles: createMenuParticles(),
+  }
+
+  menuBursts.value = {
+    ...menuBursts.value,
+    [index]: burst,
+  }
+  burstCleanupTimers.set(
+    index,
+    window.setTimeout(() => {
+      clearMenuBurst(index)
+    }, 700),
+  )
 }
 
 function submitGlobalSearch(): void {
@@ -112,6 +205,34 @@ async function handleCommand(command: string): Promise<void> {
       :class="{ 'is-collapsed': isSidebarCollapsed }"
       :width="asideWidth"
     >
+      <svg
+        class="main-layout__menu-filter"
+        width="0"
+        height="0"
+        aria-hidden="true"
+        focusable="false"
+      >
+        <defs>
+          <filter
+            id="sidebar-menu-gooey"
+            x="-30%"
+            y="-70%"
+            width="160%"
+            height="240%"
+            color-interpolation-filters="sRGB"
+          >
+            <feGaussianBlur in="SourceGraphic" stdDeviation="7" result="blur" />
+            <feColorMatrix
+              in="blur"
+              mode="matrix"
+              values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 20 -9"
+              result="goo"
+            />
+            <feBlend in="SourceGraphic" in2="goo" />
+          </filter>
+        </defs>
+      </svg>
+
       <div class="main-layout__brand">
         <img
           class="main-layout__brand-mark"
@@ -126,7 +247,7 @@ async function handleCommand(command: string): Promise<void> {
       </div>
 
       <nav class="main-layout__navigation" aria-label="主导航">
-        <p v-show="!isSidebarCollapsed" class="main-layout__menu-label">工作台</p>
+        <!-- <p v-show="!isSidebarCollapsed" class="main-layout__menu-label">工作台</p> -->
         <el-menu
           class="main-layout__menu"
           :collapse="isSidebarCollapsed"
@@ -139,11 +260,60 @@ async function handleCommand(command: string): Promise<void> {
             :key="item.index"
             :index="item.index"
             :disabled="item.disabled"
+            :class="{ 'is-featured-agent': item.index === FEATURED_MENU_INDEX }"
+            @keydown.enter.space="handleMenuClick($event, item.index, item.disabled)"
           >
-            <el-icon>
+            <span
+              class="main-layout__menu-hit-target"
+              aria-hidden="true"
+              @click="handleMenuClick($event, item.index, item.disabled)"
+            ></span>
+            <span class="main-layout__menu-liquid" aria-hidden="true">
+              <span class="main-layout__menu-liquid-bg"></span>
+              <span class="main-layout__menu-droplet is-first"></span>
+              <span class="main-layout__menu-droplet is-second"></span>
+              <span class="main-layout__menu-droplet is-third"></span>
+            </span>
+
+            <el-icon class="main-layout__menu-icon">
               <component :is="item.icon" />
             </el-icon>
-            <template #title>{{ item.title }}</template>
+            <template #title>
+              <span class="main-layout__menu-title">
+                <span>{{ item.title }}</span>
+                <span
+                  v-if="item.index === FEATURED_MENU_INDEX"
+                  class="main-layout__featured-badge"
+                  aria-label="重点功能"
+                  >🎉</span
+                >
+              </span>
+            </template>
+
+            <span
+              v-if="menuBursts[item.index]"
+              :key="menuBursts[item.index].id"
+              class="main-layout__menu-burst"
+              :data-burst-id="menuBursts[item.index].id"
+              :style="{
+                '--burst-origin-x': `${menuBursts[item.index].originX}px`,
+                '--burst-origin-y': `${menuBursts[item.index].originY}px`,
+              }"
+              aria-hidden="true"
+            >
+              <span class="main-layout__menu-burst-ring"></span>
+              <span
+                v-for="particle in menuBursts[item.index].particles"
+                :key="particle.id"
+                class="main-layout__menu-burst-particle"
+                :style="{
+                  '--particle-color': particle.color,
+                  '--particle-delay': `${particle.delay}s`,
+                  '--particle-x': `${particle.translateX}px`,
+                  '--particle-y': `${particle.translateY}px`,
+                }"
+              ></span>
+            </span>
           </el-menu-item>
         </el-menu>
       </nav>
@@ -174,8 +344,9 @@ async function handleCommand(command: string): Promise<void> {
           </el-tooltip>
 
           <div class="main-layout__page-context">
-            <span>WIND DOC · 工作台</span>
-            <strong>{{ currentPageTitle }}</strong>
+            <span>绿能信盾检测技术服务(保定)有限公司</span>
+            <span>www.greenenergyinsp.cn</span>
+            <strong class="main-layout__visually-hidden">{{ currentPageTitle }}</strong>
           </div>
           <p v-if="currentPageDescription" class="main-layout__page-description">
             {{ currentPageDescription }}

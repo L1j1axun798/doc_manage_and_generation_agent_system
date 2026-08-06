@@ -1,6 +1,7 @@
 from rest_framework import serializers
 
-from .models import Folder
+from .models import Folder, PersonnelProfile
+from .personnel import personnel_snapshot
 
 
 class FolderSerializer(serializers.ModelSerializer):
@@ -45,3 +46,61 @@ class FolderMoveSerializer(serializers.Serializer):
         required=False,
     )  # type: ignore[assignment]
     sort_order = serializers.IntegerField(min_value=0, required=False)
+
+
+class PersonnelRecordSerializer(serializers.Serializer):
+    id = serializers.SerializerMethodField()
+    folder_id = serializers.SerializerMethodField()
+    name = serializers.SerializerMethodField()
+    gender = serializers.SerializerMethodField()
+    gender_display = serializers.SerializerMethodField()
+    id_card_number = serializers.SerializerMethodField()
+    phone = serializers.SerializerMethodField()
+    profile_complete = serializers.SerializerMethodField()
+    updated_at = serializers.SerializerMethodField()
+
+    def _snapshot(self, obj: Folder) -> dict:
+        return personnel_snapshot(obj)
+
+    def get_id(self, obj: Folder) -> str:
+        return str(obj.pk)
+
+    def get_folder_id(self, obj: Folder) -> int:
+        return obj.pk
+
+    def get_name(self, obj: Folder) -> str:
+        return obj.name
+
+    def get_gender(self, obj: Folder) -> str:
+        return str(self._snapshot(obj)["gender"])
+
+    def get_gender_display(self, obj: Folder) -> str:
+        return str(self._snapshot(obj)["gender_display"])
+
+    def get_id_card_number(self, obj: Folder) -> str:
+        return str(self._snapshot(obj)["id_card_number"])
+
+    def get_phone(self, obj: Folder) -> str:
+        return str(self._snapshot(obj)["phone"])
+
+    def get_profile_complete(self, obj: Folder) -> bool:
+        return bool(self._snapshot(obj)["profile_complete"])
+
+    def get_updated_at(self, obj: Folder) -> object:
+        return self._snapshot(obj)["updated_at"]
+
+
+class PersonnelRecordUpdateSerializer(serializers.Serializer):
+    gender = serializers.ChoiceField(choices=PersonnelProfile.Gender.choices, required=False)
+    id_card_number = serializers.CharField(
+        max_length=32,
+        allow_blank=True,
+        trim_whitespace=True,
+        required=False,
+    )
+    phone = serializers.CharField(
+        max_length=30,
+        allow_blank=True,
+        trim_whitespace=True,
+        required=False,
+    )

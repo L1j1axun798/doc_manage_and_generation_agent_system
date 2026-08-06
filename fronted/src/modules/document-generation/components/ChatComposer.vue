@@ -15,7 +15,6 @@ const props = defineProps<{
   uploadLoading?: boolean
   disabled?: boolean
   canSend?: boolean
-  templateMissing?: boolean
   placeholder?: string
   helperText?: string
   editableContext?: boolean
@@ -73,7 +72,9 @@ function handleFile(event: Event): void {
       </el-tooltip>
     </div>
     <template v-if="!collapsed">
-      <slot name="attachments" />
+      <div class="chat-composer__attachments">
+        <slot name="attachments" />
+      </div>
       <slot name="context-extra" />
       <el-input
         :model-value="modelValue"
@@ -111,21 +112,18 @@ function handleFile(event: Event): void {
             上传资料
           </el-button>
         </div>
-        <el-button
-          data-test="chat-send"
-          type="primary"
-          :loading="loading"
-          :disabled="!canSend"
-          @click="emit('send')"
-        >
-          发送
-        </el-button>
-      </div>
-      <div class="chat-composer__meta">
-        <span :class="{ 'is-warning': templateMissing }">
-          {{ templateMissing ? '请先选择甲方模板' : helperText || 'Enter 发送 · Shift + Enter 换行' }}
-        </span>
-        <span>{{ modelValue.length }}/4000</span>
+        <div class="chat-composer__actions">
+          <span class="chat-composer__count">{{ modelValue.length }}/4000</span>
+          <el-button
+            data-test="chat-send"
+            type="primary"
+            :loading="loading"
+            :disabled="!canSend"
+            @click="emit('send')"
+          >
+            发送
+          </el-button>
+        </div>
       </div>
     </template>
   </div>
@@ -133,6 +131,7 @@ function handleFile(event: Event): void {
 
 <style scoped>
 .chat-composer {
+  position: relative;
   display: grid;
   padding: 12px;
   border: 1px solid var(--color-border-strong);
@@ -157,11 +156,24 @@ function handleFile(event: Event): void {
 }
 
 .chat-composer__collapse-row {
+  position: absolute;
+  z-index: 1;
+  top: 8px;
+  right: 8px;
   display: flex;
   min-height: 26px;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+
+.chat-composer.is-collapsed .chat-composer__collapse-row {
+  position: static;
+}
+
+.chat-composer__attachments {
+  min-width: 0;
+  padding-right: 36px;
 }
 
 .chat-composer__collapsed-copy {
@@ -197,13 +209,12 @@ function handleFile(event: Event): void {
 
 .chat-composer__footer,
 .chat-composer__tools,
-.chat-composer__meta {
+.chat-composer__actions {
   display: flex;
   align-items: center;
 }
 
-.chat-composer__footer,
-.chat-composer__meta {
+.chat-composer__footer {
   justify-content: space-between;
   gap: 10px;
 }
@@ -222,13 +233,15 @@ function handleFile(event: Event): void {
   display: none;
 }
 
-.chat-composer__meta {
-  color: var(--color-text-tertiary);
-  font-size: 11px;
+.chat-composer__actions {
+  flex: 0 0 auto;
+  gap: 10px;
 }
 
-.chat-composer__meta .is-warning {
-  color: var(--color-warning);
+.chat-composer__count {
+  color: var(--color-text-tertiary);
+  font-size: 11px;
+  white-space: nowrap;
 }
 
 @media (max-width: 720px) {
@@ -237,8 +250,8 @@ function handleFile(event: Event): void {
     flex-direction: column;
   }
 
-  .chat-composer__footer > .el-button {
-    width: 100%;
+  .chat-composer__actions {
+    justify-content: flex-end;
   }
 }
 </style>

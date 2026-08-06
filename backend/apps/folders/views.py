@@ -6,9 +6,17 @@ from rest_framework.generics import get_object_or_404
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from apps.accounts.permissions import IsSystemAdmin
+
 from .models import Folder
+from .personnel import personnel_folders, update_personnel_profile
 from .selectors import active_visible_folders_for_user, folder_tree_for_user
-from .serializers import FolderMoveSerializer, FolderSerializer
+from .serializers import (
+    FolderMoveSerializer,
+    FolderSerializer,
+    PersonnelRecordSerializer,
+    PersonnelRecordUpdateSerializer,
+)
 from .services import create_folder, disable_folder, move_folder, update_folder
 
 
@@ -69,3 +77,47 @@ class FolderViewSet(viewsets.ModelViewSet):
     def disable(self, request, pk=None):
         disable_folder(actor=request.user, folder=self.get_object(), request=request)
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class PersonnelViewSet(viewsets.GenericViewSet):
+    queryset = Folder.objects.none()
+    serializer_class = PersonnelRecordSerializer
+    permission_classes = [IsSystemAdmin]
+    http_method_names = ["get", "put", "patch", "head", "options"]
+    search_fields = ["name", "personnel_profile__id_card_number", "personnel_profile__phone"]
+    ordering_fields = ["name", "sort_order", "personnel_profile__updated_at"]
+    ordering = ["sort_order", "id"]
+
+    def get_queryset(self):
+        if getattr(self, "swagger_fake_view", False):
+            return Folder.objects.none()
+        return personnel_folders()
+
+    def get_object(self):
+        return get_object_or_404(self.get_queryset(), pk=self.kwargs["pk"])
+
+    def list(self, request):
+        queryset = self.filter_queryset(self.get_queryset())
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            return self.get_paginated_response(PersonnelRecordSerializer(page, many=True).data)
+        return Response(PersonnelRecordSerializer(queryset, many=True).data)
+
+    def retrieve(self, request, pk=None):
+        return Response(PersonnelRecordSerializer(self.get_object()).data)
+
+    def update(self, request, pk=None):
+        serializer = PersonnelRecordUpdateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        folder = self.get_object()
+        update_personnel_profile(
+            actor=request.user,
+            folder=folder,
+            data=dict(serializer.validated_data),
+            request=request,
+        )
+        folder = personnel_folders().get(pk=folder.pk)
+        return Response(PersonnelRecordSerializer(folder).data)
+
+    def partial_update(self, request, pk=None):
+        return self.update(request, pk=pk)

@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { Refresh } from '@element-plus/icons-vue'
+import { Plus, Refresh } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import type { UploadUserFile } from 'element-plus'
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 
 import { getErrorMessage } from '@/core/http/error-normalizer'
 import { useAuthStore } from '@/modules/auth/stores/auth.store'
@@ -22,6 +23,7 @@ import type {
 } from '../document-generation.types'
 
 const authStore = useAuthStore()
+const router = useRouter()
 const projects = ref<Project[]>([])
 const selectedProjectId = ref<number | null>(null)
 const loading = ref(false)
@@ -103,6 +105,10 @@ async function loadProjects(): Promise<void> {
   } finally {
     loading.value = false
   }
+}
+
+function openProjectCreate(): void {
+  void router.push({ name: 'projects', query: { action: 'create' } })
 }
 
 async function openKnowledgeUploadDialog(): Promise<void> {
@@ -246,6 +252,15 @@ function closeKnowledgeUploadDialog(): void {
               circle
               aria-label="刷新项目"
               @click="loadProjects"
+            />
+          </el-tooltip>
+          <el-tooltip content="创建新项目" placement="bottom">
+            <el-button
+              class="document-generation-page__project-create"
+              :icon="Plus"
+              circle
+              aria-label="创建新项目"
+              @click="openProjectCreate"
             />
           </el-tooltip>
         </div>
@@ -409,6 +424,10 @@ function closeKnowledgeUploadDialog(): void {
 }
 
 .document-generation-page__project-refresh {
+  flex: 0 0 auto;
+}
+
+.document-generation-page__project-create {
   flex: 0 0 auto;
 }
 

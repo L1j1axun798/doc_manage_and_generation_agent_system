@@ -128,6 +128,12 @@ export interface DocumentGenerationTemplate {
   required_fact_fields: string[]
 }
 
+export type TemplateSyncStatus = 'synced' | 'already_present' | 'folder_missing'
+
+export interface TemplateSelectionResult extends DocumentGenerationTemplate {
+  sync_status: TemplateSyncStatus
+}
+
 export interface AgentPersonnelCertification {
   name: string
   certificate_number: string
@@ -137,6 +143,9 @@ export interface AgentPersonnelCertification {
 export interface AgentPersonnelContext {
   id: string
   name: string
+  gender: 'unknown' | 'male' | 'female'
+  id_card_number: string
+  phone: string
   job_title: string
   department: string
   contact: string
@@ -146,8 +155,10 @@ export interface AgentPersonnelContext {
 }
 
 export interface AvailableAgentPersonnel extends AgentPersonnelContext {
-  user_id: number
-  project_member_id: number
+  folder_id: number
+  gender_display: string
+  profile_complete: boolean
+  updated_at: string | null
 }
 
 export interface AgentTemplateContext {
@@ -177,14 +188,6 @@ export interface AgentConversationContext {
 export interface GenerationConversationContextPayload {
   initial_message: string
   selected_personnel_ids: number[]
-}
-
-export interface ClientTemplateCandidate {
-  document_id: number
-  document_version_id: number
-  filename: string
-  title: string
-  registration_status: 'pending_registration'
 }
 
 export interface ConversationSourceAttachment {

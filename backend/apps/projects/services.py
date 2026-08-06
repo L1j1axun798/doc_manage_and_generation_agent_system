@@ -18,8 +18,11 @@ PROJECT_ARCHIVE_FOLDER_CODE_PREFIX = "PROJECT-ARCHIVE"
 
 @transaction.atomic
 def create_project(*, actor: Any, data: dict[str, Any], request: Any = None) -> Project:
-    manager = data.get("manager")
-    project = Project.objects.create(created_by=actor, **data)
+    project_data = dict(data)
+    if not getattr(actor, "is_system_admin", False):
+        project_data["manager"] = actor
+    manager = project_data.get("manager")
+    project = Project.objects.create(created_by=actor, **project_data)
     if manager is not None:
         ProjectMember.objects.update_or_create(
             project=project,

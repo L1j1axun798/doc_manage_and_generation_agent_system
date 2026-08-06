@@ -10,6 +10,11 @@ import DocumentGenerationPage from '@/modules/document-generation/pages/Document
 const mocks = vi.hoisted(() => ({
   fetchProjects: vi.fn(),
   fetchKnowledgeCorpusUploads: vi.fn(),
+  routerPush: vi.fn(),
+}))
+
+vi.mock('vue-router', () => ({
+  useRouter: () => ({ push: mocks.routerPush }),
 }))
 
 vi.mock('@/modules/projects/api/projects.api', () => ({
@@ -122,7 +127,27 @@ describe('document generation RAG corpus upload', () => {
     wrapper.unmount()
   })
 
-  it('does not expose the upload entry to non-admin users', async () => {
+  it('routes regular users to the existing project creation flow', async () => {
+    const wrapper = mountPage({
+      ...baseUser,
+      id: 2,
+      username: 'operator',
+      role: 'data_operator',
+    })
+    await flushPromises()
+
+    const createButton = wrapper.get('button[aria-label="创建新项目"]')
+    expect(createButton.text()).toBe('')
+    await createButton.trigger('click')
+
+    expect(mocks.routerPush).toHaveBeenCalledWith({
+      name: 'projects',
+      query: { action: 'create' },
+    })
+    wrapper.unmount()
+  })
+
+  it('keeps RAG upload admin-only while exposing project creation to non-admin users', async () => {
     const wrapper = mountPage({
       ...baseUser,
       id: 2,
@@ -132,6 +157,7 @@ describe('document generation RAG corpus upload', () => {
     await flushPromises()
 
     expect(wrapper.text()).not.toContain('上传 RAG 资料')
+    expect(wrapper.find('button[aria-label="创建新项目"]').exists()).toBe(true)
     expect(mocks.fetchKnowledgeCorpusUploads).not.toHaveBeenCalled()
     wrapper.unmount()
   })

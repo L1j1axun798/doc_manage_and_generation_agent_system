@@ -90,6 +90,7 @@ const POLLING_STATUSES: ReadonlySet<GenerationTaskStatus> = new Set([
 
 const BLOCKED_FOLDER_NAMES = ['报告模板', '竣工资料档案', '完工资料', '检测报告']
 const BLOCKED_FILE_MARKERS = ['检测报告', '试验报告', '验收报告', '完工报告', '竣工资料']
+const CLIENT_TEMPLATE_DESCRIPTION_MARKER = '四措两案 Agent 甲方模板'
 
 export function shouldPollGenerationTask(status: GenerationTaskStatus): boolean {
   return POLLING_STATUSES.has(status)
@@ -99,6 +100,7 @@ export function isEligibleEntrySource(document: DocumentItem): boolean {
   const names = `${document.folder_name} ${document.title} ${document.current_version?.original_filename || ''}`
   return Boolean(document.current_version)
     && document.source_type === 'entrance_material'
+    && !document.description.includes(CLIENT_TEMPLATE_DESCRIPTION_MARKER)
     && !BLOCKED_FOLDER_NAMES.some((value) => document.folder_name.includes(value))
     && !BLOCKED_FILE_MARKERS.some((value) => names.includes(value))
 }

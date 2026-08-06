@@ -370,6 +370,9 @@ class PersonnelCertificationContext(ContractModel):
 class PersonnelContext(ContractModel):
     id: NonBlankString
     name: NonBlankString
+    gender: str = "unknown"
+    id_card_number: str = ""
+    phone: str = ""
     job_title: str = ""
     department: str = ""
     contact: str = ""

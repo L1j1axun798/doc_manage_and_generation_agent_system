@@ -71,4 +71,67 @@ describe('main layout defaults', () => {
     expect(wrapper.find('.main-layout__aside').classes()).toContain('is-collapsed')
     wrapper.unmount()
   })
+
+  it('highlights the document agent and replaces repeated click bursts', async () => {
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/', component: { template: '<div />' } },
+        { path: '/document-generation', component: { template: '<div />' } },
+      ],
+    })
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const authStore = useAuthStore()
+    authStore.$patch({
+      user: {
+        id: 1,
+        username: 'admin',
+        real_name: '管理员',
+        employee_no: 'A001',
+        role: 'system_admin',
+        phone: '',
+        email: 'admin@example.com',
+        is_active: true,
+        must_change_password: false,
+        webauthn_enabled: true,
+        webauthn_credentials_count: 1,
+        created_at: '2026-07-30T00:00:00+08:00',
+      },
+      status: 'authenticated',
+      initialized: true,
+    })
+
+    await router.push('/')
+    await router.isReady()
+
+    const wrapper = mount(MainLayout, {
+      global: {
+        plugins: [pinia, router, ElementPlus],
+      },
+    })
+    const agentItem = wrapper.find('.el-menu-item.is-featured-agent')
+
+    expect(agentItem.text()).toContain('四措两案Agent V1.0')
+    expect(agentItem.find('.main-layout__featured-badge').text()).toBe('🎉')
+
+    const hitTarget = agentItem.find('.main-layout__menu-hit-target')
+    hitTarget.element.dispatchEvent(
+      new MouseEvent('click', { bubbles: true, clientX: 40, clientY: 24, detail: 1 }),
+    )
+    await wrapper.vm.$nextTick()
+    const firstBurstId = agentItem.find('.main-layout__menu-burst').attributes('data-burst-id')
+    expect(agentItem.findAll('.main-layout__menu-burst')).toHaveLength(1)
+    expect(agentItem.findAll('.main-layout__menu-burst-particle')).toHaveLength(12)
+
+    hitTarget.element.dispatchEvent(
+      new MouseEvent('click', { bubbles: true, clientX: 64, clientY: 28, detail: 1 }),
+    )
+    await wrapper.vm.$nextTick()
+    expect(agentItem.findAll('.main-layout__menu-burst')).toHaveLength(1)
+    expect(agentItem.findAll('.main-layout__menu-burst-particle')).toHaveLength(12)
+    expect(agentItem.find('.main-layout__menu-burst').attributes('data-burst-id')).not.toBe(firstBurstId)
+
+    wrapper.unmount()
+  })
 })

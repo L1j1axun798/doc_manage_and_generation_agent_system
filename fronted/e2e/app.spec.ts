@@ -166,6 +166,23 @@ test('moves the document agent description into the main header', async ({ page 
     '在一个会话内完成模板、人员、资料、生成、修改与审核。',
   )
   await expect(page.getByRole('button', { name: '上传 RAG 资料' })).toBeVisible()
+
+  const featuredAgentItem = page.locator('.el-menu-item.is-featured-agent')
+  await expect(featuredAgentItem).toContainText('四措两案Agent V1.0')
+  await expect(featuredAgentItem.locator('.main-layout__featured-badge')).toHaveText('🎉')
+  await featuredAgentItem.hover()
+  await expect(featuredAgentItem.locator('.main-layout__menu-liquid-bg')).toHaveCSS('opacity', '1')
+
+  await featuredAgentItem.click({ position: { x: 116, y: 22 } })
+  await expect(featuredAgentItem.locator('.main-layout__menu-burst-particle')).toHaveCount(12)
+  const firstBurstId = await featuredAgentItem.locator('.main-layout__menu-burst').getAttribute('data-burst-id')
+  await featuredAgentItem.click({ position: { x: 132, y: 24 } })
+  await expect(featuredAgentItem.locator('.main-layout__menu-burst')).toHaveCount(1)
+  await expect(featuredAgentItem.locator('.main-layout__menu-burst-particle')).toHaveCount(12)
+  await expect(featuredAgentItem.locator('.main-layout__menu-burst')).not.toHaveAttribute(
+    'data-burst-id',
+    firstBurstId ?? '',
+  )
 })
 
 test('shows document center with folder tree and document detail', async ({ page }) => {

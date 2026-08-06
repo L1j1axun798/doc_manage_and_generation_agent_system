@@ -27,7 +27,9 @@ const filteredPersonnel = computed(() => {
   const keyword = search.value.trim().toLowerCase()
   if (!keyword) return props.personnel
   return props.personnel.filter((person) =>
-    `${person.name} ${person.job_title} ${person.department}`.toLowerCase().includes(keyword),
+    `${person.name} ${person.gender_display} ${person.id_card_number} ${person.phone}`
+      .toLowerCase()
+      .includes(keyword),
   )
 })
 
@@ -63,17 +65,21 @@ function confirm(): void {
       <el-checkbox-group v-else-if="filteredPersonnel.length" v-model="draftIds" class="personnel-selector__list">
         <el-checkbox
           v-for="person in filteredPersonnel"
-          :key="person.user_id"
-          :value="person.user_id"
+          :key="person.folder_id"
+          :value="person.folder_id"
           class="personnel-selector__item"
         >
           <span class="personnel-selector__copy">
             <strong>{{ person.name }}</strong>
-            <small>{{ person.job_title }}{{ person.department ? ` · ${person.department}` : '' }}</small>
+            <small>
+              {{ person.gender_display }} · {{ person.id_card_number || '身份证未填写' }} ·
+              {{ person.phone || '手机号未填写' }}
+            </small>
+            <el-tag v-if="!person.profile_complete" size="small" type="warning" effect="light">资料待完善</el-tag>
           </span>
         </el-checkbox>
       </el-checkbox-group>
-      <el-empty v-else-if="!loading" :image-size="72" description="当前项目没有可选人员" />
+      <el-empty v-else-if="!loading" :image-size="72" description="“人员资质”中没有可选人员" />
     </div>
     <template #footer>
       <span class="personnel-selector__count">已选择 {{ draftIds.length }} 人</span>

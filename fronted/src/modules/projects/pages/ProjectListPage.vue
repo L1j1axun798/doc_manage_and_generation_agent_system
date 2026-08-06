@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 
 import { getErrorMessage } from '@/core/http/error-normalizer'
 import { useAuthStore } from '@/modules/auth/stores/auth.store'
@@ -12,6 +12,7 @@ import ProjectTable from '../components/ProjectTable.vue'
 import type { Project, ProjectPayload } from '../projects.types'
 
 const router = useRouter()
+const route = useRoute()
 const authStore = useAuthStore()
 const projects = ref<Project[]>([])
 const total = ref(0)
@@ -22,7 +23,15 @@ const formLoading = ref(false)
 const formVisible = ref(false)
 const editingProject = ref<Project | null>(null)
 
-onMounted(loadProjects)
+onMounted(() => {
+  void loadProjects()
+  if (route.query.action === 'create') {
+    openCreate()
+    const query = { ...route.query }
+    delete query.action
+    void router.replace({ name: 'projects', query })
+  }
+})
 
 async function loadProjects(): Promise<void> {
   loading.value = true
@@ -64,7 +73,7 @@ async function submitProject(payload: ProjectPayload): Promise<void> {
       ElMessage.success('项目已修改')
     } else {
       await createProject(payload)
-      ElMessage.success('项目已创建')
+      ElMessage.success('创建成功🎉现在可以去生成四措两案了~')
     }
     formVisible.value = false
     await loadProjects()
@@ -105,8 +114,8 @@ async function removeProject(project: Project): Promise<void> {
 
 <template>
   <section class="project-page">
-    <header v-if="authStore.isSystemAdmin" class="project-page__header page-action-bar">
-      <el-button v-if="authStore.isSystemAdmin" type="primary" @click="openCreate">创建项目</el-button>
+    <header class="project-page__header page-action-bar">
+      <el-button type="primary" @click="openCreate">创建项目</el-button>
     </header>
 
     <section class="document-search-panel">

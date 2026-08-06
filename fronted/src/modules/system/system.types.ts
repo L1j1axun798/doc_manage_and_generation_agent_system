@@ -40,6 +40,32 @@ export interface FolderMovePayload {
   sort_order?: number
 }
 
+export type PersonnelGender = 'unknown' | 'male' | 'female'
+
+export interface PersonnelRecord {
+  id: string
+  folder_id: number
+  name: string
+  gender: PersonnelGender
+  gender_display: string
+  id_card_number: string
+  phone: string
+  profile_complete: boolean
+  updated_at: string | null
+}
+
+export interface PersonnelListQuery {
+  page?: number
+  search?: string
+  ordering?: string
+}
+
+export interface PersonnelUpdatePayload {
+  gender: PersonnelGender
+  id_card_number: string
+  phone: string
+}
+
 export interface HealthStatus {
   status: string
   service: string

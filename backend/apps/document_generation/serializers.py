@@ -20,6 +20,7 @@ from .models import (
 )
 
 KNOWLEDGE_CORPUS_MAX_BYTES = 20 * 1024 * 1024
+CLIENT_TEMPLATE_MAX_BYTES = 20 * 1024 * 1024
 
 
 def document_template_display_name(template: DocumentTemplate) -> str:
@@ -57,6 +58,23 @@ class DocumentTemplateSerializer(serializers.ModelSerializer):
 
     def get_display_name(self, obj: DocumentTemplate) -> str:
         return document_template_display_name(obj)
+
+
+class ClientTemplateUploadSerializer(serializers.Serializer):
+    project_id = serializers.IntegerField(min_value=1)
+    file = serializers.FileField(write_only=True)
+
+    def validate_file(self, uploaded_file):
+        validate_uploaded_file(uploaded_file)
+        if uploaded_file_extension(uploaded_file) != ".docx":
+            raise serializers.ValidationError("甲方模板仅支持 DOCX 文件")
+        if uploaded_file.size > CLIENT_TEMPLATE_MAX_BYTES:
+            raise serializers.ValidationError("甲方模板不能超过 20 MB")
+        return uploaded_file
+
+
+class ClientTemplateSelectSerializer(serializers.Serializer):
+    project_id = serializers.IntegerField(min_value=1)
 
 
 class KnowledgeCorpusUploadSerializer(serializers.ModelSerializer):
@@ -340,6 +358,10 @@ class GenerationConversationContextSerializer(serializers.Serializer):
         if len(values) != len(set(values)):
             raise serializers.ValidationError("所选人员不能重复")
         return values
+
+
+class AvailablePersonnelQuerySerializer(serializers.Serializer):
+    project_id = serializers.IntegerField(min_value=1)
 
 
 class GenerationTaskCreateSerializer(serializers.Serializer):

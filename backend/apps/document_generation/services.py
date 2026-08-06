@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import uuid
 from collections.abc import Iterable
+from pathlib import PurePath
 from typing import Any
 
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -16,8 +18,9 @@ from apps.audit.services import audit_log
 from apps.documents.models import Document, DocumentVersion
 from apps.documents.services import create_document
 from apps.folders.defaults import ENTRY_PREPARATION_ROOT_CODE
-from apps.folders.models import Folder
-from apps.projects.models import Project, ProjectMember
+from apps.folders.models import Folder, PersonnelProfile
+from apps.folders.personnel import personnel_folders, personnel_profile_for
+from apps.projects.models import Project
 from common.storage import LocalDocumentStorage
 
 from .engine.canonical_facts import (
@@ -26,6 +29,7 @@ from .engine.canonical_facts import (
     validate_required_fact_value,
 )
 from .engine.contracts import (
+    ENTRY_PLAN_SECTION_CODES,
     FORBIDDEN_FACT_FIELD_PARTS,
     ConfirmedFact,
     ParsedBlock,
@@ -56,7 +60,7 @@ from .models import (
 from .permissions import can_review_generation, can_use_generation
 from .queues import stop_generation_job
 from .revision import revision_required_literals
-from .selectors import visible_source_version_for_user
+from .selectors import template_is_available_for_project, visible_source_version_for_user
 from .workflow_events import TaskWorkflowRecorder
 
 TECH_SOLUTION_CODE = "PUBLIC-TECH-SOLUTION"
@@ -74,6 +78,7 @@ BLOCKED_SOURCE_MARKERS = (
     "竣工资料",
     "报告模板",
 )
+CLIENT_TEMPLATE_DESCRIPTION_MARKER = "四措两案 Agent 甲方模板"
 ACTIVE_TASK_STATUSES = frozenset(
     {
         GenerationTask.Status.EXTRACTING,
@@ -92,6 +97,172 @@ def _fingerprint(payload: Any) -> str:
         default=str,
     ).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _self_service_template_storage_folder(project: Project) -> tuple[Folder, bool]:
+    entry_folder = Folder.objects.filter(
+        project=project,
+        code=ENTRY_PREPARATION_ROOT_CODE,
+        is_active=True,
+    ).first()
+    if entry_folder is not None:
+        return entry_folder, True
+
+    fallback = (
+        Folder.objects.filter(project=project, code=TECH_SOLUTION_CODE, is_active=True).first()
+        or Folder.objects.filter(project=project, is_active=True)
+        .order_by("sort_order", "id")
+        .first()
+        or Folder.objects.filter(
+            project__isnull=True,
+            code=TECH_SOLUTION_CODE,
+            is_active=True,
+        ).first()
+    )
+    if fallback is None:
+        raise DocumentGenerationError(
+            "TEMPLATE_STORAGE_UNAVAILABLE",
+            "当前没有可用于保存甲方模板的资料目录",
+        )
+    return fallback, False
+
+
+def create_self_service_template(
+    *,
+    actor: Any,
+    project: Project,
+    uploaded_file: Any,
+    request: Any = None,
+) -> tuple[DocumentTemplate, bool]:
+    original_filename = str(getattr(uploaded_file, "name", "")).strip()
+    if PurePath(original_filename).suffix.lower() != ".docx":
+        raise DocumentGenerationError("TEMPLATE_INVALID", "甲方模板仅支持 DOCX 文件")
+    content = uploaded_file.read()
+    if hasattr(uploaded_file, "seek"):
+        uploaded_file.seek(0)
+    try:
+        validation = DocxTemplateRenderer().preflight(
+            TemplateDocument(
+                template_id="self-service-upload",
+                filename=original_filename,
+                content=content,
+            )
+        )
+    except AgentError as exc:
+        raise DocumentGenerationError("TEMPLATE_INVALID", exc.message) from exc
+    if not validation.valid:
+        raise DocumentGenerationError("TEMPLATE_INVALID", "模板不是可用的 DOCX 文件")
+
+    folder, synced_to_entry = _self_service_template_storage_folder(project)
+    document = create_document(
+        actor=actor,
+        folder=folder,
+        uploaded_file=SimpleUploadedFile(
+            original_filename,
+            content,
+            content_type=(
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            ),
+        ),
+        title=PurePath(original_filename).stem,
+        description=f"{CLIENT_TEMPLATE_DESCRIPTION_MARKER}（用户自主选择，无需审核）。",
+        source_type=(
+            Document.SourceType.ENTRANCE_MATERIAL
+            if synced_to_entry
+            else Document.SourceType.PROJECT_UPLOAD
+        ),
+        request=request,
+    )
+    template = DocumentTemplate.objects.create(
+        code=f"CLIENT-{project.pk}-{uuid.uuid4().hex[:12]}",
+        client_name="甲方提供",
+        business_type=BUSINESS_TYPE,
+        version="自主上传",
+        document_version=document.current_version,
+        field_mapping={
+            "template_name": document.title,
+            "source_kind": "client_self_service",
+            "self_service": True,
+            "project_id": project.pk,
+            "required_placeholders": [],
+            "privacy_mode": "styles_and_page_setup_only",
+        },
+        section_order=list(ENTRY_PLAN_SECTION_CODES),
+        required_fact_fields=list(REQUIRED_FACT_LABELS),
+        is_active=True,
+        approval_status=ApprovalStatus.DRAFT,
+        created_by=actor,
+    )
+    audit_log(
+        user=actor,
+        action="document_generation.template.self_service_create",
+        resource=template,
+        result="success",
+        request=request,
+        after_data={
+            "project_id": project.pk,
+            "document_version_id": document.current_version_id,
+            "synced_to_entry": synced_to_entry,
+        },
+    )
+    return template, synced_to_entry
+
+
+def sync_template_to_project_entry(
+    *,
+    actor: Any,
+    project: Project,
+    template: DocumentTemplate,
+    request: Any = None,
+) -> str:
+    entry_folder = Folder.objects.filter(
+        project=project,
+        code=ENTRY_PREPARATION_ROOT_CODE,
+        is_active=True,
+    ).first()
+    if entry_folder is None:
+        return "folder_missing"
+
+    source_version = template.document_version
+    source_document = source_version.document
+    if source_document.folder_id == entry_folder.pk:
+        return "already_present"
+    if Document.objects.filter(
+        folder=entry_folder,
+        deleted_at__isnull=True,
+        current_version__sha256=source_version.sha256,
+    ).exists():
+        return "already_present"
+
+    filename = source_version.original_filename
+    title = source_document.title
+    if Document.objects.filter(
+        folder=entry_folder,
+        deleted_at__isnull=True,
+    ).filter(Q(title=title) | Q(current_version__original_filename=filename)).exists():
+        path = PurePath(filename)
+        filename = f"{path.stem}-{template.code}{path.suffix}"
+        title = f"{title}-{template.code}"
+    storage = LocalDocumentStorage()
+    template_path = storage.resolve(source_version.storage_path)
+    if not template_path.is_file():
+        raise DocumentGenerationError("TEMPLATE_INVALID", "模板物理文件不存在")
+    create_document(
+        actor=actor,
+        folder=entry_folder,
+        uploaded_file=SimpleUploadedFile(
+            filename,
+            template_path.read_bytes(),
+            content_type=(
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            ),
+        ),
+        title=title,
+        description=f"{CLIENT_TEMPLATE_DESCRIPTION_MARKER}同步副本，请勿作为生成来源资料。",
+        source_type=Document.SourceType.ENTRANCE_MATERIAL,
+        request=request,
+    )
+    return "synced"
 
 
 def _task_snapshot(task: GenerationTask) -> dict[str, Any]:
@@ -320,35 +491,41 @@ def _normalize_conversation_context(
     raw_context = context or {}
     initial_message = str(raw_context.get("initial_message", "")).strip()
     selected_ids = list(dict.fromkeys(raw_context.get("selected_personnel_ids", [])))
-    members = {
-        member.user_id: member
-        for member in ProjectMember.objects.select_related("user").filter(
-            project=project,
-            user_id__in=selected_ids,
-            user__is_active=True,
-        )
+    folders = {
+        folder.pk: folder
+        for folder in personnel_folders().filter(pk__in=selected_ids)
     }
-    missing_ids = [personnel_id for personnel_id in selected_ids if personnel_id not in members]
+    missing_ids = [personnel_id for personnel_id in selected_ids if personnel_id not in folders]
     if missing_ids:
         raise DocumentGenerationError(
             "PERSONNEL_INVALID",
-            "所选人员不属于当前项目或已停用，请刷新人员列表后重试",
+            "所选人员不在“人员资质”名单中或已停用，请刷新人员列表后重试",
         )
     personnel = []
     for personnel_id in selected_ids:
-        member = members[personnel_id]
+        folder = folders[personnel_id]
+        profile = personnel_profile_for(folder)
+        phone = profile.phone if profile else ""
         personnel.append(
             {
-                "id": str(member.user_id),
-                "name": member.user.real_name.strip() or member.user.username,
-                "job_title": member.get_role_display(),
+                "id": str(folder.pk),
+                "name": folder.name.strip(),
+                "gender": profile.gender if profile else PersonnelProfile.Gender.UNKNOWN,
+                "id_card_number": profile.id_card_number if profile else "",
+                "phone": phone,
+                "job_title": "",
                 "department": "",
-                "contact": "",
+                "contact": phone,
                 "certifications": [],
                 "certificate_valid_until": None,
                 "additional_info": {
-                    "project_member_id": member.pk,
-                    "project_role": member.role,
+                    "personnel_folder_id": folder.pk,
+                    "profile_complete": bool(
+                        profile
+                        and profile.gender != PersonnelProfile.Gender.UNKNOWN
+                        and profile.id_card_number
+                        and profile.phone
+                    ),
                 },
             }
         )
@@ -402,12 +579,8 @@ def create_generation_task(
             "BUSINESS_TYPE_INVALID",
             "一期仅支持风电机组检测四措两案编制",
         )
-    if (
-        not template.is_active
-        or template.approval_status != ApprovalStatus.APPROVED
-        or template.business_type != BUSINESS_TYPE
-    ):
-        raise DocumentGenerationError("TEMPLATE_INVALID", "模板未批准或未启用")
+    if not template_is_available_for_project(template, project_id=project.pk):
+        raise DocumentGenerationError("TEMPLATE_INVALID", "模板不可用于当前项目")
     normalized_facts = _normalize_initial_facts(initial_facts)
     normalized_context = _normalize_conversation_context(
         project=project,
@@ -521,6 +694,14 @@ def add_generation_sources(
 
 def _ensure_entry_source(version: DocumentVersion) -> None:
     document = version.document
+    if (
+        version.generation_templates.exists()
+        or CLIENT_TEMPLATE_DESCRIPTION_MARKER in document.description
+    ):
+        raise DocumentGenerationError(
+            "SOURCE_PURPOSE_MISMATCH",
+            "甲方模板不能同时作为四措两案生成来源资料",
+        )
     if document.source_type != Document.SourceType.ENTRANCE_MATERIAL:
         raise DocumentGenerationError(
             "SOURCE_PURPOSE_MISMATCH",

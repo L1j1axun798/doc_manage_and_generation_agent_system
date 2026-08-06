@@ -58,3 +58,47 @@ class Folder(models.Model):
                 raise ValidationError("系统根分类必须位于公共根目录")
             if not self.is_active:
                 raise ValidationError("系统根分类不能停用")
+
+
+class PersonnelProfile(models.Model):
+    class Gender(models.TextChoices):
+        UNKNOWN = "unknown", "未填写"
+        MALE = "male", "男"
+        FEMALE = "female", "女"
+
+    folder = models.OneToOneField(
+        Folder,
+        on_delete=models.CASCADE,
+        related_name="personnel_profile",
+        verbose_name="人员目录",
+    )
+    gender = models.CharField(
+        "性别",
+        max_length=16,
+        choices=Gender.choices,
+        default=Gender.UNKNOWN,
+    )
+    id_card_number = models.CharField("身份证号", max_length=32, blank=True)
+    phone = models.CharField("手机号", max_length=30, blank=True)
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="updated_personnel_profiles",
+        verbose_name="最后修改人",
+    )
+    created_at = models.DateTimeField("创建时间", auto_now_add=True)
+    updated_at = models.DateTimeField("更新时间", auto_now=True)
+
+    class Meta:
+        ordering = ["folder__sort_order", "folder_id"]
+        indexes = [
+            models.Index(fields=["gender"], name="personnel_gender_idx"),
+            models.Index(fields=["updated_at"], name="personnel_updated_idx"),
+        ]
+        verbose_name = "人员信息"
+        verbose_name_plural = "人员信息"
+
+    def __str__(self) -> str:
+        return self.folder.name

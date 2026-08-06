@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from django.db.models import QuerySet
+from django.db.models import Q, QuerySet
 
 from apps.documents.models import DocumentVersion
 from apps.documents.selectors import visible_documents_for_user
@@ -18,15 +18,37 @@ from .models import (
 from .permissions import can_use_generation
 
 
-def available_templates() -> QuerySet[DocumentTemplate]:
+def available_templates(*, project_id: int | None = None) -> QuerySet[DocumentTemplate]:
+    availability = Q(approval_status=ApprovalStatus.APPROVED)
+    if project_id is not None:
+        availability |= Q(
+            field_mapping__self_service=True,
+            field_mapping__project_id=project_id,
+        )
     return (
         DocumentTemplate.objects.filter(
+            availability,
             business_type=BUSINESS_TYPE,
             is_active=True,
-            approval_status=ApprovalStatus.APPROVED,
         )
         .select_related("document_version", "document_version__document")
         .order_by("client_name", "code", "-id")
+    )
+
+
+def template_is_available_for_project(
+    template: DocumentTemplate,
+    *,
+    project_id: int,
+) -> bool:
+    if not template.is_active or template.business_type != BUSINESS_TYPE:
+        return False
+    if template.approval_status == ApprovalStatus.APPROVED:
+        return True
+    mapping = template.field_mapping or {}
+    return bool(
+        mapping.get("self_service") is True
+        and mapping.get("project_id") == project_id
     )
 
 

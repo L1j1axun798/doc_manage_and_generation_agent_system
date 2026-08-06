@@ -6,8 +6,6 @@ from rest_framework.generics import get_object_or_404
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from apps.accounts.permissions import IsSystemAdmin
-
 from .models import Project, ProjectMember
 from .permissions import can_manage_project, can_manage_project_members
 from .selectors import project_members_for_project, visible_projects_for_user
@@ -34,11 +32,6 @@ class ProjectViewSet(viewsets.ModelViewSet):
         if getattr(self, "swagger_fake_view", False):
             return Project.objects.none()
         return visible_projects_for_user(self.request.user)
-
-    def get_permissions(self):
-        if self.action == "create":
-            return [IsSystemAdmin()]
-        return super().get_permissions()
 
     def perform_create(self, serializer):
         serializer.instance = create_project(

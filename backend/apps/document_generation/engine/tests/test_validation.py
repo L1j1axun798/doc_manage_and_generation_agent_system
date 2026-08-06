@@ -434,4 +434,4 @@ def test_section_context_includes_personnel_and_locked_template_constraints() ->
     assert context.conversation_context.personnel[0].name == "项目成员"
     assert context.conversation_context.template is not None
     assert context.conversation_context.template.format_locked is True
-    assert "严格使用当前批准模板" in context.objective
+    assert "严格使用当前选定模板" in context.objective

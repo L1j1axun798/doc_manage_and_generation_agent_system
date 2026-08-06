@@ -10,7 +10,7 @@ from docx import Document as DocxDocument
 
 from apps.audit.models import AuditLog
 from apps.documents.models import Document, DocumentVersion
-from apps.folders.models import Folder
+from apps.folders.models import Folder, PersonnelProfile
 from apps.projects.models import Project, ProjectMember
 from common.storage import LocalDocumentStorage
 
@@ -111,6 +111,24 @@ def setup_generation_case(tmp_path):
         user=viewer,
         role=ProjectMember.Role.VIEWER,
     )
+    staff_root = Folder.objects.create(
+        name="人员资质",
+        code="PUBLIC-STAFF",
+        is_system_root=True,
+        created_by=admin,
+    )
+    personnel_folder = Folder.objects.create(
+        parent=staff_root,
+        name="张三",
+        created_by=admin,
+    )
+    PersonnelProfile.objects.create(
+        folder=personnel_folder,
+        gender=PersonnelProfile.Gender.MALE,
+        id_card_number="110101199001010011",
+        phone="13800000000",
+        updated_by=admin,
+    )
     technical_folder = Folder.objects.create(
         project=project,
         name="技术方案",
@@ -178,6 +196,7 @@ def setup_generation_case(tmp_path):
         "report_version": report_version,
         "technical_folder": technical_folder,
         "entry_folder": entry_folder,
+        "personnel_folder": personnel_folder,
     }
 
 
@@ -568,7 +587,7 @@ def test_pipeline_endpoint_atomically_creates_sources_and_queues_extraction(
             "document_version_ids": [case["source_version"].pk],
             "conversation_context": {
                 "initial_message": "请重点核对入场人员分工后开始编制",
-                "selected_personnel_ids": [case["viewer"].pk],
+                "selected_personnel_ids": [case["personnel_folder"].pk],
             },
             "facts": [
                 {
@@ -591,19 +610,19 @@ def test_pipeline_endpoint_atomically_creates_sources_and_queues_extraction(
     assert task.conversation_context["initial_message"] == ("请重点核对入场人员分工后开始编制")
     assert task.conversation_context["personnel"] == [
         {
-            "id": str(case["viewer"].pk),
-            "name": case["viewer"].real_name,
-            "job_title": "查看者",
+            "id": str(case["personnel_folder"].pk),
+            "name": "张三",
+            "gender": "male",
+            "id_card_number": "110101199001010011",
+            "phone": "13800000000",
+            "job_title": "",
             "department": "",
-            "contact": "",
+            "contact": "13800000000",
             "certifications": [],
             "certificate_valid_until": None,
             "additional_info": {
-                "project_member_id": ProjectMember.objects.get(
-                    project=case["project"],
-                    user=case["viewer"],
-                ).pk,
-                "project_role": ProjectMember.Role.VIEWER,
+                "personnel_folder_id": case["personnel_folder"].pk,
+                "profile_complete": True,
             },
         }
     ]
@@ -615,10 +634,186 @@ def test_pipeline_endpoint_atomically_creates_sources_and_queues_extraction(
     ).exists()
 
 
-@pytest.mark.django_db(transaction=True)
-def test_pipeline_rejects_personnel_outside_the_current_project(client, tmp_path):
+@pytest.mark.django_db
+@pytest.mark.parametrize("actor_key", ["manager", "admin"])
+def test_manager_and_admin_can_upload_self_service_template(
+    client,
+    tmp_path,
+    actor_key,
+):
     case = setup_generation_case(tmp_path)
-    outsider = make_user("outsider", User.Role.DATA_OPERATOR)
+    client.force_login(case[actor_key])
+
+    with override_settings(FILE_STORAGE_ROOT=tmp_path):
+        response = client.post(
+            "/api/v1/document-generation/templates/",
+            {
+                "project_id": case["project"].pk,
+                "file": SimpleUploadedFile(
+                    f"client-{actor_key}.docx",
+                    docx_bytes("甲方四措两案模板"),
+                    content_type=DOCX_MIME,
+                ),
+            },
+        )
+
+    assert response.status_code == 201
+    assert response.json()["sync_status"] == "synced"
+    template = DocumentTemplate.objects.get(pk=response.json()["id"])
+    assert template.is_active is True
+    assert template.approval_status == ApprovalStatus.DRAFT
+    assert template.field_mapping["self_service"] is True
+    assert template.field_mapping["project_id"] == case["project"].pk
+    assert template.document_version.document.folder == case["entry_folder"]
+
+    listed = client.get(
+        "/api/v1/document-generation/templates/",
+        {"project_id": case["project"].pk},
+    )
+    assert listed.status_code == 200
+    assert template.pk in {item["id"] for item in listed.json()}
+
+
+@pytest.mark.django_db(transaction=True)
+def test_self_service_template_can_be_used_without_approval(client, tmp_path, monkeypatch):
+    case = setup_generation_case(tmp_path)
+    client.force_login(case["manager"])
+    monkeypatch.setattr(
+        "apps.document_generation.queues.queue_generation_task",
+        lambda task_id: None,
+    )
+    with override_settings(FILE_STORAGE_ROOT=tmp_path):
+        uploaded = client.post(
+            "/api/v1/document-generation/templates/",
+            {
+                "project_id": case["project"].pk,
+                "file": SimpleUploadedFile(
+                    "client-direct.docx",
+                    docx_bytes("甲方四措两案模板"),
+                    content_type=DOCX_MIME,
+                ),
+            },
+        )
+
+        response = client.post(
+            "/api/v1/document-generation/tasks/pipeline/",
+            {
+                "project_id": case["project"].pk,
+                "template_id": uploaded.json()["id"],
+                "idempotency_key": "self-service-template-pipeline",
+                "document_version_ids": [case["source_version"].pk],
+                "conversation_context": {"initial_message": "按甲方模板开始编制"},
+                "facts": [
+                    {
+                        "field": "project_name",
+                        "value": "风场入场项目",
+                        "value_type": "string",
+                    }
+                ],
+            },
+            content_type="application/json",
+        )
+
+    assert uploaded.status_code == 201
+    assert response.status_code == 202
+    assert response.json()["template_id"] == uploaded.json()["id"]
+
+
+@pytest.mark.django_db
+def test_template_upload_skips_sync_when_entry_folder_is_missing(client, tmp_path):
+    case = setup_generation_case(tmp_path)
+    case["entry_folder"].is_active = False
+    case["entry_folder"].save(update_fields=["is_active", "updated_at"])
+    client.force_login(case["manager"])
+
+    with override_settings(FILE_STORAGE_ROOT=tmp_path):
+        response = client.post(
+            "/api/v1/document-generation/templates/",
+            {
+                "project_id": case["project"].pk,
+                "file": SimpleUploadedFile(
+                    "client-no-entry.docx",
+                    docx_bytes("甲方四措两案模板"),
+                    content_type=DOCX_MIME,
+                ),
+            },
+        )
+
+    assert response.status_code == 201
+    assert response.json()["sync_status"] == "folder_missing"
+    template = DocumentTemplate.objects.get(pk=response.json()["id"])
+    assert template.document_version.document.folder == case["technical_folder"]
+
+
+@pytest.mark.django_db
+def test_selecting_template_syncs_once_to_entry_folder(client, tmp_path):
+    case = setup_generation_case(tmp_path)
+    client.force_login(case["manager"])
+    url = f'/api/v1/document-generation/templates/{case["template"].pk}/select/'
+
+    with override_settings(FILE_STORAGE_ROOT=tmp_path):
+        first = client.post(
+            url,
+            {"project_id": case["project"].pk},
+            content_type="application/json",
+        )
+        second = client.post(
+            url,
+            {"project_id": case["project"].pk},
+            content_type="application/json",
+        )
+
+    assert first.status_code == 200
+    assert first.json()["sync_status"] == "synced"
+    assert second.status_code == 200
+    assert second.json()["sync_status"] == "already_present"
+    assert Document.objects.filter(
+        folder=case["entry_folder"],
+        description__contains="四措两案 Agent 甲方模板",
+    ).count() == 1
+    synchronized_document = Document.objects.get(
+        folder=case["entry_folder"],
+        description__contains="四措两案 Agent 甲方模板",
+    )
+    task = create_task_via_api(client, case)
+    source_response = client.post(
+        f"/api/v1/document-generation/tasks/{task.pk}/sources/",
+        {"document_version_ids": [synchronized_document.current_version_id]},
+        content_type="application/json",
+    )
+    assert source_response.status_code == 400
+    assert source_response.json()["code"] == "SOURCE_PURPOSE_MISMATCH"
+
+
+@pytest.mark.django_db
+def test_available_personnel_comes_from_public_staff_folders(client, tmp_path):
+    case = setup_generation_case(tmp_path)
+    client.force_login(case["manager"])
+
+    response = client.get(
+        "/api/v1/document-generation/tasks/available-personnel/",
+        {"project_id": case["project"].pk},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == [
+        {
+            "id": str(case["personnel_folder"].pk),
+            "folder_id": case["personnel_folder"].pk,
+            "name": "张三",
+            "gender": "male",
+            "gender_display": "男",
+            "id_card_number": "110101199001010011",
+            "phone": "13800000000",
+            "profile_complete": True,
+            "updated_at": response.json()[0]["updated_at"],
+        }
+    ]
+
+
+@pytest.mark.django_db(transaction=True)
+def test_pipeline_rejects_personnel_outside_public_staff_list(client, tmp_path):
+    case = setup_generation_case(tmp_path)
     client.force_login(case["manager"])
 
     response = client.post(
@@ -630,7 +825,7 @@ def test_pipeline_rejects_personnel_outside_the_current_project(client, tmp_path
             "document_version_ids": [case["source_version"].pk],
             "conversation_context": {
                 "initial_message": "开始编制",
-                "selected_personnel_ids": [outsider.pk],
+                "selected_personnel_ids": [999999],
             },
         },
         content_type="application/json",

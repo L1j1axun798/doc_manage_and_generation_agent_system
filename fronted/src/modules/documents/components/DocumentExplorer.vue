@@ -257,6 +257,15 @@ watch(
   },
 )
 
+watch(
+  () => (isTopPublicFolderMode.value ? route.query.folder : undefined),
+  () => {
+    if (applyRouteFolderSelection()) {
+      page.value = 1
+    }
+  },
+)
+
 function getRouteSearch(): string {
   return typeof route.query.search === 'string' ? route.query.search : ''
 }
@@ -283,6 +292,34 @@ function applyRouteSearch(reload: boolean): void {
   }
 }
 
+function getRouteFolderId(): number | undefined {
+  const value = route.query.folder
+  const rawValue = Array.isArray(value) ? value[0] : value
+  if (typeof rawValue !== 'string' || !/^\d+$/.test(rawValue)) {
+    return undefined
+  }
+
+  const folderId = Number(rawValue)
+  return Number.isSafeInteger(folderId) && folderId > 0 ? folderId : undefined
+}
+
+function applyRouteFolderSelection(): boolean {
+  if (!isTopPublicFolderMode.value || (props.syncSearchQuery && search.value.trim())) {
+    return false
+  }
+
+  const folderId = getRouteFolderId()
+  const folderExists = publicRootNodes.value.some(
+    (node) => folderId !== undefined && (node.id === folderId || hasDescendant(node, folderId)),
+  )
+  if (!folderExists || selectedFolderId.value === folderId) {
+    return false
+  }
+
+  selectedFolderId.value = folderId
+  return true
+}
+
 async function loadFolderTree(): Promise<void> {
   if (!props.showFolders) {
     folderTree.value = []
@@ -296,6 +333,7 @@ async function loadFolderTree(): Promise<void> {
     if (fixedFolderNode.value) {
       selectedFolderId.value = fixedFolderNode.value.id
     }
+    applyRouteFolderSelection()
     syncTopFolderSelection()
   } catch (error) {
     ElMessage.error(getErrorMessage(error))

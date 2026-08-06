@@ -12,6 +12,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.accounts.permissions import IsSystemAdmin
+from apps.folders.personnel import personnel_folders
+from apps.folders.serializers import PersonnelRecordSerializer
 
 from .exceptions import DocumentAgentDisabled, DocumentAgentPhase5Blocked
 from .knowledge_corpus import (
@@ -27,6 +29,9 @@ from .selectors import (
     writable_project_for_user,
 )
 from .serializers import (
+    AvailablePersonnelQuerySerializer,
+    ClientTemplateSelectSerializer,
+    ClientTemplateUploadSerializer,
     DocumentTemplateSerializer,
     ExportSerializer,
     GeneratedSectionSerializer,
@@ -52,6 +57,7 @@ from .services import (
     confirm_and_request_generation,
     confirm_generation_facts,
     create_generation_task,
+    create_self_service_template,
     delete_generation_task,
     edit_generated_section,
     export_generation_task,
@@ -65,6 +71,7 @@ from .services import (
     start_compilation_pipeline,
     stop_generation_task,
     submit_generation_review,
+    sync_template_to_project_entry,
 )
 
 
@@ -86,11 +93,76 @@ class DocumentTemplateViewSet(
     serializer_class = DocumentTemplateSerializer
     permission_classes = [IsDocumentGenerationUser]
     pagination_class = None
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     def get_queryset(self):
         if getattr(self, "swagger_fake_view", False):
             return DocumentTemplate.objects.none()
-        return available_templates()
+        project_id = self.request.query_params.get("project_id")
+        if not project_id:
+            return available_templates()
+        try:
+            numeric_project_id = int(project_id)
+        except (TypeError, ValueError):
+            return DocumentTemplate.objects.none()
+        if writable_project_for_user(self.request.user, numeric_project_id) is None:
+            return DocumentTemplate.objects.none()
+        return available_templates(project_id=numeric_project_id)
+
+    @extend_schema(
+        request=ClientTemplateUploadSerializer,
+        responses=DocumentTemplateSerializer,
+    )
+    def create(self, request, *args, **kwargs):
+        serializer = ClientTemplateUploadSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        project = writable_project_for_user(request.user, data["project_id"])
+        if project is None:
+            return Response(
+                {"detail": "项目不存在或当前用户无权编制入场资料"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        template, synced_to_entry = create_self_service_template(
+            actor=request.user,
+            project=project,
+            uploaded_file=data["file"],
+            request=request,
+        )
+        payload = DocumentTemplateSerializer(template).data
+        payload["sync_status"] = "synced" if synced_to_entry else "folder_missing"
+        return Response(payload, status=status.HTTP_201_CREATED)
+
+    @extend_schema(
+        request=ClientTemplateSelectSerializer,
+        responses=DocumentTemplateSerializer,
+    )
+    @action(detail=True, methods=["post"], url_path="select")
+    def select_template(self, request, pk=None):
+        serializer = ClientTemplateSelectSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        project = writable_project_for_user(
+            request.user,
+            serializer.validated_data["project_id"],
+        )
+        if project is None:
+            return Response(
+                {"detail": "项目不存在或当前用户无权编制入场资料"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        template = get_object_or_404(
+            available_templates(project_id=project.pk),
+            pk=pk,
+        )
+        sync_status = sync_template_to_project_entry(
+            actor=request.user,
+            project=project,
+            template=template,
+            request=request,
+        )
+        payload = DocumentTemplateSerializer(template).data
+        payload["sync_status"] = sync_status
+        return Response(payload)
 
 
 class RagOverviewView(DocumentAgentFeatureMixin, APIView):
@@ -191,10 +263,27 @@ class GenerationTaskViewSet(
             "update_section": GeneratedSectionUpdateSerializer,
             "lock_section": SectionLockSerializer,
             "regenerate_section": SectionRegenerateSerializer,
+            "available_personnel": AvailablePersonnelQuerySerializer,
             "submit_review": ReviewActionSerializer,
             "approve": ReviewActionSerializer,
             "export": ExportSerializer,
         }.get(self.action, GenerationTaskSerializer)
+
+    @extend_schema(
+        parameters=[AvailablePersonnelQuerySerializer],
+        responses=PersonnelRecordSerializer(many=True),
+    )
+    @action(detail=False, methods=["get"], url_path="available-personnel")
+    def available_personnel(self, request):
+        serializer = AvailablePersonnelQuerySerializer(data=request.query_params)
+        serializer.is_valid(raise_exception=True)
+        project_id = serializer.validated_data["project_id"]
+        if writable_project_for_user(request.user, project_id) is None:
+            return Response(
+                {"detail": "项目不存在或当前用户无权编制入场资料"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        return Response(PersonnelRecordSerializer(personnel_folders(), many=True).data)
 
     @extend_schema(
         request=GenerationPipelineCreateSerializer,
@@ -211,7 +300,10 @@ class GenerationTaskViewSet(
                 {"detail": "项目不存在或当前用户无权编制入场资料"},
                 status=status.HTTP_404_NOT_FOUND,
             )
-        template = get_object_or_404(available_templates(), pk=data["template_id"])
+        template = get_object_or_404(
+            available_templates(project_id=project.pk),
+            pk=data["template_id"],
+        )
         task, created = start_compilation_pipeline(
             actor=request.user,
             project=project,
@@ -243,7 +335,10 @@ class GenerationTaskViewSet(
                 {"detail": "项目不存在或当前用户无权编制入场资料"},
                 status=status.HTTP_404_NOT_FOUND,
             )
-        template = get_object_or_404(available_templates(), pk=data["template_id"])
+        template = get_object_or_404(
+            available_templates(project_id=project.pk),
+            pk=data["template_id"],
+        )
         task, created = create_generation_task(
             actor=request.user,
             project=project,
