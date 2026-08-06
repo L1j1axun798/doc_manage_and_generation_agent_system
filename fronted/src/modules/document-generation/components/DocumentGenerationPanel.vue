@@ -2141,12 +2141,12 @@ async function runAction(action: () => Promise<void>): Promise<void> {
 
 .doc-agent__welcome-cursor {
   display: inline-block;
-  width: 2px;
-  height: 1em;
+  width: 0.72em;
+  height: 2px;
   margin-left: 3px;
   background: var(--color-brand);
-  vertical-align: -0.08em;
-  animation: doc-agent-stream-cursor 720ms steps(1, end) infinite;
+  vertical-align: 0.08em;
+  animation: doc-agent-stream-cursor 1.2s ease-in-out infinite;
 }
 
 @keyframes doc-agent-stream-character {
@@ -2163,13 +2163,14 @@ async function runAction(action: () => Promise<void>): Promise<void> {
 
 @keyframes doc-agent-stream-cursor {
   0%,
-  46% {
-    opacity: 1;
+  100% {
+    opacity: 0.28;
+    transform: scaleX(0.82);
   }
 
-  47%,
-  100% {
-    opacity: 0;
+  50% {
+    opacity: 1;
+    transform: scaleX(1);
   }
 }
 

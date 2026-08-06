@@ -209,6 +209,12 @@ describe('document generation conversation directory', () => {
     expect(wrapper.text()).not.toContain('Enter 发送')
     expect(wrapper.get('.chat-composer__count').text()).toBe('0/4000')
     expect(wrapper.get('.chat-composer__actions [data-test="chat-send"]').text()).toBe('发送')
+    expect(wrapper.findAll('.chat-composer__tool-button').map((button) => button.text())).toEqual([
+      '上传甲方模板',
+      '选择人员',
+      '选择系统内参考资料',
+      '从本机上传参考资料',
+    ])
     expect(wrapper.get('[data-test="chat-send"]').attributes('disabled')).toBeDefined()
     expect(wrapper.get('.conversation-sidebar__header button').attributes('disabled')).toBeDefined()
     expect(mocks.fetchGenerationTasks).not.toHaveBeenCalled()
@@ -305,7 +311,7 @@ describe('document generation conversation directory', () => {
       global: { plugins: [pinia, ElementPlus] },
     })
     await flushPromises()
-    const templateButton = wrapper.findAll('button').find((button) => button.text() === '甲方模板')
+    const templateButton = wrapper.findAll('button').find((button) => button.text() === '上传甲方模板')
     await templateButton?.trigger('click')
     await wrapper.vm.$nextTick()
     const fileInput = wrapper.get('.template-selector__file-input')

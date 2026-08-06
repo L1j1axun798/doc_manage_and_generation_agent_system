@@ -67,7 +67,7 @@ function statusType(task: GenerationTask): 'danger' | 'success' | 'warning' | 'i
           @click="emit('open', task)"
         >
           <span class="doc-agent__conversation-copy">
-            <strong>{{ `对话${index + 1}-${username}` }}</strong>
+            <span class="doc-agent__conversation-title">{{ `对话${index + 1}-${username}` }}</span>
           </span>
           <span class="doc-agent__conversation-state">
             <el-tag size="small" :type="statusType(task)">
@@ -229,8 +229,10 @@ function statusType(task: GenerationTask): 'danger' | 'success' | 'warning' | 'i
   flex: 1;
 }
 
-.doc-agent__conversation-copy strong {
+.doc-agent__conversation-title {
   overflow: hidden;
+  font-size: 12px;
+  font-weight: 400;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
