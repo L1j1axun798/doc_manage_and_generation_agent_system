@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 
 import { formatDateTime } from '@/shared/utils/format'
 import type {
@@ -15,6 +15,7 @@ const props = defineProps<{
 }>()
 
 const detailsExpanded = ref(false)
+const timelineViewport = ref<HTMLElement | null>(null)
 const COLLAPSED_EVENT_COUNT = 3
 
 const stageLabels: Record<string, string> = {
@@ -66,6 +67,24 @@ const visibleEvents = computed(() => detailsExpanded.value
   ? props.events
   : props.events.slice(-COLLAPSED_EVENT_COUNT))
 
+watch(
+  () => [latestEvent.value?.sequence || 0, detailsExpanded.value] as const,
+  () => scrollToLatestEvent(),
+  { flush: 'post', immediate: true },
+)
+
+function scrollToLatestEvent(): void {
+  void nextTick(() => {
+    const viewport = timelineViewport.value
+    if (!viewport) return
+    if (typeof viewport.scrollTo === 'function') {
+      viewport.scrollTo({ top: viewport.scrollHeight, behavior: 'smooth' })
+    } else {
+      viewport.scrollTop = viewport.scrollHeight
+    }
+  })
+}
+
 function tagType(
   status: GenerationTraceStatus,
 ): 'success' | 'warning' | 'danger' | 'info' | 'primary' {
@@ -116,31 +135,15 @@ function displayDetail(detail: string): string {
       </el-tag>
     </div>
 
-    <div v-if="!detailsExpanded" class="workflow-trace__compact-meta">
-      <span>{{ task.model_alias || '模型尚未调用' }}</span>
+    <div class="workflow-trace__meta">
+      <span :title="task.template_name">模板 {{ task.template_name }}</span>
+      <span>来源资料 {{ task.sources.length }} 份</span>
+      <span>模型 {{ task.model_alias || '尚未调用' }}</span>
+      <span>尝试次数 {{ task.generation_attempts }}</span>
       <span>Tool {{ toolCount }}</span>
       <span>模型事件 {{ modelCount }}</span>
       <span>RAG {{ ragCount }}</span>
       <span>共 {{ events.length }} 条状态</span>
-    </div>
-
-    <div v-else class="workflow-trace__metrics">
-      <div>
-        <span>模型状态</span>
-        <strong>{{ task.model_alias || '尚未调用模型' }}</strong>
-      </div>
-      <div>
-        <span>Tool Use</span>
-        <strong>{{ toolCount }}</strong>
-      </div>
-      <div>
-        <span>模型调用事件</span>
-        <strong>{{ modelCount }}</strong>
-      </div>
-      <div>
-        <span>RAG事件</span>
-        <strong>{{ ragCount }}</strong>
-      </div>
     </div>
 
     <div v-if="detailsExpanded" class="workflow-trace__references">
@@ -164,30 +167,41 @@ function displayDetail(detail: string): string {
       :image-size="56"
       description="任务启动后，这里会显示实时执行轨迹"
     />
-    <el-timeline v-else class="workflow-trace__timeline">
-      <el-timeline-item
-        v-for="event in visibleEvents"
-        :key="event.sequence"
-        :timestamp="formatDateTime(event.created_at)"
-        placement="top"
-        :type="tagType(event.status)"
-        :hollow="event.status === 'started'"
-      >
-        <div class="workflow-trace__event">
-          <div class="workflow-trace__event-title">
-            <el-tag size="small" :type="event.event_type === 'rag' ? 'success' : 'info'">
-              {{ typeLabels[event.event_type] }}
-            </el-tag>
-            <strong>{{ event.title }}</strong>
-            <el-tag size="small" :type="tagType(event.status)" effect="plain">
-              {{ statusLabel(event.status) }}
-            </el-tag>
+    <div
+      v-else
+      ref="timelineViewport"
+      class="workflow-trace__timeline-viewport"
+      aria-live="polite"
+      aria-atomic="false"
+    >
+      <el-timeline class="workflow-trace__timeline">
+        <el-timeline-item
+          v-for="event in visibleEvents"
+          :key="event.sequence"
+          :timestamp="formatDateTime(event.created_at)"
+          placement="top"
+          :type="tagType(event.status)"
+          :hollow="event.status === 'started'"
+        >
+          <div
+            class="workflow-trace__event"
+            :class="{ 'is-current': event.sequence === latestEvent?.sequence }"
+          >
+            <div class="workflow-trace__event-title">
+              <el-tag size="small" :type="event.event_type === 'rag' ? 'success' : 'info'">
+                {{ typeLabels[event.event_type] }}
+              </el-tag>
+              <span class="workflow-trace__event-name">{{ event.title }}</span>
+              <el-tag size="small" :type="tagType(event.status)" effect="plain">
+                {{ statusLabel(event.status) }}
+              </el-tag>
+            </div>
+            <p v-if="event.detail">{{ displayDetail(event.detail) }}</p>
+            <small>{{ stageLabels[event.stage] || event.stage }} · {{ event.tool }}</small>
           </div>
-          <p v-if="event.detail">{{ displayDetail(event.detail) }}</p>
-          <small>{{ stageLabels[event.stage] || event.stage }} · {{ event.tool }}</small>
-        </div>
-      </el-timeline-item>
-    </el-timeline>
+        </el-timeline-item>
+      </el-timeline>
+    </div>
     <div v-if="events.length" class="workflow-trace__expand-actions">
       <el-button
         link
@@ -237,40 +251,23 @@ function displayDetail(detail: string): string {
   margin-top: 5px;
 }
 
-.workflow-trace__metrics {
-  display: grid;
-  margin: 16px 0;
-  gap: 10px;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-}
-
-.workflow-trace__compact-meta {
+.workflow-trace__meta {
   display: flex;
   flex-wrap: wrap;
   margin: 14px 0 12px;
   gap: 7px;
 }
 
-.workflow-trace__compact-meta span {
+.workflow-trace__meta span {
+  max-width: min(100%, 280px);
+  overflow: hidden;
   padding: 4px 8px;
   border-radius: 999px;
   background: var(--el-bg-color);
   color: var(--el-text-color-secondary);
   font-size: 12px;
-}
-
-.workflow-trace__metrics > div {
-  display: grid;
-  padding: 12px;
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: 8px;
-  background: var(--el-bg-color);
-  gap: 5px;
-}
-
-.workflow-trace__metrics span {
-  color: var(--el-text-color-secondary);
-  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .workflow-trace__references {
@@ -278,14 +275,24 @@ function displayDetail(detail: string): string {
   margin-bottom: 18px;
 }
 
-.workflow-trace__timeline {
+.workflow-trace__timeline-viewport {
   max-height: 250px;
   overflow: auto;
+  scroll-behavior: smooth;
+  scrollbar-width: thin;
+}
+
+.workflow-trace.is-expanded .workflow-trace__timeline-viewport {
+  max-height: min(50vh, 460px);
+}
+
+.workflow-trace__timeline {
   padding: 6px 4px 0;
 }
 
-.workflow-trace.is-expanded .workflow-trace__timeline {
-  max-height: min(50vh, 460px);
+.workflow-trace__timeline :deep(.el-timeline-item__timestamp) {
+  font-size: 11px;
+  font-weight: 400;
 }
 
 .workflow-trace__event {
@@ -293,10 +300,45 @@ function displayDetail(detail: string): string {
   border: 1px solid var(--el-border-color-lighter);
   border-radius: 8px;
   background: var(--el-bg-color);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.workflow-trace__event.is-current {
+  border-color: color-mix(in srgb, var(--el-color-primary) 30%, var(--el-border-color-lighter));
+  animation: workflow-trace-stream-in 420ms ease-out;
+}
+
+.workflow-trace__event-title {
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.workflow-trace__event-name {
+  font-size: 12px;
+  font-weight: 400;
 }
 
 .workflow-trace__event p {
-  margin: 8px 0 4px;
+  margin: 6px 0 3px;
+  font-size: 12px;
+}
+
+.workflow-trace__event small {
+  font-size: 11px;
+  font-weight: 400;
+}
+
+@keyframes workflow-trace-stream-in {
+  from {
+    opacity: 0.35;
+    transform: translateY(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .workflow-trace:not(.is-expanded) .workflow-trace__event p {
@@ -313,13 +355,15 @@ function displayDetail(detail: string): string {
 }
 
 @media (max-width: 900px) {
-  .workflow-trace__metrics {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
   .workflow-trace__heading {
     align-items: flex-start;
     flex-direction: column;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workflow-trace__event.is-current {
+    animation: none;
   }
 }
 </style>

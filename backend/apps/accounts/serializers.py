@@ -79,6 +79,11 @@ class LoginChallengeResponseSerializer(serializers.Serializer):
     options = serializers.DictField()
 
 
+class AuthenticatedLoginResponseSerializer(serializers.Serializer):
+    status = serializers.CharField()
+    user = UserSerializer()
+
+
 class WebAuthnLoginVerifySerializer(serializers.Serializer):
     pending_token = serializers.CharField()
     credential = serializers.DictField()

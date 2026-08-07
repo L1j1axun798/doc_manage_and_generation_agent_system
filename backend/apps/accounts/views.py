@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.contrib.auth import (
     authenticate,
     get_user_model,
@@ -12,7 +13,7 @@ from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import ensure_csrf_cookie
 from drf_spectacular.types import OpenApiTypes
-from drf_spectacular.utils import OpenApiResponse, extend_schema
+from drf_spectacular.utils import OpenApiResponse, PolymorphicProxySerializer, extend_schema
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import AuthenticationFailed
@@ -27,6 +28,7 @@ from common.throttles import LoginAccountThrottle, LoginIPThrottle
 from .models import User as UserModel
 from .permissions import IsSystemAdmin
 from .serializers import (
+    AuthenticatedLoginResponseSerializer,
     ChangePasswordSerializer,
     LoginChallengeResponseSerializer,
     LoginSerializer,
@@ -84,7 +86,17 @@ class LoginView(APIView):
     authentication_classes = []
     throttle_classes = [LoginIPThrottle, LoginAccountThrottle]
 
-    @extend_schema(request=LoginSerializer, responses=LoginChallengeResponseSerializer)
+    @extend_schema(
+        request=LoginSerializer,
+        responses=PolymorphicProxySerializer(
+            component_name="LoginResponse",
+            serializers=[
+                LoginChallengeResponseSerializer,
+                AuthenticatedLoginResponseSerializer,
+            ],
+            resource_type_field_name=None,
+        ),
+    )
     def post(self, request):
         serializer = LoginSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -113,6 +125,30 @@ class LoginView(APIView):
                 error_message="invalid_credentials",
             )
             raise AuthenticationFailed("用户名或密码错误")
+
+        if not settings.LOGIN_REQUIRE_WEBAUTHN:
+            login(request, user)
+            audit_log(
+                user=user,
+                action="auth.password_verified",
+                resource=user,
+                result="success",
+                request=request,
+            )
+            audit_log(
+                user=user,
+                action="auth.login",
+                resource=user,
+                result="success",
+                request=request,
+                after_data={"verification_method": "password"},
+            )
+            return Response(
+                {
+                    "status": "authenticated",
+                    "user": UserSerializer(user).data,
+                }
+            )
 
         result = begin_login(user=user, request=request)
         return Response(
@@ -145,6 +181,7 @@ class WebAuthnLoginVerifyView(APIView):
             resource=user,
             result="success",
             request=request,
+            after_data={"verification_method": "webauthn"},
         )
         return Response(UserSerializer(user).data)
 
@@ -241,7 +278,7 @@ class MeView(APIView):
 
     @extend_schema(responses=UserSerializer)
     def get(self, request):
-        if not is_webauthn_session(request):
+        if settings.LOGIN_REQUIRE_WEBAUTHN and not is_webauthn_session(request):
             logout(request)
             raise AuthenticationFailed("登录态已过期，请重新登录")
         return Response(UserSerializer(request.user).data)

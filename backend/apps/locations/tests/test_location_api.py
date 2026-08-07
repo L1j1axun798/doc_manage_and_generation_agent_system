@@ -3,6 +3,7 @@ from decimal import Decimal
 
 import pytest
 from django.contrib.auth import get_user_model
+from django.test import override_settings
 from django.utils import timezone
 
 from apps.accounts.models import WebAuthnCredential
@@ -188,6 +189,31 @@ def test_report_requires_webauthn_assertion(client):
 
 
 @pytest.mark.django_db
+@override_settings(
+    LOGIN_REQUIRE_WEBAUTHN=False,
+    LOCATION_REPORT_REQUIRE_WEBAUTHN=True,
+)
+def test_password_login_does_not_disable_location_webauthn(client):
+    user = make_user("password-login-location-verified")
+
+    login_response = client.post(
+        "/api/v1/auth/login/",
+        {"username": user.username, "password": "Password123!"},
+        content_type="application/json",
+    )
+    location_response = client.post(
+        "/api/v1/locations/report/",
+        {"longitude": "116.397128", "latitude": "39.916527"},
+        content_type="application/json",
+    )
+
+    assert login_response.status_code == 200
+    assert login_response.json()["status"] == "authenticated"
+    assert location_response.status_code == 400
+    assert LocationReport.objects.count() == 0
+
+
+@pytest.mark.django_db
 def test_report_challenge_returns_webauthn_options_for_bound_user(client):
     user = make_user("operator")
     create_webauthn_credential(user)
@@ -200,8 +226,38 @@ def test_report_challenge_returns_webauthn_options_for_bound_user(client):
     )
 
     assert response.status_code == 200
+    assert response.json()["status"] == "webauthn_required"
     assert response.json()["token"]
     assert response.json()["options"]["challenge"]
+
+
+@pytest.mark.django_db
+@override_settings(LOCATION_REPORT_REQUIRE_WEBAUTHN=False)
+def test_location_verification_can_be_disabled_independently(client, monkeypatch):
+    user = make_user("location-without-webauthn")
+    client.force_login(user)
+
+    def unexpected_verification(**kwargs):
+        raise AssertionError("WebAuthn verification must not run while the location switch is off")
+
+    monkeypatch.setattr("apps.locations.views.verify_location_challenge", unexpected_verification)
+    challenge_response = client.post(
+        "/api/v1/locations/report/challenge/",
+        {"longitude": "116.397128", "latitude": "39.916527"},
+        content_type="application/json",
+    )
+    report_response = client.post(
+        "/api/v1/locations/report/",
+        {"longitude": "116.397128", "latitude": "39.916527"},
+        content_type="application/json",
+    )
+
+    assert challenge_response.status_code == 200
+    assert challenge_response.json() == {"status": "not_required"}
+    assert report_response.status_code == 201
+    report_audit = AuditLog.objects.get(action="location.report", result="success")
+    assert report_audit.after_data["verification_method"] == "session"
+    assert report_audit.after_data["webauthn_credential_id"] is None
 
 
 @pytest.mark.django_db

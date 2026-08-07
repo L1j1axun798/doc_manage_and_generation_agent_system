@@ -10,7 +10,10 @@ import type {
 
 const task = {
   status: 'generating',
+  template_name: '风机质保检测四措两案模板',
   model_alias: 'qwen-test',
+  generation_attempts: 2,
+  sources: [{ id: 1 }, { id: 2 }],
   reference_summary: {
     project_source_files: 2,
     approved_rag_chunks: 20,
@@ -43,7 +46,13 @@ describe('document generation workflow trace', () => {
     expect(wrapper.text()).not.toContain('执行状态 2')
     expect(wrapper.text()).toContain('执行状态 3')
     expect(wrapper.text()).toContain('执行状态 5')
+    expect(wrapper.text()).toContain('模板 风机质保检测四措两案模板')
+    expect(wrapper.text()).toContain('来源资料 2 份')
+    expect(wrapper.text()).toContain('模型 qwen-test')
+    expect(wrapper.text()).toContain('尝试次数 2')
     expect(wrapper.text()).toContain('共 5 条状态')
+    expect(wrapper.find('.workflow-trace__event strong').exists()).toBe(false)
+    expect(wrapper.get('.workflow-trace__event.is-current').text()).toContain('执行状态 5')
     expect(wrapper.text()).toContain('展开全部执行详情（5 条）')
 
     await wrapper.get('.workflow-trace__expand-actions button').trigger('click')
@@ -52,5 +61,26 @@ describe('document generation workflow trace', () => {
     expect(wrapper.text()).toContain('执行状态 2')
     expect(wrapper.text()).toContain('当前项目事实资料 2 份')
     expect(wrapper.text()).toContain('收起执行详情')
+  })
+
+  it('keeps the newest polled event visible as a live stream update', async () => {
+    const wrapper = mount(GenerationWorkflowTrace, {
+      props: { task, events },
+      global: { plugins: [ElementPlus] },
+    })
+    const newestEvent: GenerationTraceEvent = {
+      ...events.at(-1)!,
+      sequence: 6,
+      title: '最新生成状态',
+      detail: '正在写入最新章节',
+      created_at: '2026-08-05T10:06:00+08:00',
+    }
+
+    await wrapper.setProps({ events: [...events, newestEvent] })
+
+    expect(wrapper.get('.workflow-trace__timeline-viewport').attributes('aria-live')).toBe('polite')
+    expect(wrapper.get('.workflow-trace__event.is-current').text()).toContain('最新生成状态')
+    expect(wrapper.text()).not.toContain('执行状态 3')
+    expect(wrapper.text()).toContain('执行状态 4')
   })
 })

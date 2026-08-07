@@ -1387,12 +1387,6 @@ async function runAction(action: () => Promise<void>): Promise<void> {
       </template>
 
       <el-progress :percentage="selectedTask.progress" />
-      <el-descriptions :column="2" border class="doc-agent__meta">
-        <el-descriptions-item label="模板">{{ selectedTask.template_name }}</el-descriptions-item>
-        <el-descriptions-item label="来源资料">{{ selectedTask.sources.length }}份</el-descriptions-item>
-        <el-descriptions-item label="模型">{{ selectedTask.model_alias || '尚未调用' }}</el-descriptions-item>
-        <el-descriptions-item label="尝试次数">{{ selectedTask.generation_attempts }}</el-descriptions-item>
-      </el-descriptions>
 
       <el-alert
         v-if="selectedTask.error_message"
@@ -2176,21 +2170,27 @@ async function runAction(action: () => Promise<void>): Promise<void> {
 
 .doc-agent__message-turn {
   display: grid;
-  max-width: 980px;
-  margin: 0 auto 22px;
+  width: min(100%, 980px);
+  max-width: 100%;
+  margin: 0 0 22px;
   align-items: flex-start;
   gap: 12px;
   grid-template-columns: 34px minmax(0, 1fr);
 }
 
 .doc-agent__message-turn > div:last-child {
+  width: 100%;
+  max-width: 100%;
   min-width: 0;
+  overflow: hidden;
   padding: 12px 15px;
+  box-sizing: border-box;
   border-radius: var(--radius-lg);
 }
 
 .doc-agent__message-turn p {
   margin: 6px 0 0;
+  overflow-wrap: anywhere;
   line-height: 1.7;
   white-space: pre-wrap;
 }
@@ -2208,12 +2208,12 @@ async function runAction(action: () => Promise<void>): Promise<void> {
   background: var(--color-bg-surface-secondary);
 }
 
-.doc-agent__message-turn--agent {
-  max-width: 1180px;
-}
-
 .doc-agent__message-turn--agent > .doc-agent__ai-response {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   padding: 0;
+  box-sizing: border-box;
 }
 
 .doc-agent__ai-summary {
@@ -2446,8 +2446,12 @@ async function runAction(action: () => Promise<void>): Promise<void> {
 }
 
 .doc-agent__task {
-  max-width: none;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   margin: 0;
+  overflow: hidden;
+  box-sizing: border-box;
   border: 0;
   border-radius: 0;
   background: transparent;
@@ -2459,11 +2463,10 @@ async function runAction(action: () => Promise<void>): Promise<void> {
 }
 
 .doc-agent__task :deep(.el-card__body) {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
   padding: 16px;
-}
-
-.doc-agent__meta {
-  margin: 18px 0;
 }
 
 .doc-agent__recovery {

@@ -15,7 +15,7 @@ const router = useRouter()
 setTheme('light')
 
 const loading = ref(false)
-const loginStep = ref<'idle' | 'password' | 'webauthn'>('idle')
+const loginStep = ref<'idle' | 'password'>('idle')
 const form = reactive({
   username: '',
   password: '',
@@ -31,11 +31,6 @@ async function submitLogin(): Promise<void> {
   loginStep.value = 'password'
 
   try {
-    window.setTimeout(() => {
-      if (loading.value) {
-        loginStep.value = 'webauthn'
-      }
-    }, 300)
     const user = await authStore.login({
       username: form.username,
       password: form.password,
@@ -96,7 +91,7 @@ async function submitLogin(): Promise<void> {
           size="large"
           type="primary"
         >
-          {{ loginStep === 'webauthn' ? '等待本人验证' : '登录' }}
+          {{ loginStep === 'password' ? '正在登录' : '登录' }}
         </el-button>
       </el-form>
     </section>

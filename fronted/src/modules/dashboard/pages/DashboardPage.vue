@@ -203,6 +203,10 @@ async function submitLocationFailure(reason: string): Promise<void> {
 
 async function submitVerifiedLocationReport(payload: LocationReportPayload): Promise<void> {
   const challenge = await createLocationReportChallenge(payload)
+  if (challenge.status === 'not_required') {
+    await reportLocation(payload)
+    return
+  }
   const credential = await authenticateWithWebAuthn(challenge.options)
   await reportLocation({
     ...payload,

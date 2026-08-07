@@ -1,18 +1,20 @@
-from drf_spectacular.utils import extend_schema
+from django.conf import settings
+from drf_spectacular.utils import PolymorphicProxySerializer, extend_schema
 from rest_framework import serializers
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.accounts.permissions import IsSystemAdmin
-from apps.accounts.serializers import WebAuthnOptionsResponseSerializer
 from apps.accounts.webauthn_services import begin_location_challenge, verify_location_challenge
 from apps.audit.services import audit_log
 
 from .serializers import (
+    LocationChallengeNotRequiredResponseSerializer,
     LocationReportRequestSerializer,
     LocationReportSerializer,
     LocationSnapshotSerializer,
+    LocationWebAuthnChallengeResponseSerializer,
     location_payload_hash,
 )
 from .services import build_location_snapshot, get_admin_location_snapshots, get_latest_report
@@ -23,7 +25,14 @@ class LocationReportChallengeView(APIView):
 
     @extend_schema(
         request=LocationReportRequestSerializer,
-        responses=WebAuthnOptionsResponseSerializer,
+        responses=PolymorphicProxySerializer(
+            component_name="LocationReportChallengeResponse",
+            serializers=[
+                LocationWebAuthnChallengeResponseSerializer,
+                LocationChallengeNotRequiredResponseSerializer,
+            ],
+            resource_type_field_name=None,
+        ),
     )
     def post(self, request):
         serializer = LocationReportRequestSerializer(
@@ -31,12 +40,20 @@ class LocationReportChallengeView(APIView):
             context={"request": request, "require_webauthn": False},
         )
         serializer.is_valid(raise_exception=True)
+        if not settings.LOCATION_REPORT_REQUIRE_WEBAUTHN:
+            return Response({"status": "not_required"})
         result = begin_location_challenge(
             user=request.user,
             payload_hash=location_payload_hash(serializer.validated_data),
             request=request,
         )
-        return Response({"token": result.token, "options": result.options})
+        return Response(
+            {
+                "status": "webauthn_required",
+                "token": result.token,
+                "options": result.options,
+            }
+        )
 
 
 class LocationReportView(APIView):
@@ -44,11 +61,28 @@ class LocationReportView(APIView):
 
     @extend_schema(request=LocationReportRequestSerializer, responses=LocationReportSerializer)
     def post(self, request):
+        require_webauthn = settings.LOCATION_REPORT_REQUIRE_WEBAUTHN
         serializer = LocationReportRequestSerializer(
             data=request.data,
-            context={"request": request},
+            context={"request": request, "require_webauthn": require_webauthn},
         )
         serializer.is_valid(raise_exception=True)
+        if not require_webauthn:
+            report = serializer.save()
+            audit_log(
+                user=request.user,
+                action="location.report",
+                resource=report,
+                result="success",
+                request=request,
+                after_data={
+                    "report_status": report.report_status,
+                    "verification_method": "session",
+                    "webauthn_credential_id": None,
+                },
+            )
+            return Response(LocationReportSerializer(report).data, status=201)
+
         webauthn = serializer.validated_data.get("webauthn") or {}
         credential = webauthn.get("credential")
         challenge_token = webauthn.get("challenge_token")
@@ -70,6 +104,7 @@ class LocationReportView(APIView):
             request=request,
             after_data={
                 "report_status": report.report_status,
+                "verification_method": "webauthn",
                 "webauthn_credential_id": webauthn_credential.id,
             },
         )

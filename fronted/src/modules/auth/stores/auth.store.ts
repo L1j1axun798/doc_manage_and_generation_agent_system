@@ -61,12 +61,13 @@ export const useAuthStore = defineStore('auth', {
     async login(payload: LoginPayload): Promise<AuthUser> {
       this.status = 'loading'
       await fetchCsrfToken()
-      const challenge = await login(payload)
-      const credential = await authenticateWithWebAuthn(challenge.options)
-      const user = await verifyWebAuthnLogin({
-        pending_token: challenge.pending_token,
-        credential,
-      })
+      const loginResponse = await login(payload)
+      const user = loginResponse.status === 'authenticated'
+        ? loginResponse.user
+        : await verifyWebAuthnLogin({
+            pending_token: loginResponse.pending_token,
+            credential: await authenticateWithWebAuthn(loginResponse.options),
+          })
       this.user = user
       this.status = 'authenticated'
       this.initialized = true

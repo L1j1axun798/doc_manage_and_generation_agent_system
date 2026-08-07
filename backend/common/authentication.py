@@ -15,7 +15,7 @@ class PasswordChangeRequired(PermissionDenied):
 
 
 class SecureSessionAuthentication(SessionAuthentication):
-    """Apply account and WebAuthn session requirements to every authenticated API."""
+    """Apply account and configured login-session requirements to every authenticated API."""
 
     password_change_exempt_paths = {
         "/api/v1/auth/logout/",
@@ -35,7 +35,7 @@ class SecureSessionAuthentication(SessionAuthentication):
 
         path = request.path_info.rstrip("/") + "/"
         if (
-            getattr(settings, "API_REQUIRE_WEBAUTHN_SESSION", True)
+            getattr(settings, "LOGIN_REQUIRE_WEBAUTHN", True)
             and path not in self.webauthn_exempt_paths
         ):
             verified_user_id = request.session.get("webauthn_verified_user_id")

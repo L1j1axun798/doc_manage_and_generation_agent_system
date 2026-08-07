@@ -13,7 +13,7 @@ def mark_verified(client, user) -> None:
 
 @pytest.mark.django_db
 def test_business_api_rejects_password_only_session(client, settings):
-    settings.API_REQUIRE_WEBAUTHN_SESSION = True
+    settings.LOGIN_REQUIRE_WEBAUTHN = True
     settings.API_ENFORCE_PASSWORD_CHANGE = True
     user = User.objects.create_user(
         username="password-only",
@@ -31,7 +31,7 @@ def test_business_api_rejects_password_only_session(client, settings):
 
 @pytest.mark.django_db
 def test_verified_session_can_access_business_api(client, settings):
-    settings.API_REQUIRE_WEBAUTHN_SESSION = True
+    settings.LOGIN_REQUIRE_WEBAUTHN = True
     settings.API_ENFORCE_PASSWORD_CHANGE = True
     user = User.objects.create_user(
         username="verified",
@@ -47,7 +47,7 @@ def test_verified_session_can_access_business_api(client, settings):
 
 @pytest.mark.django_db
 def test_password_change_requirement_is_enforced_by_api(client, settings):
-    settings.API_REQUIRE_WEBAUTHN_SESSION = True
+    settings.LOGIN_REQUIRE_WEBAUTHN = True
     settings.API_ENFORCE_PASSWORD_CHANGE = True
     user = User.objects.create_user(
         username="must-change",

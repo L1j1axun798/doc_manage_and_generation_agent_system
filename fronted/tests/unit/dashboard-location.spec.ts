@@ -161,6 +161,37 @@ describe('dashboard location and RAG overview', () => {
     wrapper.unmount()
   })
 
+  it('submits directly when the backend says location WebAuthn is not required', async () => {
+    mocks.locateCurrentUser.mockResolvedValue({
+      ok: true,
+      longitude: 116.397128,
+      latitude: 39.916527,
+      accuracy: 25.5,
+      address: 'Beijing',
+    })
+    mocks.createLocationReportChallenge.mockResolvedValue({ status: 'not_required' })
+    mocks.reportLocation.mockResolvedValue({})
+
+    const wrapper = mountDashboard(baseUser)
+    await flushPromises()
+
+    const reportButton = wrapper.findAll('button').find((button) =>
+      button.text().includes('上报当前位置'),
+    )
+    await reportButton!.trigger('click')
+    await flushPromises()
+
+    expect(mocks.createLocationReportChallenge).toHaveBeenCalledTimes(1)
+    expect(mocks.authenticateWithWebAuthn).not.toHaveBeenCalled()
+    expect(mocks.reportLocation).toHaveBeenCalledWith({
+      longitude: 116.397128,
+      latitude: 39.916527,
+      accuracy: 25.5,
+      address: 'Beijing',
+    })
+    wrapper.unmount()
+  })
+
   it('shows the personnel map and runtime operations only to system administrators', async () => {
     mocks.fetchRagOverview.mockResolvedValue(makeRagOverview(true))
     const wrapper = mountDashboard({

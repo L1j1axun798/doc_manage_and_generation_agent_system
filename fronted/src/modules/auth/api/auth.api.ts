@@ -3,7 +3,7 @@ import type {
   AuthUser,
   ChangePasswordPayload,
   CsrfResponse,
-  LoginChallengeResponse,
+  LoginResponse,
   LoginPayload,
   WebAuthnCredential,
   WebAuthnEnrollmentTicket,
@@ -18,8 +18,8 @@ export async function fetchCsrfToken(): Promise<CsrfResponse> {
   return response.data
 }
 
-export async function login(payload: LoginPayload): Promise<LoginChallengeResponse> {
-  const response = await apiClient.post<LoginChallengeResponse>('/auth/login/', payload)
+export async function login(payload: LoginPayload): Promise<LoginResponse> {
+  const response = await apiClient.post<LoginResponse>('/auth/login/', payload)
   return response.data
 }
 

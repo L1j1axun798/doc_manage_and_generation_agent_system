@@ -50,7 +50,16 @@ export interface LocationReportWebAuthnPayload {
   credential: AuthenticationResponseJSON
 }
 
-export interface LocationReportChallenge {
+export interface LocationReportWebAuthnChallenge {
+  status: 'webauthn_required'
   token: string
   options: PublicKeyCredentialRequestOptionsJSON
 }
+
+export interface LocationReportVerificationNotRequired {
+  status: 'not_required'
+}
+
+export type LocationReportChallenge =
+  | LocationReportWebAuthnChallenge
+  | LocationReportVerificationNotRequired

@@ -1,5 +1,6 @@
 import pytest
 from django.contrib.auth import get_user_model
+from django.test import override_settings
 from django.urls import reverse
 
 from apps.accounts.models import WebAuthnCredential
@@ -193,6 +194,7 @@ def test_inactive_user_cannot_login(client):
 
 
 @pytest.mark.django_db
+@override_settings(LOGIN_REQUIRE_WEBAUTHN=True)
 def test_login_requires_webauthn_before_session(client, monkeypatch):
     user = User.objects.create_user(
         username="operator",
@@ -235,6 +237,7 @@ def test_login_requires_webauthn_before_session(client, monkeypatch):
 
 
 @pytest.mark.django_db
+@override_settings(LOGIN_REQUIRE_WEBAUTHN=True)
 def test_legacy_session_without_webauthn_marker_is_rejected_on_me(client):
     user = User.objects.create_user(
         username="operator",
@@ -251,6 +254,7 @@ def test_legacy_session_without_webauthn_marker_is_rejected_on_me(client):
 
 
 @pytest.mark.django_db
+@override_settings(LOGIN_REQUIRE_WEBAUTHN=True)
 def test_login_without_bound_webauthn_device_is_denied(client):
     User.objects.create_user(
         username="operator",
@@ -267,6 +271,31 @@ def test_login_without_bound_webauthn_device_is_denied(client):
 
     assert response.status_code == 403
     assert "本人验证设备" in str(response.json())
+
+
+@pytest.mark.django_db
+@override_settings(LOGIN_REQUIRE_WEBAUTHN=False)
+def test_password_login_creates_usable_session_when_webauthn_is_disabled(client):
+    user = User.objects.create_user(
+        username="password-only-login",
+        password="PasswordOnly123!",
+        real_name="Password-only user",
+        role=User.Role.DATA_OPERATOR,
+    )
+
+    response = client.post(
+        reverse("auth-login"),
+        {"username": user.username, "password": "PasswordOnly123!"},
+        content_type="application/json",
+    )
+    me_response = client.get(reverse("auth-me"))
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "authenticated"
+    assert response.json()["user"]["id"] == user.id
+    assert me_response.status_code == 200
+    login_audit = AuditLog.objects.get(action="auth.login", result="success")
+    assert login_audit.after_data == {"verification_method": "password"}
 
 
 @pytest.mark.django_db

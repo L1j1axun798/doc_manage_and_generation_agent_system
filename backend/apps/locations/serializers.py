@@ -27,6 +27,16 @@ class LocationReportSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "reported_at", "created_at"]
 
 
+class LocationWebAuthnChallengeResponseSerializer(serializers.Serializer):
+    status = serializers.CharField()
+    token = serializers.CharField()
+    options = serializers.DictField()
+
+
+class LocationChallengeNotRequiredResponseSerializer(serializers.Serializer):
+    status = serializers.CharField()
+
+
 class LocationReportRequestSerializer(serializers.ModelSerializer):
     longitude = serializers.FloatField(required=False, allow_null=True)
     latitude = serializers.FloatField(required=False, allow_null=True)

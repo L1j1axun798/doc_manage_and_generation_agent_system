@@ -36,11 +36,18 @@ export interface CsrfResponse {
   csrfToken: string
 }
 
-export interface LoginChallengeResponse {
+export interface LoginWebAuthnRequiredResponse {
   status: 'webauthn_required'
   pending_token: string
   options: PublicKeyCredentialRequestOptionsJSON
 }
+
+export interface LoginAuthenticatedResponse {
+  status: 'authenticated'
+  user: AuthUser
+}
+
+export type LoginResponse = LoginWebAuthnRequiredResponse | LoginAuthenticatedResponse
 
 export interface WebAuthnLoginVerifyPayload {
   pending_token: string
