@@ -2,6 +2,7 @@ from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
 from .views import (
+    AgentSystemPromptViewSet,
     DocumentTemplateViewSet,
     GenerationTaskViewSet,
     KnowledgeCorpusUploadViewSet,
@@ -9,6 +10,11 @@ from .views import (
 )
 
 router = DefaultRouter()
+router.register(
+    "document-generation/system-prompts",
+    AgentSystemPromptViewSet,
+    basename="docgen-system-prompt",
+)
 router.register(
     "document-generation/templates",
     DocumentTemplateViewSet,

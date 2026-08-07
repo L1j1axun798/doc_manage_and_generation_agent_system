@@ -10,6 +10,8 @@ import DocumentGenerationPage from '@/modules/document-generation/pages/Document
 const mocks = vi.hoisted(() => ({
   fetchProjects: vi.fn(),
   fetchKnowledgeCorpusUploads: vi.fn(),
+  fetchAgentSystemPrompts: vi.fn(),
+  uploadAgentSystemPrompt: vi.fn(),
   routerPush: vi.fn(),
 }))
 
@@ -22,9 +24,11 @@ vi.mock('@/modules/projects/api/projects.api', () => ({
 }))
 
 vi.mock('@/modules/document-generation/api/document-generation.api', () => ({
+  fetchAgentSystemPrompts: mocks.fetchAgentSystemPrompts,
   fetchKnowledgeCorpusUploads: mocks.fetchKnowledgeCorpusUploads,
   retryKnowledgeCorpusUpload: vi.fn(),
   uploadKnowledgeCorpus: vi.fn(),
+  uploadAgentSystemPrompt: mocks.uploadAgentSystemPrompt,
 }))
 
 const baseUser: AuthUser = {
@@ -101,6 +105,7 @@ describe('document generation RAG corpus upload', () => {
       previous: null,
       results: [],
     })
+    mocks.fetchAgentSystemPrompts.mockResolvedValue([])
   })
 
   it('shows the upload entry to system administrators and opens the status dialog', async () => {
@@ -111,6 +116,13 @@ describe('document generation RAG corpus upload', () => {
       button.text().includes('上传 RAG 资料'),
     )
     expect(uploadButton).toBeDefined()
+    const systemPromptButton = wrapper.findAll('button').find((button) =>
+      button.text().includes('上传 System Prompt'),
+    )
+    expect(systemPromptButton).toBeDefined()
+    await systemPromptButton!.trigger('click')
+    await flushPromises()
+    expect(mocks.fetchAgentSystemPrompts).toHaveBeenCalled()
     await uploadButton!.trigger('click')
     await flushPromises()
 
@@ -157,6 +169,7 @@ describe('document generation RAG corpus upload', () => {
     await flushPromises()
 
     expect(wrapper.text()).not.toContain('上传 RAG 资料')
+    expect(wrapper.text()).not.toContain('上传 System Prompt')
     expect(wrapper.find('button[aria-label="创建新项目"]').exists()).toBe(true)
     expect(mocks.fetchKnowledgeCorpusUploads).not.toHaveBeenCalled()
     wrapper.unmount()

@@ -10,7 +10,6 @@ import type { DocumentItem } from '@/modules/documents/documents.types'
 import type { Project } from '@/modules/projects/projects.types'
 import { formatDateTime } from '@/shared/utils/format'
 import {
-  approveGenerationTask,
   confirmAndGenerate,
   deleteGenerationTask,
   exportGenerationTask,
@@ -27,7 +26,6 @@ import {
   selectGenerationTemplate,
   startGenerationPipeline,
   stopGenerationTask,
-  submitGenerationReview,
   updateGeneratedSection,
 } from '../api/document-generation.api'
 import {
@@ -222,7 +220,6 @@ const composerCanSend = computed(() => {
   return Boolean(
     isProjectActive.value
     && draftContext.value.templateId
-    && draftContext.value.sourceVersionIds.length,
   )
 })
 const composerHelperText = computed(() => {
@@ -287,18 +284,14 @@ const recoveryGuidance = computed(() => {
   return ''
 })
 const isProjectActive = computed(() => props.project?.status === 'active')
-const canApprove = computed(
-  () =>
-    authStore.user?.role === 'system_admin'
-    || authStore.user?.role === 'project_manager',
-)
-const allSectionsLocked = computed(
-  () =>
-    Boolean(selectedTask.value?.sections.length)
-    && selectedTask.value?.sections.every((section) => section.is_locked),
-)
 const selectedTemplate = computed(
   () => templates.value.find((template) => template.id === selectedTask.value?.template_id) || null,
+)
+const allSectionsLocked = computed(
+  () => {
+    const sections = selectedTask.value?.sections || []
+    return Boolean(sections.length) && sections.every((section) => section.is_locked)
+  },
 )
 const exportFilenameError = computed(() => {
   const filename = normalizedExportFilenameStem()
@@ -330,9 +323,9 @@ const statusLabels: Record<GenerationTaskStatus, string> = {
   queued: '已进入生成队列',
   generating: '正在生成',
   review_required: '待人工审核',
-  pending_approval: '已提交，待技术负责人批准',
-  approved: '已批准，待导出',
-  exported: '已导出',
+  pending_approval: '章节已确认，可下载',
+  approved: '章节已确认，可下载',
+  exported: '已生成并归档',
   failed: '执行失败',
   cancelled: '已停止',
 }
@@ -530,8 +523,8 @@ function conversationTitle(task: GenerationTask): string {
 function agentStatusMessage(task: GenerationTask): string {
   if (task.status === 'needs_confirmation') return '资料分析已完成，请核对下方关键事实后继续。'
   if (task.status === 'review_required') return '初稿已生成，请逐章复核；需要修改时在底部选择章节并发送要求。'
-  if (task.status === 'pending_approval') return '人工复核已完成，正在等待技术负责人批准。'
-  if (task.status === 'approved') return '文档已批准，可以导出到当前项目“技术方案”目录。'
+  if (task.status === 'pending_approval') return '章节已完成人工确认，可以直接生成并下载文档。'
+  if (task.status === 'approved') return '章节已完成人工确认，可以直接生成并下载文档。'
   if (task.status === 'exported') return '正式 Word 已归档，可直接下载。'
   if (task.status === 'failed') return '本次处理未完成，请查看错误和恢复建议后重试。'
   if (task.status === 'cancelled') return '本会话已停止，已产生的中间内容仍保留。'
@@ -601,9 +594,16 @@ function hydrateTaskDrafts(): void {
       const candidates = Array.isArray(conflict.candidates)
         ? conflict.candidates as FactProposal[]
         : []
-      const preferred = [...candidates].sort(
-        (left, right) => Number(right.confidence || 0) - Number(left.confidence || 0),
-      )[0]
+      const preferred = [...candidates].sort((left, right) => {
+        const rightPromptPriority = right.evidence?.some(
+          (evidence) => evidence.source_document_version_id === 0,
+        ) ? 1 : 0
+        const leftPromptPriority = left.evidence?.some(
+          (evidence) => evidence.source_document_version_id === 0,
+        ) ? 1 : 0
+        return rightPromptPriority - leftPromptPriority
+          || Number(right.confidence || 0) - Number(left.confidence || 0)
+      })[0]
       return field && preferred && !proposalFields.has(field)
         ? [{ ...preferred, field }]
         : []
@@ -659,7 +659,9 @@ function hydrateTaskDrafts(): void {
         field,
         valueText: '',
         valueType: definition.valueType,
-        sourceDocumentVersionId: task.sources[0]?.document_version_id ?? null,
+        sourceDocumentVersionId: task.conversation_context?.initial_message
+          ? 0
+          : task.sources[0]?.document_version_id ?? null,
         locator: {},
         textQuote: '',
         confidence: 1,
@@ -839,8 +841,8 @@ async function sendComposerMessage(): Promise<void> {
 async function createAndExtract(): Promise<void> {
   const project = requireSelectedProject()
   if (!project) return
-  if (!draftContext.value.templateId || draftContext.value.sourceVersionIds.length === 0) {
-    ElMessage.warning('请选择模板和至少一份当前项目的入场前置资料')
+  if (!draftContext.value.templateId) {
+    ElMessage.warning('请选择甲方模板')
     return
   }
   if (draftContext.value.sourceVersionIds.length > MAX_CONVERSATION_SOURCE_COUNT) {
@@ -931,7 +933,7 @@ async function confirmFacts(): Promise<void> {
 }
 
 function toConfirmedFact(draft: FactDraft): ConfirmedFactPayload {
-  if (!draft.field.trim() || !draft.sourceDocumentVersionId) {
+  if (!draft.field.trim() || draft.sourceDocumentVersionId === null) {
     throw new Error('事实字段和来源资料不能为空')
   }
   const locator: SourceLocator = {
@@ -1212,20 +1214,6 @@ function isSectionRegenerating(section: GeneratedSection): boolean {
   )
 }
 
-async function submitReview(): Promise<void> {
-  await runTaskAction(
-    (taskId) => submitGenerationReview(taskId, '已完成人工复核并提交'),
-    '已提交审核记录',
-  )
-}
-
-async function approveTask(): Promise<void> {
-  await runTaskAction(
-    (taskId) => approveGenerationTask(taskId, '技术负责人批准'),
-    '已批准，可以导出Word',
-  )
-}
-
 async function openExportDialog(): Promise<void> {
   if (!selectedTask.value) {
     return
@@ -1258,9 +1246,14 @@ async function exportTask(): Promise<void> {
       `${normalizedExportFilenameStem()}.docx`,
     )
     exportDialogVisible.value = false
+    const outputDocumentId = selectedTask.value.output_document_id
+    if (outputDocumentId) {
+      const document = await fetchDocument(outputDocumentId)
+      await downloadDocument(document)
+    }
     await refreshTasks()
     configurePolling()
-    ElMessage.success('已导出到当前项目的“技术方案”目录')
+    ElMessage.success('文档已生成，并已开始下载')
   } catch (error) {
     ElMessage.error(getErrorMessage(error))
   } finally {
@@ -1354,7 +1347,7 @@ async function runAction(action: () => Promise<void>): Promise<void> {
               >{{ character }}</span>
               <span class="doc-agent__welcome-cursor" aria-hidden="true" />
             </h2>
-            <p v-if="project">自主选择或上传甲方模板，并选择入场人员和来源资料，然后发送编制要求。系统会在同一会话内完成事实核对、生成、修改、批准和导出。</p>
+            <p v-if="project">自主选择或上传甲方模板，按需选择入场人员和来源资料，也可以仅发送编制要求开始对话。系统只读取当前项目且你有权查看的入场前置资料，不生成检测报告、实测结论或完工报告；生成内容必须逐章人工确认并锁定后才能生成和下载。</p>
             <p v-else>请在上方项目选择框中选择一个在执行项目。选择后，会话记录、模板、人员和资料将在当前界面直接加载。</p>
           </section>
 
@@ -1409,7 +1402,7 @@ async function runAction(action: () => Promise<void>): Promise<void> {
       <template v-if="selectedTask.status === 'needs_confirmation'">
         <h3>快速核对5项关键事实</h3>
         <el-alert
-          title="通常只需核对下列内容，然后点一次“确认并开始编制”。来源定位和其他识别信息已收进折叠项。"
+          title="Agent 会优先从你本次输入的 Prompt 识别项目名称、工作范围、检测部件、检测方法和风险重点；请核对后点击“确认并开始编制”。"
           type="info"
           :closable="false"
           show-icon
@@ -1491,6 +1484,11 @@ async function runAction(action: () => Promise<void>): Promise<void> {
                 <summary>查看或修正来源依据</summary>
                 <el-select v-model="row.sourceDocumentVersionId" style="width: 100%">
                   <el-option
+                    v-if="selectedTask.conversation_context?.initial_message"
+                    label="用户本次 Prompt"
+                    :value="0"
+                  />
+                  <el-option
                     v-for="source in selectedTask.sources"
                     :key="source.document_version_id"
                     :label="source.document_title"
@@ -1537,6 +1535,11 @@ async function runAction(action: () => Promise<void>): Promise<void> {
                     <summary>来源依据</summary>
                     <el-select v-model="row.sourceDocumentVersionId" style="width: 100%">
                       <el-option
+                        v-if="selectedTask.conversation_context?.initial_message"
+                        label="用户本次 Prompt"
+                        :value="0"
+                      />
+                      <el-option
                         v-for="source in selectedTask.sources"
                         :key="source.document_version_id"
                         :label="source.document_title"
@@ -1551,6 +1554,15 @@ async function runAction(action: () => Promise<void>): Promise<void> {
           </el-collapse-item>
         </el-collapse>
         <div class="doc-agent__actions">
+          <el-button
+            v-if="selectedTask.facts_snapshot.length === 0"
+            type="primary"
+            plain
+            :loading="actionLoading"
+            @click="retryTask"
+          >
+            重新识别 Prompt
+          </el-button>
           <el-button @click="addManualFact">高级：补充其他事实</el-button>
           <el-button type="primary" :loading="actionLoading" @click="confirmFacts">
             确认并开始编制
@@ -1562,7 +1574,7 @@ async function runAction(action: () => Promise<void>): Promise<void> {
         <el-button
           type="primary"
           :loading="actionLoading"
-          :disabled="!isProjectActive"
+          :disabled="!allSectionsLocked || !isProjectActive"
           @click="startGeneration"
         >
           生成四措两案初稿
@@ -1766,37 +1778,26 @@ async function runAction(action: () => Promise<void>): Promise<void> {
           </el-button>
           <el-button
             type="primary"
-            :disabled="!allSectionsLocked"
+            :disabled="!allSectionsLocked || !isProjectActive"
             :loading="actionLoading"
-            @click="submitReview"
+            @click="openExportDialog"
           >
-            提交技术负责人批准
+            下载生成文档
           </el-button>
         </div>
       </template>
 
-      <div v-if="selectedTask.status === 'pending_approval'" class="doc-agent__actions">
-        <span>初稿已完成人工复核，等待技术负责人批准。</span>
-          <el-button
-            v-if="canApprove"
-            type="primary"
-            :disabled="!isProjectActive"
-            :loading="actionLoading"
-            @click="approveTask"
-          >
-            技术负责人批准
-          </el-button>
-      </div>
-
-      <div v-if="selectedTask.status === 'approved'" class="doc-agent__actions">
+      <div
+        v-if="['pending_approval', 'approved'].includes(selectedTask.status)"
+        class="doc-agent__actions"
+      >
         <el-button
-          v-if="canApprove"
           type="primary"
           :loading="actionLoading"
           :disabled="!isProjectActive"
           @click="openExportDialog"
         >
-          导出Word到“技术方案”
+          下载生成文档
         </el-button>
       </div>
 
@@ -1807,7 +1808,7 @@ async function runAction(action: () => Promise<void>): Promise<void> {
           :disabled="!selectedTask.output_document_id"
           @click="downloadOutput"
         >
-          下载已批准Word
+          再次下载生成文档
         </el-button>
       </div>
     </el-card>
@@ -1895,7 +1896,7 @@ async function runAction(action: () => Promise<void>): Promise<void> {
 
     <el-dialog
       v-model="exportDialogVisible"
-      title="导出已批准 Word"
+      title="生成并下载 Word"
       width="560px"
       :close-on-click-modal="false"
     >
@@ -1943,7 +1944,7 @@ async function runAction(action: () => Promise<void>): Promise<void> {
           :disabled="exportInfoLoading || !exportInfo || Boolean(exportFilenameError)"
           @click="exportTask"
         >
-          确认导出
+          生成并下载
         </el-button>
       </template>
     </el-dialog>

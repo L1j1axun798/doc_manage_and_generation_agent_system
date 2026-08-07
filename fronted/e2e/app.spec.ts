@@ -2,6 +2,7 @@ import { expect, test, type Page } from '@playwright/test'
 import type { FolderTreeNode } from '../src/modules/documents/documents.types'
 
 test('redirects anonymous users from root to login', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
   await page.route('**/api/v1/auth/csrf/', async (route) => {
     await route.fulfill({
       contentType: 'application/json',
@@ -18,8 +19,30 @@ test('redirects anonymous users from root to login', async ({ page }) => {
 
   await page.goto('/')
 
-  await expect(page.getByRole('heading', { name: '绿能信盾资料管理系统' })).toBeVisible()
-  await expect(page.getByRole('button', { name: '登录' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '绿能信盾企业资料管理与Agent平台' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '欢迎使用本系统！' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '进入系统' })).toBeVisible()
+  await expect(page.getByText('忘记密码')).toHaveCount(0)
+  const rememberLogin = page.getByRole('checkbox', { name: '保持登录' })
+  const rememberLoginLabel = page.getByText('保持登录', { exact: true })
+  await expect(rememberLogin).toBeChecked()
+  await rememberLoginLabel.click()
+  await expect(rememberLogin).not.toBeChecked()
+  await rememberLoginLabel.click()
+  await expect(rememberLogin).toBeChecked()
+  const visualRegion = await page.locator('.login-page__visual').boundingBox()
+  const logo = await page.locator('.login-page__brand-mark').boundingBox()
+  const usernameInput = await page.locator('#login-username').locator('..').boundingBox()
+  const submitButton = await page.locator('.login-page__submit').boundingBox()
+  expect(visualRegion?.width).toBe(1044)
+  expect(logo?.width).toBe(56)
+  expect(logo?.height).toBe(56)
+  expect(usernameInput?.height).toBe(54)
+  expect(submitButton?.height).toBe(56)
+  await expect(page.locator('.login-page__panel')).toHaveCSS(
+    'background-color',
+    'rgb(250, 251, 252)',
+  )
   await expect(page).toHaveURL(/\/login/)
 })
 

@@ -25,6 +25,7 @@ export interface AuthUser {
 export interface LoginPayload {
   username: string
   password: string
+  remember_me: boolean
 }
 
 export interface ChangePasswordPayload {

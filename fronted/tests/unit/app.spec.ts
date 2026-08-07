@@ -23,6 +23,7 @@ it('mounts the dashboard route', async () => {
     },
   })
 
-  expect(wrapper.text()).toContain('绿能信盾资料管理系统')
-  expect(wrapper.text()).toContain('登录')
+  expect(wrapper.text()).toContain('绿能信盾企业资料管理与Agent平台')
+  expect(wrapper.text()).toContain('欢迎使用本系统！')
+  expect(wrapper.text()).toContain('进入系统')
 })

@@ -11,12 +11,15 @@ import { fetchProjects } from '@/modules/projects/api/projects.api'
 import type { Project } from '@/modules/projects/projects.types'
 import { formatDateTime } from '@/shared/utils/format'
 import {
+  fetchAgentSystemPrompts,
   fetchKnowledgeCorpusUploads,
   retryKnowledgeCorpusUpload,
+  uploadAgentSystemPrompt,
   uploadKnowledgeCorpus,
 } from '../api/document-generation.api'
 import DocumentGenerationPanel from '../components/DocumentGenerationPanel.vue'
 import type {
+  AgentSystemPrompt,
   KnowledgeCorpusUpload,
   KnowledgeCorpusUploadStatus,
   KnowledgeSectionCode,
@@ -32,6 +35,10 @@ const uploadSubmitting = ref(false)
 const uploadHistoryLoading = ref(false)
 const uploadFiles = ref<UploadUserFile[]>([])
 const knowledgeUploads = ref<KnowledgeCorpusUpload[]>([])
+const systemPromptDialogVisible = ref(false)
+const systemPromptSubmitting = ref(false)
+const systemPromptFiles = ref<UploadUserFile[]>([])
+const systemPrompts = ref<AgentSystemPrompt[]>([])
 const allSectionCodes: KnowledgeSectionCode[] = [
   'overview',
   'organization_measures',
@@ -114,6 +121,39 @@ function openProjectCreate(): void {
 async function openKnowledgeUploadDialog(): Promise<void> {
   uploadDialogVisible.value = true
   await loadKnowledgeUploads()
+}
+
+async function openSystemPromptDialog(): Promise<void> {
+  systemPromptDialogVisible.value = true
+  try {
+    systemPrompts.value = await fetchAgentSystemPrompts()
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error))
+  }
+}
+
+async function submitSystemPrompt(): Promise<void> {
+  const file = systemPromptFiles.value[0]?.raw
+  if (!file) {
+    ElMessage.warning('请选择一个 UTF-8 编码的 TXT 或 Markdown 文件')
+    return
+  }
+  systemPromptSubmitting.value = true
+  try {
+    const prompt = await uploadAgentSystemPrompt(file)
+    systemPrompts.value = [
+      prompt,
+      ...systemPrompts.value
+        .filter((item) => item.id !== prompt.id)
+        .map((item) => ({ ...item, is_active: false })),
+    ]
+    systemPromptFiles.value = []
+    ElMessage.success('System Prompt 已启用；新建 Agent 任务将冻结使用该版本')
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error))
+  } finally {
+    systemPromptSubmitting.value = false
+  }
 }
 
 async function loadKnowledgeUploads(): Promise<void> {
@@ -270,12 +310,67 @@ function closeKnowledgeUploadDialog(): void {
           v-if="isSystemAdmin"
           type="primary"
           plain
+          @click="openSystemPromptDialog"
+        >
+          上传 System Prompt
+        </el-button>
+        <el-button
+          v-if="isSystemAdmin"
+          type="primary"
+          plain
           @click="openKnowledgeUploadDialog"
         >
           上传 RAG 资料
         </el-button>
       </template>
     </DocumentGenerationPanel>
+
+    <el-dialog
+      v-model="systemPromptDialogVisible"
+      title="上传 Agent System Prompt"
+      width="min(760px, 94vw)"
+      destroy-on-close
+      @closed="systemPromptFiles = []"
+    >
+      <el-alert
+        title="仅系统管理员可更新。上传后只影响新建任务；每个任务会冻结所用版本，避免运行过程中提示词漂移。"
+        type="info"
+        :closable="false"
+        show-icon
+      />
+      <el-upload
+        v-model:file-list="systemPromptFiles"
+        class="system-prompt-upload"
+        drag
+        action="#"
+        accept=".txt,.md,text/plain,text/markdown"
+        :auto-upload="false"
+        :limit="1"
+      >
+        <div class="el-upload__text">拖放 System Prompt 到这里，或<em>点击选择文件</em></div>
+      </el-upload>
+      <el-button
+        type="primary"
+        :loading="systemPromptSubmitting"
+        @click="submitSystemPrompt"
+      >
+        上传并启用
+      </el-button>
+      <el-table :data="systemPrompts" empty-text="尚未上传 System Prompt" class="system-prompt-history">
+        <el-table-column prop="original_filename" label="文件" min-width="180" show-overflow-tooltip />
+        <el-table-column prop="version" label="版本" min-width="170" />
+        <el-table-column label="状态" width="90">
+          <template #default="{ row }">
+            <el-tag :type="row.is_active ? 'success' : 'info'">
+              {{ row.is_active ? '当前启用' : '历史版本' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="上传时间" width="170">
+          <template #default="{ row }">{{ formatDateTime(row.created_at) }}</template>
+        </el-table-column>
+      </el-table>
+    </el-dialog>
 
     <el-dialog
       v-model="uploadDialogVisible"
@@ -436,6 +531,11 @@ function closeKnowledgeUploadDialog(): void {
 }
 
 .knowledge-upload-form {
+  margin-top: 18px;
+}
+
+.system-prompt-upload,
+.system-prompt-history {
   margin-top: 18px;
 }
 

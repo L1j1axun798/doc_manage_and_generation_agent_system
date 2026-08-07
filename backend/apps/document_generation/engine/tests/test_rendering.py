@@ -23,7 +23,10 @@ from apps.document_generation.engine.errors import (
     SourcePurposeMismatchError,
     TemplateInvalidError,
 )
-from apps.document_generation.engine.rendering import DocxTemplateRenderer
+from apps.document_generation.engine.rendering import (
+    DocxTemplateRenderer,
+    infer_template_section_order,
+)
 
 
 def _template_bytes() -> bytes:
@@ -290,3 +293,67 @@ def test_style_only_baseline_without_english_list_or_table_styles_still_renders(
     rendered = Document(BytesIO(artifact.content))
     assert "• 核验人员资质" in [paragraph.text for paragraph in rendered.paragraphs]
     assert rendered.tables[-1].rows[1].cells[1].text == "使用双钩安全带"
+
+
+def test_customer_outline_controls_section_order_and_keeps_existing_heading_format() -> None:
+    baseline = Document()
+    baseline.add_paragraph("甲方封面标题")
+    baseline.add_paragraph("第一章、项目简介")
+    baseline.add_paragraph("历史项目概况")
+    baseline.add_paragraph("第二章、安全措施")
+    baseline.add_paragraph("历史安全正文")
+    baseline.add_paragraph("第三章、施工方案")
+    baseline.add_paragraph("历史施工正文")
+    for style_name in ("Heading 2", "Heading 3"):
+        style = baseline.styles[style_name]
+        style._element.getparent().remove(style._element)
+    output = BytesIO()
+    baseline.save(output)
+
+    assert infer_template_section_order(output.getvalue()) == (
+        "overview",
+        "safety_measures",
+        "construction_plan",
+    )
+
+    artifact = DocxTemplateRenderer().render(
+        RenderRequest(
+            template=TemplateDocument(
+                template_id="customer-outline",
+                filename="甲方四措两案.docx",
+                content=output.getvalue(),
+            ),
+            facts=_facts()[:1],
+            sections=(
+                GeneratedSection(
+                    section_code="overview",
+                    title="系统概况标题",
+                    paragraphs=("当前项目概况",),
+                ),
+                GeneratedSection(
+                    section_code="safety_measures",
+                    title="系统安全标题",
+                    paragraphs=("当前安全正文",),
+                ),
+                GeneratedSection(
+                    section_code="construction_plan",
+                    title="系统施工标题",
+                    paragraphs=("当前施工正文",),
+                ),
+            ),
+        )
+    )
+
+    rendered = Document(BytesIO(artifact.content))
+    texts = [paragraph.text for paragraph in rendered.paragraphs if paragraph.text.strip()]
+    assert texts == [
+        "甲方封面标题",
+        "第一章、项目简介",
+        "当前项目概况",
+        "第二章、安全措施",
+        "当前安全正文",
+        "第三章、施工方案",
+        "当前施工正文",
+    ]
+    assert "历史项目概况" not in texts
+    assert "系统概况标题" not in texts

@@ -20,7 +20,7 @@ from .knowledge_corpus import (
     create_knowledge_corpus_upload,
     retry_knowledge_corpus_upload,
 )
-from .models import DocumentTemplate, GenerationTask, KnowledgeCorpusUpload
+from .models import AgentSystemPrompt, DocumentTemplate, GenerationTask, KnowledgeCorpusUpload
 from .overview import get_rag_overview
 from .permissions import IsDocumentGenerationUser
 from .selectors import (
@@ -29,6 +29,8 @@ from .selectors import (
     writable_project_for_user,
 )
 from .serializers import (
+    AgentSystemPromptSerializer,
+    AgentSystemPromptUploadSerializer,
     AvailablePersonnelQuerySerializer,
     ClientTemplateSelectSerializer,
     ClientTemplateUploadSerializer,
@@ -52,6 +54,7 @@ from .serializers import (
     TraceEventQuerySerializer,
 )
 from .services import (
+    activate_agent_system_prompt,
     add_generation_sources,
     approve_generation_task,
     confirm_and_request_generation,
@@ -82,6 +85,37 @@ class DocumentAgentFeatureMixin:
         if not getattr(settings, "DOCUMENT_AGENT_PHASE5_APPROVED", False):
             raise DocumentAgentPhase5Blocked
         return super().initial(request, *args, **kwargs)  # type: ignore[misc]
+
+
+class AgentSystemPromptViewSet(
+    DocumentAgentFeatureMixin,
+    mixins.ListModelMixin,
+    viewsets.GenericViewSet,
+):
+    queryset = AgentSystemPrompt.objects.select_related("created_by").all()
+    serializer_class = AgentSystemPromptSerializer
+    permission_classes = [IsSystemAdmin]
+    parser_classes = [MultiPartParser, FormParser]
+    pagination_class = None
+
+    def get_serializer_class(self):
+        if self.action == "create":
+            return AgentSystemPromptUploadSerializer
+        return AgentSystemPromptSerializer
+
+    @extend_schema(
+        request=AgentSystemPromptUploadSerializer,
+        responses=AgentSystemPromptSerializer,
+    )
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        prompt = activate_agent_system_prompt(
+            actor=request.user,
+            uploaded_file=serializer.validated_data["file"],
+            request=request,
+        )
+        return Response(AgentSystemPromptSerializer(prompt).data, status=status.HTTP_201_CREATED)
 
 
 class DocumentTemplateViewSet(

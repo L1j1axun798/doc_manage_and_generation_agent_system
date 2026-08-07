@@ -109,7 +109,11 @@ def test_section_schema_is_repaired_at_most_once_and_usage_is_recorded() -> None
         calls.append(payload)
         return next(responses), f"request-{len(calls)}"
 
-    provider = OpenAICompatibleLLMProvider(_config(), transport=transport)
+    provider = OpenAICompatibleLLMProvider(
+        _config(),
+        transport=transport,
+        system_prompt="遵循甲方模板章序",
+    )
 
     section = provider.draft_section(_context())
 
@@ -118,6 +122,7 @@ def test_section_schema_is_repaired_at_most_once_and_usage_is_recorded() -> None
     assert calls[0]["enable_thinking"] is False
     assert calls[0]["max_tokens"] == 4096
     assert calls[0]["temperature"] == 0
+    assert "遵循甲方模板章序" in calls[0]["messages"][0]["content"]
     assert "原输出的校验错误" in str(calls[1]["messages"])
     assert "title" in str(calls[1]["messages"])
     assert [record.purpose for record in provider.usage_records] == [
@@ -446,7 +451,10 @@ def test_persistent_rate_limit_stops_after_configured_attempts_without_secret() 
 
 
 def test_section_revision_has_separate_usage_purpose() -> None:
+    calls = []
+
     def transport(endpoint, headers, payload, timeout):
+        calls.append(payload)
         return (
             _response(
                 {
@@ -465,3 +473,4 @@ def test_section_revision_has_separate_usage_purpose() -> None:
     assert revised.paragraphs == ("修订后的入场计划。",)
     assert revised.section_code == "overview"
     assert provider.usage_records[-1].purpose == ModelCallPurpose.SECTION_REVISION
+    assert "安全目标 1500 字" in calls[-1]["messages"][-1]["content"]

@@ -58,6 +58,7 @@ from .webauthn_services import (
 User = get_user_model()
 WEBAUTHN_SESSION_USER_KEY = "webauthn_verified_user_id"
 WEBAUTHN_SESSION_VERIFIED_AT_KEY = "webauthn_verified_at"
+PENDING_LOGIN_PREFERENCE_SESSION_KEY = "pending_login_preference"
 
 
 def mark_webauthn_session(request: Request, user: UserModel) -> None:
@@ -69,6 +70,10 @@ def is_webauthn_session(request: Request) -> bool:
     if not request.user.is_authenticated:
         return False
     return request.session.get(WEBAUTHN_SESSION_USER_KEY) == request.user.pk
+
+
+def set_login_session_expiry(request: Request, *, remember_me: bool) -> None:
+    request.session.set_expiry(settings.SESSION_COOKIE_AGE if remember_me else 0)
 
 
 class CsrfView(APIView):
@@ -102,6 +107,7 @@ class LoginView(APIView):
         serializer.is_valid(raise_exception=True)
         username = serializer.validated_data["username"]
         password = serializer.validated_data["password"]
+        remember_me = serializer.validated_data["remember_me"]
         user = authenticate(request, username=username, password=password)
 
         if user is None:
@@ -128,6 +134,8 @@ class LoginView(APIView):
 
         if not settings.LOGIN_REQUIRE_WEBAUTHN:
             login(request, user)
+            request.session.pop(PENDING_LOGIN_PREFERENCE_SESSION_KEY, None)
+            set_login_session_expiry(request, remember_me=remember_me)
             audit_log(
                 user=user,
                 action="auth.password_verified",
@@ -151,6 +159,10 @@ class LoginView(APIView):
             )
 
         result = begin_login(user=user, request=request)
+        request.session[PENDING_LOGIN_PREFERENCE_SESSION_KEY] = {
+            "pending_token": result.token,
+            "remember_me": remember_me,
+        }
         return Response(
             {
                 "status": "webauthn_required",
@@ -168,12 +180,21 @@ class WebAuthnLoginVerifyView(APIView):
     def post(self, request):
         serializer = WebAuthnLoginVerifySerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        pending_token = serializer.validated_data["pending_token"]
+        pending_preference = request.session.get(PENDING_LOGIN_PREFERENCE_SESSION_KEY, {})
+        remember_me = bool(
+            pending_preference.get("remember_me")
+            if pending_preference.get("pending_token") == pending_token
+            else False
+        )
         user = finish_login(
-            pending_token=serializer.validated_data["pending_token"],
+            pending_token=pending_token,
             credential=serializer.validated_data["credential"],
             request=request,
         )
+        request.session.pop(PENDING_LOGIN_PREFERENCE_SESSION_KEY, None)
         login(request, user)
+        set_login_session_expiry(request, remember_me=remember_me)
         mark_webauthn_session(request, user)
         audit_log(
             user=user,

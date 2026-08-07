@@ -15,6 +15,7 @@ from apps.audit.services import audit_log
 from common.storage import LocalDocumentStorage
 
 from .artifacts import TaskDraftArtifactStorage
+from .conversation_sources import prompt_source_document
 from .engine.canonical_facts import enrich_required_fact_candidates
 from .engine.contracts import (
     AgentConversationContext,
@@ -39,7 +40,7 @@ from .engine.orchestrator import GenerationOrchestrator
 from .engine.parsing import EntrySourceParser
 from .engine.ports import EmbeddingProvider, LLMProvider
 from .engine.rag import RagRetriever, SectionChunker
-from .engine.rendering import DocxTemplateRenderer
+from .engine.rendering import DocxTemplateRenderer, infer_template_section_order
 from .engine.validation import ControlledSectionValidator
 from .knowledge_sections import blocks_for_section
 from .models import (
@@ -518,7 +519,7 @@ def _run_fact_extraction(task_id: str) -> str:
             detail=f"已解析{len(parsed_documents)}份资料",
             metadata={"document_count": len(parsed_documents)},
         )
-        llm_provider, provider_alias = _build_llm_provider()
+        llm_provider, provider_alias = _build_llm_provider(task.system_prompt_snapshot)
         recorder.emit(
             stage="extracting_facts",
             tool="extract_fact_candidates",
@@ -540,7 +541,11 @@ def _run_fact_extraction(task_id: str) -> str:
             detail=f"识别到{len(candidates)}条候选事实",
             metadata={"candidate_count": len(candidates)},
         )
-        candidates = enrich_required_fact_candidates(candidates, parsed_documents)
+        candidates = enrich_required_fact_candidates(
+            candidates,
+            parsed_documents,
+            preferred_source_document_version_id=0,
+        )
         merged = FactMergeService().merge(candidates)
         recorder.emit(
             stage="validating_facts",
@@ -712,7 +717,18 @@ def _build_request(task_id: str) -> GenerationRequest:
     if hashlib.sha256(template_content).hexdigest() != template_version.sha256:
         raise AgentError("TEMPLATE_INVALID", "模板哈希校验失败")
     facts = tuple(ConfirmedFact.model_validate(value) for value in task.facts_snapshot)
-    section_codes = tuple(task.pending_section_codes or task.template.section_order)
+    template_section_order = (
+        infer_template_section_order(template_content)
+        or tuple(task.template.section_order)
+    )
+    pending_section_codes = tuple(task.pending_section_codes)
+    section_codes = tuple(
+        section_code
+        for section_code in template_section_order
+        if not pending_section_codes or section_code in pending_section_codes
+    )
+    if not section_codes:
+        section_codes = tuple(task.template.section_order)
     force_regenerate_section_codes = (
         section_codes
         if len(section_codes) == 1 and task.sections.filter(section_code=section_codes[0]).exists()
@@ -848,7 +864,13 @@ def _build_request(task_id: str) -> GenerationRequest:
 def _build_orchestrator(
     task_id: str,
 ) -> tuple[GenerationOrchestrator, str, str]:
-    llm_provider, provider_alias = _build_llm_provider()
+    system_prompt = (
+        GenerationTask.objects.filter(pk=task_id)
+        .values_list("system_prompt_snapshot", flat=True)
+        .first()
+        or ""
+    )
+    llm_provider, provider_alias = _build_llm_provider(system_prompt)
     embedding_provider: EmbeddingProvider
     if settings.DOCUMENT_AGENT_ALLOW_FAKE_PROVIDER:
         embedding_provider = HashingEmbeddingProvider()
@@ -873,14 +895,18 @@ def _build_orchestrator(
     return orchestrator, provider_alias, llm_provider.model_alias
 
 
-def _build_llm_provider() -> tuple[LLMProvider, str]:
+def _build_llm_provider(system_prompt: str = "") -> tuple[LLMProvider, str]:
     if settings.DOCUMENT_AGENT_ALLOW_FAKE_PROVIDER:
         return FakeLLMProvider(), "fake"
-    return OpenAICompatibleLLMProvider.from_env(), "openai-compatible"
+    return OpenAICompatibleLLMProvider.from_env(system_prompt=system_prompt), "openai-compatible"
 
 
 def _load_source_documents(task_id: str) -> tuple[SourceDocument, ...]:
-    task = GenerationTask.objects.prefetch_related("sources__document_version").get(pk=task_id)
+    task = (
+        GenerationTask.objects.select_related("project")
+        .prefetch_related("sources__document_version")
+        .get(pk=task_id)
+    )
     storage = LocalDocumentStorage()
     sources: list[SourceDocument] = []
     for source in task.sources.all():
@@ -902,6 +928,9 @@ def _load_source_documents(task_id: str) -> tuple[SourceDocument, ...]:
                 content=content,
             )
         )
+    prompt_source = prompt_source_document(task)
+    if prompt_source is not None:
+        sources.append(prompt_source)
     return tuple(sources)
 
 

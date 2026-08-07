@@ -23,6 +23,8 @@ from .contracts import (
 )
 from .errors import AgentError, SourcePurposeMismatchError, SourceUnsupportedError
 
+USER_PROMPT_MIME_TYPE = "application/x-wind-doc-agent-prompt"
+
 REPORT_FILENAME_MARKERS = (
     "检测报告",
     "试验报告",
@@ -273,6 +275,33 @@ class EntrySourceParser:
         self.pdf_parser = PdfSourceParser()
 
     def parse(self, source: SourceDocument) -> ParsedDocument:
+        if source.mime_type == USER_PROMPT_MIME_TYPE:
+            try:
+                text = source.content.decode("utf-8").strip()
+            except UnicodeDecodeError as exc:
+                raise AgentError("SOURCE_PARSE_FAILED", "用户Prompt无法解析") from exc
+            if not text:
+                raise AgentError("SOURCE_PARSE_FAILED", "用户Prompt为空")
+            prompt_lines = tuple(line.strip() for line in text.splitlines() if line.strip())
+            return ParsedDocument(
+                document_version_id=source.document_version_id,
+                filename=source.filename,
+                mime_type=source.mime_type,
+                content_sha256=sha256(source.content).hexdigest(),
+                title="用户本次编制要求",
+                blocks=tuple(
+                    ParsedBlock(
+                        block_id=f"prompt:p:{index}",
+                        block_type=ParsedBlockType.PARAGRAPH,
+                        text=line,
+                        locator=SourceLocator(
+                            paragraph_index=index,
+                            text_quote=line[:200],
+                        ),
+                    )
+                    for index, line in enumerate(prompt_lines)
+                ),
+            )
         suffix = Path(source.filename).suffix.lower()
         if suffix == ".docx" or source.mime_type == self._docx_mime:
             return self.docx_parser.parse(source)

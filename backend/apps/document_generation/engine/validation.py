@@ -40,6 +40,7 @@ PLANNED_VALUE_FIELDS = frozenset(
 NUMBER_RE = re.compile(r"(?<![A-Za-z])\d+(?:\.\d+)?")
 SUBHEADING_RE = re.compile(r"^(?:[（(][一二三四五六七八九十]+[）)]|[一二三四五六七八九十]+、)")
 INTERNAL_CODE_LABELS = {
+    "main_shaft": "风机主轴",
     "tower_weld": "塔筒焊缝",
     "high_strength_bolt": "高强度螺栓",
     "pitch_bearing": "变桨轴承",

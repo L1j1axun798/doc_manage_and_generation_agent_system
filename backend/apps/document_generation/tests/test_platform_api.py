@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from io import BytesIO
 
 import pytest
@@ -14,8 +15,10 @@ from apps.folders.models import Folder, PersonnelProfile
 from apps.projects.models import Project, ProjectMember
 from common.storage import LocalDocumentStorage
 
+from ..engine.contracts import RenderedArtifact
 from ..jobs import run_generation_task
 from ..models import (
+    AgentSystemPrompt,
     ApprovalStatus,
     DocumentTemplate,
     GeneratedSection,
@@ -41,6 +44,15 @@ def docx_bytes(*paragraphs: str) -> bytes:
     document = DocxDocument()
     for value in paragraphs:
         document.add_paragraph(value)
+    output = BytesIO()
+    document.save(output)
+    return output.getvalue()
+
+
+def docx_with_chapter_outline_bytes(*headings: str) -> bytes:
+    document = DocxDocument()
+    for heading in headings:
+        document.add_paragraph(heading)
     output = BytesIO()
     document.save(output)
     return output.getvalue()
@@ -634,6 +646,169 @@ def test_pipeline_endpoint_atomically_creates_sources_and_queues_extraction(
     ).exists()
 
 
+@pytest.mark.django_db(transaction=True)
+def test_pipeline_can_start_without_uploaded_reference_files(client, tmp_path, monkeypatch):
+    case = setup_generation_case(tmp_path)
+    client.force_login(case["manager"])
+    queued_ids: list[str] = []
+    monkeypatch.setattr(
+        "apps.document_generation.queues.queue_generation_task",
+        lambda task_id: queued_ids.append(task_id),
+    )
+
+    response = client.post(
+        "/api/v1/document-generation/tasks/pipeline/",
+        {
+            "project_id": case["project"].pk,
+            "template_id": case["template"].pk,
+            "idempotency_key": "prompt-only-pipeline",
+            "document_version_ids": [],
+            "conversation_context": {
+                "initial_message": "仅开展塔筒焊缝超声探伤，涉及人员登塔作业",
+            },
+            "facts": [
+                {
+                    "field": "project_name",
+                    "value": "风场入场项目",
+                    "value_type": "string",
+                }
+            ],
+        },
+        content_type="application/json",
+    )
+
+    assert response.status_code == 202
+    task = GenerationTask.objects.get(pk=response.json()["id"])
+    assert task.sources.count() == 0
+    assert task.status == GenerationTask.Status.EXTRACTING
+    assert queued_ids == [str(task.pk)]
+    with override_settings(
+        FILE_STORAGE_ROOT=tmp_path,
+        DOCUMENT_AGENT_ALLOW_FAKE_PROVIDER=True,
+    ):
+        assert run_generation_task(str(task.pk)) == "extracted"
+    task.refresh_from_db()
+    assert task.status == GenerationTask.Status.NEEDS_CONFIRMATION
+    facts = {fact["field"]: fact for fact in task.facts_snapshot}
+    assert facts["work_scope"]["value"] == "仅开展塔筒焊缝超声探伤，涉及人员登塔作业"
+    assert facts["inspection_component_codes"]["value"] == ["tower_weld"]
+    assert facts["inspection_method_codes"]["value"] == ["UT"]
+    assert facts["risk_evidence_items"]["value"][0]["risk_code"] == "climbing_tower"
+    assert all(
+        any(evidence["source_document_version_id"] == 0 for evidence in fact["evidence"])
+        for fact in facts.values()
+    )
+
+
+@pytest.mark.django_db(transaction=True)
+def test_empty_prompt_fact_snapshot_can_be_reextracted_without_reference_files(
+    client,
+    tmp_path,
+    monkeypatch,
+):
+    case = setup_generation_case(tmp_path)
+    client.force_login(case["manager"])
+    queued_ids: list[str] = []
+    monkeypatch.setattr(
+        "apps.document_generation.queues.queue_generation_task",
+        lambda task_id: queued_ids.append(task_id),
+    )
+    response = client.post(
+        "/api/v1/document-generation/tasks/pipeline/",
+        {
+            "project_id": case["project"].pk,
+            "template_id": case["template"].pk,
+            "idempotency_key": "retry-empty-prompt-facts",
+            "document_version_ids": [],
+            "conversation_context": {
+                "initial_message": "仅开展风机主轴超声探伤检测",
+            },
+        },
+        content_type="application/json",
+    )
+    task = GenerationTask.objects.get(pk=response.json()["id"])
+    task.status = GenerationTask.Status.NEEDS_CONFIRMATION
+    task.operation = GenerationTask.Operation.EXTRACT
+    task.facts_snapshot = []
+    task.save(update_fields=["status", "operation", "facts_snapshot", "updated_at"])
+    queued_ids.clear()
+
+    retried = client.post(f"/api/v1/document-generation/tasks/{task.pk}/retry/")
+
+    task.refresh_from_db()
+    assert retried.status_code == 202
+    assert task.status == GenerationTask.Status.EXTRACTING
+    assert queued_ids == [str(task.pk)]
+
+
+@pytest.mark.django_db(transaction=True)
+def test_only_admin_can_upload_system_prompt_and_new_task_freezes_snapshot(
+    client,
+    tmp_path,
+    monkeypatch,
+):
+    case = setup_generation_case(tmp_path)
+    client.force_login(case["manager"])
+    denied = client.post(
+        "/api/v1/document-generation/system-prompts/",
+        {"file": SimpleUploadedFile("agent.md", "重点遵循甲方章序".encode())},
+    )
+    assert denied.status_code == 403
+
+    client.force_login(case["admin"])
+    uploaded = client.post(
+        "/api/v1/document-generation/system-prompts/",
+        {"file": SimpleUploadedFile("agent.md", "重点遵循甲方章序".encode())},
+    )
+    assert uploaded.status_code == 201
+    prompt = AgentSystemPrompt.objects.get(pk=uploaded.json()["id"])
+    assert prompt.is_active is True
+
+    monkeypatch.setattr(
+        "apps.document_generation.queues.queue_generation_task",
+        lambda task_id: None,
+    )
+    client.force_login(case["manager"])
+    response = client.post(
+        "/api/v1/document-generation/tasks/pipeline/",
+        {
+            "project_id": case["project"].pk,
+            "template_id": case["template"].pk,
+            "idempotency_key": "system-prompt-snapshot",
+            "document_version_ids": [],
+            "conversation_context": {"initial_message": "开始编制"},
+        },
+        content_type="application/json",
+    )
+    task = GenerationTask.objects.get(pk=response.json()["id"])
+    assert response.status_code == 202
+    assert task.system_prompt_id == prompt.pk
+    assert task.system_prompt_snapshot == "重点遵循甲方章序"
+    assert response.json()["system_prompt_sha256"] == prompt.content_sha256
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("encoding", ["gb18030", "utf-16"])
+def test_admin_can_upload_system_prompt_saved_with_common_windows_encoding(
+    client,
+    tmp_path,
+    encoding,
+):
+    case = setup_generation_case(tmp_path)
+    client.force_login(case["admin"])
+    content = "严格遵循甲方模板章节，不得新增章节。"
+
+    response = client.post(
+        "/api/v1/document-generation/system-prompts/",
+        {"file": SimpleUploadedFile("agent.txt", content.encode(encoding))},
+    )
+
+    assert response.status_code == 201
+    prompt = AgentSystemPrompt.objects.get(pk=response.json()["id"])
+    assert prompt.content == content
+    assert prompt.content_sha256 == hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
 @pytest.mark.django_db
 @pytest.mark.parametrize("actor_key", ["manager", "admin"])
 def test_manager_and_admin_can_upload_self_service_template(
@@ -1094,16 +1269,6 @@ def test_full_generation_review_and_export_workflow(client, tmp_path, monkeypatc
         {"locked": True},
         content_type="application/json",
     )
-    submit_response = client.post(
-        f"/api/v1/document-generation/tasks/{task.pk}/submit-review/",
-        {"comment": "编制人员已复核"},
-        content_type="application/json",
-    )
-    approve_response = client.post(
-        f"/api/v1/document-generation/tasks/{task.pk}/approve/",
-        {"comment": "技术负责人确认"},
-        content_type="application/json",
-    )
     export_info_before = client.get(
         f"/api/v1/document-generation/tasks/{task.pk}/export-info/",
     )
@@ -1128,9 +1293,6 @@ def test_full_generation_review_and_export_workflow(client, tmp_path, monkeypatc
     output = task.output_document_version.document
 
     assert lock_response.status_code == 200
-    assert submit_response.status_code == 200
-    assert submit_response.json()["status"] == GenerationTask.Status.PENDING_APPROVAL
-    assert approve_response.status_code == 200
     assert export_info_before.status_code == 200
     assert export_info_before.json()["target_folder"] == "技术方案"
     assert export_info_before.json()["agent_generated_count"] == 0
@@ -1152,6 +1314,9 @@ def test_full_generation_review_and_export_workflow(client, tmp_path, monkeypatc
         ).count()
         == 1
     )
+    assert not task.reviews.filter(
+        action__in=[GenerationReview.Action.SUBMITTED, GenerationReview.Action.APPROVED]
+    ).exists()
     events_response = client.get(
         f"/api/v1/document-generation/tasks/{task.pk}/events/",
         {"after_sequence": 0},
@@ -1168,6 +1333,13 @@ def test_export_name_conflict_reports_existing_agent_file_count(client, tmp_path
     task = create_task_via_api(client, case)
     task.status = GenerationTask.Status.APPROVED
     task.save(update_fields=["status", "updated_at"])
+    GeneratedSection.objects.create(
+        task=task,
+        section_code="overview",
+        title="工程概况与编制依据",
+        content="已确认章节正文",
+        is_locked=True,
+    )
     existing_version = create_stored_version(
         root=tmp_path,
         actor=case["manager"],
@@ -1192,20 +1364,126 @@ def test_export_name_conflict_reports_existing_agent_file_count(client, tmp_path
     info_response = client.get(
         f"/api/v1/document-generation/tasks/{task.pk}/export-info/",
     )
-    export_response = client.post(
-        f"/api/v1/document-generation/tasks/{task.pk}/export/",
-        {
-            "idempotency_key": "conflicting-export",
-            "filename": "已有四措两案.docx",
-        },
-        content_type="application/json",
-    )
+    with override_settings(FILE_STORAGE_ROOT=tmp_path):
+        export_response = client.post(
+            f"/api/v1/document-generation/tasks/{task.pk}/export/",
+            {
+                "idempotency_key": "conflicting-export",
+                "filename": "已有四措两案.docx",
+            },
+            content_type="application/json",
+        )
 
     assert info_response.status_code == 200
     assert info_response.json()["agent_generated_count"] == 1
     assert export_response.status_code == 409
     assert "已有 1 份 Agent 生成文件" in export_response.json()["message"]
     assert "请修改文件名后重试" in export_response.json()["message"]
+
+
+@pytest.mark.django_db
+def test_export_requires_all_sections_to_be_locked(client, tmp_path):
+    case = setup_generation_case(tmp_path)
+    client.force_login(case["manager"])
+    task = create_task_via_api(client, case)
+    task.status = GenerationTask.Status.REVIEW_REQUIRED
+    task.facts_snapshot = [
+        {
+            "field": "project_name",
+            "value": "风场入场项目",
+            "value_type": "string",
+            "source_document_version_id": case["source_version"].pk,
+            "locator": {"paragraph_index": 0},
+            "confidence": 1,
+            "confirmed_by": case["manager"].pk,
+        }
+    ]
+    task.save(update_fields=["status", "facts_snapshot", "updated_at"])
+    GeneratedSection.objects.create(
+        task=task,
+        section_code="overview",
+        title="工程概况与编制依据",
+        content="尚未确认章节正文",
+        is_locked=False,
+    )
+
+    with override_settings(FILE_STORAGE_ROOT=tmp_path):
+        response = client.post(
+            f"/api/v1/document-generation/tasks/{task.pk}/export/",
+            {
+                "idempotency_key": "unlocked-export",
+                "filename": "未确认章节.docx",
+            },
+            content_type="application/json",
+        )
+
+    assert response.status_code == 409
+    assert response.json()["code"] == "SECTIONS_NOT_LOCKED"
+    assert "确认并锁定全部章节" in response.json()["message"]
+
+
+@pytest.mark.django_db
+def test_export_uses_actual_template_outline_instead_of_stale_registered_order(
+    client,
+    tmp_path,
+    monkeypatch,
+):
+    case = setup_generation_case(tmp_path)
+    client.force_login(case["manager"])
+    task = create_task_via_api(client, case)
+    task.status = GenerationTask.Status.REVIEW_REQUIRED
+    task.facts_snapshot = [
+        {
+            "field": "project_name",
+            "value": "风场入场项目",
+            "value_type": "string",
+            "source_document_version_id": case["source_version"].pk,
+            "locator": {"paragraph_index": 0},
+            "confidence": 1,
+            "confirmed_by": case["manager"].pk,
+        }
+    ]
+    task.save(update_fields=["status", "facts_snapshot", "updated_at"])
+    case["template"].section_order = ["overview", "risk_identification"]
+    case["template"].save(update_fields=["section_order", "updated_at"])
+    template_version = case["template"].document_version
+    template_content = docx_with_chapter_outline_bytes("第一章 工程概况与编制依据")
+    template_path = LocalDocumentStorage(root=tmp_path).resolve(template_version.storage_path)
+    template_path.write_bytes(template_content)
+    template_version.file_size = len(template_content)
+    template_version.sha256 = hashlib.sha256(template_content).hexdigest()
+    template_version.save(update_fields=["file_size", "sha256"])
+    GeneratedSection.objects.create(
+        task=task,
+        section_code="overview",
+        title="工程概况与编制依据",
+        content="已确认章节正文",
+        is_locked=True,
+    )
+    rendered_content = docx_bytes("按模板实际章节导出的正文")
+    monkeypatch.setattr(
+        "apps.document_generation.services.DocxTemplateRenderer.render",
+        lambda *_args, **_kwargs: RenderedArtifact(
+            filename="output.docx",
+            media_type=DOCX_MIME,
+            content=rendered_content,
+            sha256=hashlib.sha256(rendered_content).hexdigest(),
+        ),
+    )
+
+    with override_settings(FILE_STORAGE_ROOT=tmp_path):
+        response = client.post(
+            f"/api/v1/document-generation/tasks/{task.pk}/export/",
+            {
+                "idempotency_key": "actual-outline-export",
+                "filename": "按模板实际章节导出.docx",
+            },
+            content_type="application/json",
+        )
+
+    task.refresh_from_db()
+    assert response.status_code == 200, response.json()
+    assert task.status == GenerationTask.Status.EXPORTED
 
 
 @pytest.mark.django_db

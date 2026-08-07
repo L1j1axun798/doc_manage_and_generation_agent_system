@@ -4,6 +4,7 @@ import re
 from collections import Counter
 from collections.abc import Mapping
 from copy import deepcopy
+from dataclasses import dataclass
 from hashlib import sha256
 from io import BytesIO
 from pathlib import Path
@@ -35,6 +36,63 @@ PLACEHOLDER_RE = re.compile(r"{{\s*([A-Za-z_][A-Za-z0-9_.]*)\s*}}")
 STYLE_ONLY_TEMPLATE_WARNING = "模板不含占位符，将仅继承样式并清除历史正文和页眉页脚"
 SECTION_NUMBER_PREFIXES = ("一", "二", "三", "四", "五", "六", "七", "八")
 SUBHEADING_RE = re.compile(r"^(?:[（(][一二三四五六七八九十]+[）)]|[一二三四五六七八九十]+、)")
+CHAPTER_HEADING_RE = re.compile(
+    r"^第\s*[一二三四五六七八九十百0-9]+\s*章\s*[、,.，．]?\s*(?P<title>.+?)\s*$"
+)
+SECTION_TITLE_ALIASES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("organization_measures", ("组织措施", "组织机构", "组织保障")),
+    ("construction_plan", ("施工方案", "作业方案", "实施方案")),
+    ("technical_measures", ("技术措施", "技术方案")),
+    ("safety_measures", ("安全措施", "安全保障")),
+    ("risk_identification", ("风险辨识", "风险预控", "危险点", "风险管控")),
+    ("emergency_plan", ("应急预案", "现场处置方案", "应急处置")),
+    ("environmental_measures", ("环保措施", "环境保护", "文明施工")),
+    ("overview", ("项目简介", "项目概况", "工程概况", "编制依据")),
+)
+
+
+@dataclass(frozen=True)
+class TemplateOutlineItem:
+    paragraph_index: int
+    section_code: str
+    title: str
+
+
+def _section_code_for_heading(text: str) -> str | None:
+    match = CHAPTER_HEADING_RE.match(" ".join(text.split()))
+    if match is None:
+        return None
+    title = match.group("title")
+    for section_code, aliases in SECTION_TITLE_ALIASES:
+        if any(alias in title for alias in aliases):
+            return section_code
+    return None
+
+
+def template_outline(document: DocumentObject) -> tuple[TemplateOutlineItem, ...]:
+    outline: list[TemplateOutlineItem] = []
+    seen: set[str] = set()
+    for index, paragraph in enumerate(document.paragraphs):
+        section_code = _section_code_for_heading(paragraph.text)
+        if section_code is None or section_code in seen:
+            continue
+        seen.add(section_code)
+        outline.append(
+            TemplateOutlineItem(
+                paragraph_index=index,
+                section_code=section_code,
+                title=" ".join(paragraph.text.split()),
+            )
+        )
+    return tuple(outline)
+
+
+def infer_template_section_order(content: bytes) -> tuple[str, ...]:
+    try:
+        document = Document(BytesIO(content))
+    except Exception:
+        return ()
+    return tuple(item.section_code for item in template_outline(document))
 
 
 def _docx_xml_text(content: bytes) -> str:
@@ -205,6 +263,109 @@ def _add_generated_table(
     return table
 
 
+def _safe_add_heading(
+    document: DocumentObject,
+    text: str,
+    *,
+    level: int,
+) -> Paragraph:
+    style_name = f"Heading {level}"
+    if _has_style(document, style_name):
+        return document.add_heading(text, level=level)
+    return document.add_paragraph(text)
+
+
+def _paragraph_run_properties(paragraph: Paragraph | None) -> CT_RPr | None:
+    if paragraph is None:
+        return None
+    for run in paragraph.runs:
+        if run._r.rPr is not None:
+            return deepcopy(run._r.rPr)
+    return None
+
+
+def _copy_paragraph_format(source: Paragraph | None, target: Paragraph) -> None:
+    if source is not None and source._p.pPr is not None:
+        if target._p.pPr is not None:
+            target._p.remove(target._p.pPr)
+        target._p.insert(0, deepcopy(source._p.pPr))
+    properties = _paragraph_run_properties(source)
+    for run in target.runs:
+        _apply_run_properties(run, properties)
+
+
+def _render_into_template_outline(
+    document: DocumentObject,
+    sections: tuple[object, ...],
+    outline: tuple[TemplateOutlineItem, ...],
+) -> None:
+    section_by_code = {getattr(section, "section_code"): section for section in sections}
+    paragraphs = list(document.paragraphs)
+    heading_paragraphs = [paragraphs[item.paragraph_index] for item in outline]
+    body = document.element.body
+
+    for outline_index in range(len(outline) - 1, -1, -1):
+        item = outline[outline_index]
+        section = section_by_code.get(item.section_code)
+        if section is None:
+            continue
+        heading = heading_paragraphs[outline_index]
+        next_heading = (
+            heading_paragraphs[outline_index + 1]
+            if outline_index + 1 < len(heading_paragraphs)
+            else None
+        )
+        removable: list[object] = []
+        body_example: Paragraph | None = None
+        subheading_example: Paragraph | None = None
+        sibling = heading._p.getnext()
+        while sibling is not None and (next_heading is None or sibling is not next_heading._p):
+            if sibling.tag == qn("w:sectPr"):
+                break
+            if sibling.tag == qn("w:p"):
+                paragraph = Paragraph(sibling, document)
+                text = paragraph.text.strip()
+                if text and body_example is None:
+                    body_example = paragraph
+                if text and SUBHEADING_RE.match(text) and subheading_example is None:
+                    subheading_example = paragraph
+            removable.append(sibling)
+            sibling = sibling.getnext()
+        for element in removable:
+            body.remove(element)
+
+        anchor = heading._p
+        for text in getattr(section, "paragraphs"):
+            is_subheading = bool(SUBHEADING_RE.match(text.strip()))
+            paragraph = document.add_paragraph(text)
+            _copy_paragraph_format(
+                subheading_example if is_subheading else body_example,
+                paragraph,
+            )
+            anchor.addnext(paragraph._p)
+            anchor = paragraph._p
+        for items in getattr(section, "lists"):
+            for value in items:
+                paragraph = document.add_paragraph(f"• {value}")
+                _copy_paragraph_format(body_example, paragraph)
+                anchor.addnext(paragraph._p)
+                anchor = paragraph._p
+        for generated_table in getattr(section, "tables"):
+            table = _add_generated_table(
+                document,
+                rows=1,
+                cols=len(generated_table.headers),
+            )
+            for index, header in enumerate(generated_table.headers):
+                table.rows[0].cells[index].text = header
+            for row in generated_table.rows:
+                cells = table.add_row().cells
+                for index, value in enumerate(row):
+                    cells[index].text = value
+            anchor.addnext(table._tbl)
+            anchor = table._tbl
+
+
 class DocxTemplateRenderer:
     _media_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
@@ -253,7 +414,11 @@ class DocxTemplateRenderer:
         try:
             if not validation.declared_placeholders:
                 source_document = Document(BytesIO(request.template.content))
-                document = _prepare_style_only_baseline(source_document, context)
+                outline = template_outline(source_document)
+                if outline:
+                    document = source_document
+                else:
+                    document = _prepare_style_only_baseline(source_document, context)
             else:
                 template = DocxTemplate(BytesIO(request.template.content))
                 environment = Environment(
@@ -270,6 +435,12 @@ class DocxTemplateRenderer:
                 raise
             raise TemplateInvalidError("模板渲染失败") from exc
 
+        if not validation.declared_placeholders and outline:
+            _render_into_template_outline(document, request.sections, outline)
+            sections_to_append: tuple[object, ...] = ()
+        else:
+            sections_to_append = tuple(request.sections)
+
         body_run_properties = (
             _dominant_body_run_properties(source_document)
             if not validation.declared_placeholders
@@ -280,19 +451,23 @@ class DocxTemplateRenderer:
             if not validation.declared_placeholders
             else None
         )
-        for section_index, section in enumerate(request.sections):
+        for section_index, section in enumerate(sections_to_append):
             prefix = (
                 SECTION_NUMBER_PREFIXES[section_index]
                 if section_index < len(SECTION_NUMBER_PREFIXES)
                 else str(section_index + 1)
             )
-            heading = document.add_heading(f"{prefix}、{section.title}", level=2)
+            heading = _safe_add_heading(
+                document,
+                f"{prefix}、{section.title}",
+                level=2,
+            )
             for run in heading.runs:
                 _apply_run_properties(run, heading_run_properties)
             for paragraph in section.paragraphs:
                 is_subheading = bool(SUBHEADING_RE.match(paragraph.strip()))
                 rendered_paragraph = (
-                    document.add_heading(paragraph, level=3)
+                    _safe_add_heading(document, paragraph, level=3)
                     if is_subheading
                     else document.add_paragraph(paragraph)
                 )

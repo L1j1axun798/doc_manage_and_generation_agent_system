@@ -66,6 +66,7 @@ class UserCreateSerializer(serializers.ModelSerializer):
 class LoginSerializer(serializers.Serializer):
     username = serializers.CharField()
     password = serializers.CharField(trim_whitespace=False)
+    remember_me = serializers.BooleanField(default=True, required=False)
 
 
 class WebAuthnOptionsResponseSerializer(serializers.Serializer):

@@ -128,6 +128,17 @@ export interface DocumentGenerationTemplate {
   required_fact_fields: string[]
 }
 
+export interface AgentSystemPrompt {
+  id: number
+  original_filename: string
+  version: string
+  content: string
+  content_sha256: string
+  is_active: boolean
+  created_by_name: string
+  created_at: string
+}
+
 export type TemplateSyncStatus = 'synced' | 'already_present' | 'folder_missing'
 
 export interface TemplateSelectionResult extends DocumentGenerationTemplate {
@@ -275,6 +286,8 @@ export interface GenerationTask {
   operation: GenerationOperation
   progress: number
   conversation_context: AgentConversationContext
+  system_prompt_id?: number | null
+  system_prompt_sha256?: string
   facts_snapshot: FactProposal[] | ConfirmedFactPayload[]
   fact_conflicts: Array<Record<string, unknown>>
   risk_profile: Record<string, unknown>

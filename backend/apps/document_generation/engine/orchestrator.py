@@ -48,6 +48,7 @@ from .sections import SectionContextBuilder
 from .validation import normalize_section_provenance
 
 T = TypeVar("T")
+MAX_SECTION_VALIDATION_REVISIONS = 3
 
 
 class _TraceBuilder:
@@ -350,7 +351,9 @@ class GenerationOrchestrator:
                 blocking_issues = tuple(
                     issue for issue in issues if issue.severity == ValidationSeverity.ERROR
                 )
-                if blocking_issues:
+                revision_attempt = 0
+                while blocking_issues and revision_attempt < MAX_SECTION_VALIDATION_REVISIONS:
+                    revision_attempt += 1
                     section = trace.invoke(
                         WorkflowStage.GENERATING_SECTIONS,
                         "revise_document_section",
@@ -360,19 +363,19 @@ class GenerationOrchestrator:
                             section,
                             blocking_issues,
                         ),
-                        detail=section_code,
+                        detail=f"{section_code}:attempt={revision_attempt}",
                     )
                     section = trace.invoke(
                         WorkflowStage.VALIDATING_SECTIONS,
                         "normalize_revised_section_provenance",
                         partial(normalize_section_provenance, section, context),
-                        detail=section_code,
+                        detail=f"{section_code}:attempt={revision_attempt}",
                     )
                     issues = trace.invoke(
                         WorkflowStage.VALIDATING_SECTIONS,
                         "revalidate_document_section",
                         partial(self._validate_section, section, context),
-                        detail=section_code,
+                        detail=f"{section_code}:attempt={revision_attempt}",
                     )
                     blocking_issues = tuple(
                         issue for issue in issues if issue.severity == ValidationSeverity.ERROR
@@ -525,7 +528,9 @@ class GenerationOrchestrator:
         return RetrievalQuery(
             business_type=request.business_type,
             section_code=section_code,
-            query_text=f"{section_code} {fact_text}".strip(),
+            query_text=(
+                f"{section_code} {request.conversation_context.initial_message} {fact_text}"
+            ).strip(),
             client_code=(str(values["client_code"]).strip() if values.get("client_code") else None),
             component_tags=(
                 tuple(str(value) for value in component_tags)

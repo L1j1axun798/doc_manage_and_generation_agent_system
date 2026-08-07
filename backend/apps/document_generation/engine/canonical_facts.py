@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 from typing import Any, Final
 
@@ -14,6 +15,7 @@ REQUIRED_FACT_LABELS: Final[dict[str, str]] = {
 }
 
 COMPONENT_CODE_LABELS: Final[dict[str, str]] = {
+    "main_shaft": "风机主轴",
     "tower_weld": "塔筒焊缝",
     "tower_component": "塔筒部件",
     "high_strength_bolt": "高强度螺栓",
@@ -46,6 +48,7 @@ RISK_CODE_LABELS: Final[dict[str, str]] = {
 }
 
 _COMPONENT_TERMS: Final[dict[str, tuple[str, ...]]] = {
+    "main_shaft": ("风机主轴", "机组主轴", "主轴轴身", "主轴检测区域"),
     "tower_weld": ("塔筒焊缝",),
     "tower_component": ("塔筒部件",),
     "high_strength_bolt": ("高强度螺栓",),
@@ -65,14 +68,14 @@ _METHOD_TERMS: Final[dict[str, tuple[str, ...]]] = {
 _RISK_TERMS: Final[dict[str, tuple[str, ...]]] = {
     "high_altitude": ("高处作业", "高空作业", "高空临边", "高空坠落"),
     "climbing_tower": ("攀爬塔筒", "攀爬风机", "人员登塔", "登塔作业", "涉及爬塔"),
-    "electrical_work": ("电气作业", "设备带电", "存在触电"),
+    "electrical_work": ("电气作业", "设备带电", "存在触电", "触电"),
     "temporary_power": ("临时用电", "临时电源"),
-    "fire_hot_work": ("动火作业", "现场明火"),
+    "fire_hot_work": ("动火作业", "现场明火", "火灾"),
     "mechanical_injury": ("机械伤害",),
     "falling_object": ("高空坠物", "物体打击"),
     "confined_space": ("有限空间作业", "密闭空间", "窒息中毒"),
-    "extreme_weather": ("大风暴雨", "冰冻天气", "极端天气"),
-    "vehicle_traffic": ("驾驶车辆", "作业车辆", "车辆交通", "兼职司机"),
+    "extreme_weather": ("大风暴雨", "大风天气", "冰冻天气", "极端天气"),
+    "vehicle_traffic": ("驾驶车辆", "作业车辆", "车辆交通", "车辆伤害", "兼职司机"),
     "environmental_pollution": ("环境污染", "废油废液", "漏油"),
     "lifting_hoisting": ("起吊作业", "吊装作业", "电动葫芦"),
 }
@@ -104,10 +107,22 @@ def _matching_codes(
 def enrich_required_fact_candidates(
     candidates: Sequence[FactCandidate],
     documents: Sequence[ParsedDocument],
+    *,
+    preferred_source_document_version_id: int | None = None,
 ) -> tuple[FactCandidate, ...]:
     """Add deterministic, source-anchored canonical candidates the UI requires."""
 
-    enriched = list(candidates)
+    preferred_candidates = _preferred_source_candidates(
+        documents,
+        preferred_source_document_version_id=preferred_source_document_version_id,
+    )
+    prompt_scope_fields = {
+        candidate.field
+        for candidate in preferred_candidates
+        if candidate.field != "risk_evidence_items"
+    }
+    enriched = [candidate for candidate in candidates if candidate.field not in prompt_scope_fields]
+    enriched.extend(preferred_candidates)
     fields = {candidate.field for candidate in enriched}
     blocks = [
         (document.document_version_id, block)
@@ -217,6 +232,194 @@ def enrich_required_fact_candidates(
             )
         )
     return tuple(enriched)
+
+
+def _preferred_source_candidates(
+    documents: Sequence[ParsedDocument],
+    *,
+    preferred_source_document_version_id: int | None,
+) -> tuple[FactCandidate, ...]:
+    if preferred_source_document_version_id is None:
+        return ()
+    document = next(
+        (
+            item
+            for item in documents
+            if item.document_version_id == preferred_source_document_version_id
+        ),
+        None,
+    )
+    if document is None:
+        return ()
+
+    requirement_block = _block_with_label(document.blocks, "用户本次编制要求")
+    if requirement_block is None:
+        return ()
+    requirement_index = document.blocks.index(requirement_block)
+    prompt_source_blocks = document.blocks[requirement_index:]
+    prompt_blocks = tuple(
+        (document.document_version_id, block) for block in prompt_source_blocks
+    )
+    prompt_text = "\n".join(
+        (
+            _labeled_value(block.text, "用户本次编制要求")
+            if block is requirement_block
+            else block.text
+        )
+        for block in prompt_source_blocks
+    ).strip()
+    if not prompt_text:
+        return ()
+
+    candidates: list[FactCandidate] = []
+    explicit_project_name = _extract_prompt_project_name(prompt_text)
+    project_block = (
+        _first_block_containing(prompt_source_blocks, explicit_project_name)
+        if explicit_project_name
+        else None
+    ) or _block_with_label(document.blocks, "项目名称")
+    if project_block is not None:
+        project_name = explicit_project_name or _labeled_value(project_block.text, "项目名称")
+        if project_name:
+            candidates.append(
+                _candidate_from_block(
+                    field="project_name",
+                    value=project_name,
+                    value_type="string",
+                    document_version_id=document.document_version_id,
+                    block=project_block,
+                    confidence=1,
+                )
+            )
+
+    work_scope, scope_block = _extract_prompt_work_scope(prompt_blocks, prompt_text)
+    if work_scope and scope_block is not None:
+        candidates.append(
+            _candidate_from_block(
+                field="work_scope",
+                value=work_scope,
+                value_type="string",
+                document_version_id=document.document_version_id,
+                block=scope_block,
+                confidence=1,
+            )
+        )
+    component_codes = list(infer_component_codes(prompt_text))
+    if component_codes:
+        component_block = _first_matching_block(prompt_blocks, _COMPONENT_TERMS)
+        candidates.append(
+            _candidate_from_block(
+                field="inspection_component_codes",
+                value=component_codes,
+                value_type="array",
+                document_version_id=document.document_version_id,
+                block=component_block[1],
+                confidence=1,
+            )
+        )
+    method_codes = _method_matches(prompt_blocks)
+    if method_codes:
+        method_block = _first_matching_block(prompt_blocks, _METHOD_TERMS)
+        candidates.append(
+            _candidate_from_block(
+                field="inspection_method_codes",
+                value=method_codes,
+                value_type="array",
+                document_version_id=document.document_version_id,
+                block=method_block[1],
+                confidence=1,
+            )
+        )
+    risk_items: list[dict[str, str]] = []
+    risk_anchor: ParsedBlock | None = None
+    for risk_code, terms in _RISK_TERMS.items():
+        matched_block = next(
+            (block for block in prompt_source_blocks if any(term in block.text for term in terms)),
+            None,
+        )
+        if matched_block is None:
+            continue
+        risk_anchor = risk_anchor or matched_block
+        risk_items.append(
+            {"risk_code": risk_code, "evidence": matched_block.text.strip()[:500]}
+        )
+    if risk_items and risk_anchor is not None:
+        candidates.append(
+            _candidate_from_block(
+                field="risk_evidence_items",
+                value=risk_items,
+                value_type="array",
+                document_version_id=document.document_version_id,
+                block=risk_anchor,
+                confidence=1,
+            )
+        )
+    return tuple(candidates)
+
+
+def _block_with_label(
+    blocks: Sequence[ParsedBlock],
+    label: str,
+) -> ParsedBlock | None:
+    return next(
+        (
+            block
+            for block in blocks
+            if block.text.startswith(f"{label}：") or block.text.startswith(f"{label}:")
+        ),
+        None,
+    )
+
+
+def _labeled_value(text: str, label: str) -> str:
+    return text[len(label) :].lstrip("：:").strip()
+
+
+def _extract_prompt_project_name(text: str) -> str:
+    matched = re.search(
+        r"(?:本次项目为|项目名称\s*[：:])\s*[“\"]?([^”\"，。；\n]+)",
+        text,
+    )
+    return matched.group(1).strip() if matched else ""
+
+
+def _extract_prompt_work_scope(
+    blocks: Sequence[tuple[int, ParsedBlock]],
+    text: str,
+) -> tuple[str, ParsedBlock | None]:
+    matched = re.search(
+        r"主要工作内容(?:为|包括|\s*[：:])\s*(.+?)(?=，工期|。|；|\n)",
+        text,
+    )
+    if matched:
+        value = matched.group(1).strip()
+        return value, _first_block_containing(tuple(block for _, block in blocks), value)
+    scope_match = _best_scope_block(blocks)
+    if scope_match is not None:
+        return scope_match[1].text.strip(), scope_match[1]
+    opening_block = blocks[0][1] if blocks else None
+    opening_requirement = (
+        _labeled_value(opening_block.text, "用户本次编制要求")
+        if opening_block is not None
+        else ""
+    )
+    if opening_block is not None and (
+        infer_component_codes(opening_requirement)
+        or infer_method_codes(opening_requirement)
+        or any(
+            marker in opening_requirement
+            for marker in ("工作范围", "检测范围", "检测", "探伤", "作业", "机组")
+        )
+    ):
+        return opening_requirement, opening_block
+    return "", None
+
+
+def _first_block_containing(
+    blocks: Sequence[ParsedBlock],
+    text: str,
+) -> ParsedBlock | None:
+    return next((block for block in blocks if text and text in block.text), None)
 
 
 def validate_required_fact_value(field: str, value: Any) -> str | None:

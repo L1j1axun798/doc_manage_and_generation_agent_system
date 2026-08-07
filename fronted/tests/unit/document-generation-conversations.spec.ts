@@ -18,9 +18,11 @@ const mocks = vi.hoisted(() => ({
   fetchGenerationTemplates: vi.fn(),
   fetchDocuments: vi.fn(),
   fetchAvailableAgentPersonnel: vi.fn(),
+  confirmAndGenerate: vi.fn(),
   stopGenerationTask: vi.fn(),
   deleteGenerationTask: vi.fn(),
   regenerateSection: vi.fn(),
+  retryGenerationTask: vi.fn(),
   startGenerationPipeline: vi.fn(),
   selectGenerationTemplate: vi.fn(),
   uploadClientTemplate: vi.fn(),
@@ -29,7 +31,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@/modules/document-generation/api/document-generation.api', () => ({
   approveGenerationTask: vi.fn(),
-  confirmAndGenerate: vi.fn(),
+  confirmAndGenerate: mocks.confirmAndGenerate,
   deleteGenerationTask: mocks.deleteGenerationTask,
   exportGenerationTask: vi.fn(),
   fetchGenerationEvents: mocks.fetchGenerationEvents,
@@ -39,7 +41,7 @@ vi.mock('@/modules/document-generation/api/document-generation.api', () => ({
   generateEntryPlan: vi.fn(),
   lockAllGeneratedSections: vi.fn(),
   regenerateSection: mocks.regenerateSection,
-  retryGenerationTask: vi.fn(),
+  retryGenerationTask: mocks.retryGenerationTask,
   setGeneratedSectionLock: vi.fn(),
   selectGenerationTemplate: mocks.selectGenerationTemplate,
   startGenerationPipeline: mocks.startGenerationPipeline,
@@ -271,6 +273,80 @@ describe('document generation conversation directory', () => {
     expect(mocks.fetchGenerationTask).toHaveBeenCalledWith(task.id)
     expect(wrapper.find('.doc-agent__task').exists()).toBe(true)
     expect(wrapper.find('.doc-agent__message-turn--agent .doc-agent__task').exists()).toBe(true)
+
+    wrapper.unmount()
+  })
+
+  it('offers document download after visible chapters are locked even if template metadata is stale', async () => {
+    const reviewTask: GenerationTask = {
+      ...task,
+      status: 'review_required',
+      operation: 'generate',
+      progress: 90,
+      sections: [
+        {
+          section_code: 'overview',
+          title: '工程概况与编制依据',
+          content: '已确认章节正文',
+          structured_content: {},
+          citations: [],
+          validation_issues: [],
+          revision: 1,
+          is_locked: true,
+          generated_at: '2026-08-07T10:00:00+08:00',
+          updated_at: '2026-08-07T10:00:00+08:00',
+        },
+      ],
+    }
+    mocks.fetchGenerationTemplates.mockResolvedValue([
+      {
+        id: task.template_id,
+        code: 'CLIENT-STALE-OUTLINE',
+        client_name: '甲方提供',
+        display_name: task.template_name,
+        business_type: 'wind_turbine_inspection_four_measures_two_plans',
+        version: '自主上传',
+        document_version_id: 388,
+        filename: 'client-template.docx',
+        field_mapping: { self_service: true },
+        section_order: ['overview', 'risk_identification'],
+        required_fact_fields: ['project_name'],
+        sync_status: 'synced',
+      },
+    ])
+    mocks.fetchDocuments.mockResolvedValue({
+      count: 0,
+      next: null,
+      previous: null,
+      results: [],
+    })
+    mocks.fetchGenerationTasks.mockResolvedValue({
+      count: 1,
+      next: null,
+      previous: null,
+      results: [reviewTask],
+    })
+    mocks.fetchGenerationTask.mockResolvedValue(reviewTask)
+    mocks.fetchGenerationEvents.mockResolvedValue([])
+
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    useAuthStore().user = currentUser
+    const wrapper = mount(DocumentGenerationPanel, {
+      props: { project },
+      global: { plugins: [pinia, ElementPlus] },
+    })
+    await flushPromises()
+    await wrapper.get('.doc-agent__conversation-item').trigger('click')
+    await flushPromises()
+
+    const downloadButton = wrapper.findAll('button').find(
+      (button) => button.text() === '下载生成文档',
+    )
+    expect(downloadButton).toBeDefined()
+    expect(downloadButton?.attributes('disabled')).toBeUndefined()
+    expect(wrapper.text()).not.toContain('提交技术负责人批准')
+    expect(wrapper.text()).not.toContain('技术负责人批准')
 
     wrapper.unmount()
   })
@@ -548,6 +624,7 @@ describe('document generation conversation directory', () => {
     const draft = contextStore.forProject(project.id)
     draft.templateId = template.id
     draft.personnelIds = [22]
+    draft.sourceVersionIds = []
     draft.message = '请重点核对人员分工后开始编制'
     await wrapper.vm.$nextTick()
     await wrapper.get('[data-test="chat-send"]').trigger('click')
@@ -555,7 +632,7 @@ describe('document generation conversation directory', () => {
 
     expect(mocks.startGenerationPipeline).toHaveBeenCalledWith(expect.objectContaining({
       template_id: template.id,
-      document_version_ids: [194],
+      document_version_ids: [],
       conversation_context: {
         initial_message: '请重点核对人员分工后开始编制',
         selected_personnel_ids: [22],
@@ -743,6 +820,140 @@ describe('document generation conversation directory', () => {
       wrapper.findAll('textarea').some((input) => input.element.value === project.name),
     ).toBe(true)
 
+    wrapper.unmount()
+  })
+
+  it('confirms a key fact whose evidence comes from the user prompt', async () => {
+    const promptFactTask: GenerationTask = {
+      ...task,
+      status: 'needs_confirmation',
+      progress: 20,
+      facts_snapshot: [
+        {
+          field: 'project_name',
+          value: project.name,
+          value_type: 'string',
+          evidence: [
+            {
+              source_document_version_id: 0,
+              locator: {
+                paragraph_index: 0,
+                text_quote: `项目名称：${project.name}`,
+              },
+              confidence: 1,
+            },
+          ],
+          confidence: 1,
+        },
+      ],
+    }
+    mocks.fetchGenerationTemplates.mockResolvedValue([
+      {
+        id: promptFactTask.template_id,
+        code: 'T001',
+        client_name: '示例客户',
+        display_name: promptFactTask.template_name,
+        business_type: 'wind_turbine_inspection_four_measures_two_plans',
+        version: 'v1',
+        document_version_id: 10,
+        filename: 'template.docx',
+        field_mapping: {},
+        section_order: ['overview'],
+        required_fact_fields: ['project_name'],
+      },
+    ])
+    mocks.fetchDocuments.mockResolvedValue({
+      count: 0,
+      next: null,
+      previous: null,
+      results: [],
+    })
+    mocks.fetchGenerationTasks.mockResolvedValue({
+      count: 1,
+      next: null,
+      previous: null,
+      results: [promptFactTask],
+    })
+    mocks.fetchGenerationTask.mockResolvedValue(promptFactTask)
+    mocks.fetchGenerationEvents.mockResolvedValue([])
+    mocks.confirmAndGenerate.mockResolvedValue({
+      ...promptFactTask,
+      status: 'generating',
+    })
+
+    const wrapper = mount(DocumentGenerationPanel, {
+      props: { project },
+      global: {
+        plugins: [createPinia(), ElementPlus],
+      },
+    })
+    await flushPromises()
+    await wrapper.get('.doc-agent__conversation-item').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('优先从你本次输入的 Prompt 识别')
+    const confirmButton = wrapper.findAll('button').find(
+      (button) => button.text().includes('确认并开始编制'),
+    )
+    expect(confirmButton).toBeDefined()
+    await confirmButton!.trigger('click')
+    await flushPromises()
+
+    expect(mocks.confirmAndGenerate).toHaveBeenCalledWith(promptFactTask.id, [
+      expect.objectContaining({
+        field: 'project_name',
+        source_document_version_id: 0,
+      }),
+    ])
+
+    wrapper.unmount()
+  })
+
+  it('offers prompt re-extraction when the worker returned an empty fact snapshot', async () => {
+    const emptyFactTask: GenerationTask = {
+      ...task,
+      status: 'needs_confirmation',
+      progress: 20,
+      facts_snapshot: [],
+    }
+    mocks.fetchGenerationTemplates.mockResolvedValue([])
+    mocks.fetchDocuments.mockResolvedValue({
+      count: 0,
+      next: null,
+      previous: null,
+      results: [],
+    })
+    mocks.fetchGenerationTasks.mockResolvedValue({
+      count: 1,
+      next: null,
+      previous: null,
+      results: [emptyFactTask],
+    })
+    mocks.fetchGenerationTask.mockResolvedValue(emptyFactTask)
+    mocks.fetchGenerationEvents.mockResolvedValue([])
+    mocks.retryGenerationTask.mockResolvedValue({
+      ...emptyFactTask,
+      status: 'extracting',
+    })
+
+    const wrapper = mount(DocumentGenerationPanel, {
+      props: { project },
+      global: {
+        plugins: [createPinia(), ElementPlus],
+      },
+    })
+    await flushPromises()
+    await wrapper.get('.doc-agent__conversation-item').trigger('click')
+    await flushPromises()
+
+    const retryButton = wrapper.findAll('button').find(
+      (button) => button.text().includes('重新识别 Prompt'),
+    )
+    expect(retryButton).toBeDefined()
+    await retryButton!.trigger('click')
+    await flushPromises()
+
+    expect(mocks.retryGenerationTask).toHaveBeenCalledWith(emptyFactTask.id)
     wrapper.unmount()
   })
 

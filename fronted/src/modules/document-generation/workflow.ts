@@ -20,6 +20,7 @@ export interface FactFieldDefinition {
 }
 
 export const COMPONENT_OPTIONS: FactOption[] = [
+  { value: 'main_shaft', label: '风机主轴' },
   { value: 'tower_weld', label: '塔筒焊缝' },
   { value: 'tower_component', label: '塔筒部件（资料未细分）' },
   { value: 'high_strength_bolt', label: '高强度螺栓' },

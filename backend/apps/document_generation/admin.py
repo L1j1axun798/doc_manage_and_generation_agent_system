@@ -1,6 +1,7 @@
 from django.contrib import admin
 
 from .models import (
+    AgentSystemPrompt,
     ClauseBlock,
     DocumentTemplate,
     GeneratedSection,
@@ -9,6 +10,13 @@ from .models import (
     GenerationTask,
     KnowledgeSection,
 )
+
+
+@admin.register(AgentSystemPrompt)
+class AgentSystemPromptAdmin(admin.ModelAdmin):
+    list_display = ("version", "original_filename", "is_active", "created_by", "created_at")
+    list_filter = ("is_active",)
+    search_fields = ("version", "original_filename", "content_sha256")
 
 
 @admin.register(DocumentTemplate)

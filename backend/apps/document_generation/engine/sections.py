@@ -56,6 +56,12 @@ class SectionContextBuilder:
             )
         quality_parts.append("资料不足时必须登记缺项，不得编造")
         active_conversation_context = conversation_context or AgentConversationContext()
+        initial_message = active_conversation_context.initial_message.strip()
+        if initial_message:
+            quality_parts.insert(
+                1,
+                f"用户本次编制要求是关键任务依据，必须在本章适用范围内落实：{initial_message}",
+            )
         if (
             active_conversation_context.template is not None
             and active_conversation_context.template.format_locked

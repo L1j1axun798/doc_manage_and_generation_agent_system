@@ -50,10 +50,16 @@ describe('auth store login verification modes', () => {
     mocks.login.mockResolvedValue({ status: 'authenticated', user })
 
     const store = useAuthStore()
-    const result = await store.login({ username: user.username, password: 'Password123!' })
+    const payload = {
+      username: user.username,
+      password: 'Password123!',
+      remember_me: true,
+    }
+    const result = await store.login(payload)
 
     expect(result).toEqual(user)
     expect(store.isAuthenticated).toBe(true)
+    expect(mocks.login).toHaveBeenCalledWith(payload)
     expect(mocks.authenticateWithWebAuthn).not.toHaveBeenCalled()
     expect(mocks.verifyWebAuthnLogin).not.toHaveBeenCalled()
   })
@@ -70,7 +76,11 @@ describe('auth store login verification modes', () => {
     mocks.verifyWebAuthnLogin.mockResolvedValue(user)
 
     const store = useAuthStore()
-    await store.login({ username: user.username, password: 'Password123!' })
+    await store.login({
+      username: user.username,
+      password: 'Password123!',
+      remember_me: false,
+    })
 
     expect(mocks.authenticateWithWebAuthn).toHaveBeenCalledWith(options)
     expect(mocks.verifyWebAuthnLogin).toHaveBeenCalledWith({

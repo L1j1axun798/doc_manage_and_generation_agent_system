@@ -181,7 +181,7 @@ class SourceLocator(ContractModel):
 
 
 class SourceDocument(ContractModel):
-    document_version_id: int = Field(gt=0)
+    document_version_id: int = Field(ge=0)
     filename: NonBlankString
     mime_type: NonBlankString
     content: bytes = Field(repr=False, min_length=1)
@@ -206,7 +206,7 @@ class ParsedBlock(ContractModel):
 
 
 class ParsedDocument(ContractModel):
-    document_version_id: int = Field(gt=0)
+    document_version_id: int = Field(ge=0)
     filename: NonBlankString
     mime_type: NonBlankString
     content_sha256: Sha256String
@@ -226,7 +226,7 @@ class FactCandidate(ContractModel):
     field: NonBlankString
     value: JsonValue
     value_type: NonBlankString
-    source_document_version_id: int = Field(gt=0)
+    source_document_version_id: int = Field(ge=0)
     locator: SourceLocator
     confidence: float = Field(ge=0, le=1)
 
@@ -241,7 +241,7 @@ class ConfirmedFact(FactCandidate):
 
 
 class FactEvidence(ContractModel):
-    source_document_version_id: int = Field(gt=0)
+    source_document_version_id: int = Field(ge=0)
     locator: SourceLocator
     confidence: float = Field(ge=0, le=1)
 
@@ -267,7 +267,7 @@ class FactConflict(ContractModel):
 class RejectedFactCandidate(ContractModel):
     field: NonBlankString
     reason_code: NonBlankString
-    source_document_version_id: int = Field(gt=0)
+    source_document_version_id: int = Field(ge=0)
 
 
 class FactMergeResult(ContractModel):
@@ -283,7 +283,7 @@ class FactExtractionResponse(ContractModel):
 class RiskEvidence(ContractModel):
     risk_code: NonBlankString
     evidence: NonBlankString
-    source_document_version_id: int | None = Field(default=None, gt=0)
+    source_document_version_id: int | None = Field(default=None, ge=0)
     locator: SourceLocator | None = None
 
 
@@ -309,7 +309,7 @@ class ClauseSelection(ContractModel):
 
 
 class SourceCitation(ContractModel):
-    source_document_version_id: int = Field(gt=0)
+    source_document_version_id: int = Field(ge=0)
     locator: SourceLocator
     chunk_id: str | None = None
     fact_field: str | None = None

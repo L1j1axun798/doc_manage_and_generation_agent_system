@@ -166,7 +166,7 @@ def test_basic_validator_rejects_result_language_outside_paragraphs() -> None:
     assert [issue.code for issue in issues] == ["RESULT_CONTENT_FORBIDDEN"]
 
 
-def test_section_gets_one_controlled_revision_before_failure(
+def test_section_gets_multiple_controlled_revisions_until_validation_passes(
     orchestrator: GenerationOrchestrator,
     generation_request: GenerationRequest,
 ) -> None:
@@ -175,7 +175,7 @@ def test_section_gets_one_controlled_revision_before_failure(
 
         def validate(self, section, context):
             self.calls += 1
-            if self.calls == 1:
+            if self.calls <= 2:
                 return (
                     ValidationIssue(
                         code="UNSOURCED_NUMBER",
@@ -191,9 +191,10 @@ def test_section_gets_one_controlled_revision_before_failure(
 
     result = orchestrator.run(generation_request)
 
-    assert validator.calls == 2
-    assert "revise_document_section" in [event.tool for event in result.trace.events]
-    assert "revalidate_document_section" in [event.tool for event in result.trace.events]
+    assert validator.calls == 3
+    tools = [event.tool for event in result.trace.events]
+    assert tools.count("revise_document_section") == 2
+    assert tools.count("revalidate_document_section") == 2
 
 
 def test_locked_section_is_reused_without_calling_model_again(

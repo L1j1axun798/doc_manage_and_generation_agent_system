@@ -264,6 +264,32 @@ class KnowledgeCorpusUpload(models.Model):
         return f"{self.source_document_version_id}:{self.section_code}"
 
 
+class AgentSystemPrompt(models.Model):
+    original_filename = models.CharField("原始文件名", max_length=255)
+    version = models.CharField("版本", max_length=80)
+    content = models.TextField("System Prompt正文")
+    content_sha256 = models.CharField("正文SHA-256", max_length=64)
+    is_active = models.BooleanField("当前启用", default=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="uploaded_agent_system_prompts",
+        verbose_name="上传人",
+    )
+    created_at = models.DateTimeField("上传时间", auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+        indexes = [
+            models.Index(fields=["is_active", "-created_at"], name="docgen_sys_prompt_idx"),
+        ]
+        verbose_name = "Agent System Prompt"
+        verbose_name_plural = "Agent System Prompts"
+
+    def __str__(self) -> str:
+        return f"{self.version}:{self.original_filename}"
+
+
 class GenerationTask(models.Model):
     class Operation(models.TextChoices):
         EXTRACT = "extract", "提取事实"
@@ -319,6 +345,16 @@ class GenerationTask(models.Model):
     idempotency_key = models.CharField("创建幂等键", max_length=120)
     request_fingerprint = models.CharField("请求指纹", max_length=64)
     conversation_context = models.JSONField("会话上下文快照", default=dict)
+    system_prompt = models.ForeignKey(
+        AgentSystemPrompt,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="generation_tasks",
+        verbose_name="System Prompt版本",
+    )
+    system_prompt_snapshot = models.TextField("System Prompt快照", blank=True)
+    system_prompt_sha256 = models.CharField("System Prompt SHA-256", max_length=64, blank=True)
     facts_snapshot = models.JSONField("事实快照", default=list)
     fact_conflicts = models.JSONField("事实冲突", default=list)
     risk_profile = models.JSONField("风险画像", default=dict)

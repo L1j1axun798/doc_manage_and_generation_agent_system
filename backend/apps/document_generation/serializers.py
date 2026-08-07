@@ -2,9 +2,14 @@ from __future__ import annotations
 
 from rest_framework import serializers
 
-from common.validators import uploaded_file_extension, validate_uploaded_file
+from common.validators import (
+    normalize_upload_filename,
+    uploaded_file_extension,
+    validate_uploaded_file,
+)
 
 from .models import (
+    AgentSystemPrompt,
     BUSINESS_TYPE,
     DOCUMENT_PURPOSE,
     ApprovalStatus,
@@ -21,6 +26,38 @@ from .models import (
 
 KNOWLEDGE_CORPUS_MAX_BYTES = 20 * 1024 * 1024
 CLIENT_TEMPLATE_MAX_BYTES = 20 * 1024 * 1024
+SYSTEM_PROMPT_MAX_BYTES = 256 * 1024
+
+
+class AgentSystemPromptSerializer(serializers.ModelSerializer):
+    created_by_name = serializers.CharField(source="created_by.real_name", read_only=True)
+
+    class Meta:
+        model = AgentSystemPrompt
+        fields = [
+            "id",
+            "original_filename",
+            "version",
+            "content",
+            "content_sha256",
+            "is_active",
+            "created_by_name",
+            "created_at",
+        ]
+
+
+class AgentSystemPromptUploadSerializer(serializers.Serializer):
+    file = serializers.FileField()
+
+    def validate_file(self, uploaded_file):
+        normalize_upload_filename(uploaded_file.name)
+        if uploaded_file_extension(uploaded_file) not in {".txt", ".md"}:
+            raise serializers.ValidationError("System Prompt 仅支持 TXT 或 Markdown 文件")
+        if uploaded_file.size <= 0:
+            raise serializers.ValidationError("System Prompt 不能为空")
+        if uploaded_file.size > SYSTEM_PROMPT_MAX_BYTES:
+            raise serializers.ValidationError("System Prompt 不能超过 256 KB")
+        return uploaded_file
 
 
 def document_template_display_name(template: DocumentTemplate) -> str:
@@ -288,6 +325,8 @@ class GenerationTaskSerializer(serializers.ModelSerializer):
             "operation",
             "progress",
             "conversation_context",
+            "system_prompt_id",
+            "system_prompt_sha256",
             "facts_snapshot",
             "fact_conflicts",
             "risk_profile",
@@ -391,7 +430,9 @@ class GenerationTaskCreateSerializer(serializers.Serializer):
 class GenerationPipelineCreateSerializer(GenerationTaskCreateSerializer):
     document_version_ids = serializers.ListField(
         child=serializers.IntegerField(min_value=1),
-        min_length=1,
+        required=False,
+        default=list,
+        allow_empty=True,
         max_length=50,
     )
 

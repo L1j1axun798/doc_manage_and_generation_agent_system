@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import codecs
 import hashlib
 import json
 import uuid
@@ -45,9 +46,11 @@ from .engine.contracts import (
 from .engine.errors import AgentError
 from .engine.facts import FactEvidenceGate
 from .engine.parsing import EntrySourceParser
-from .engine.rendering import DocxTemplateRenderer
+from .engine.rendering import DocxTemplateRenderer, infer_template_section_order
+from .conversation_sources import USER_PROMPT_SOURCE_VERSION_ID, prompt_source_document
 from .exceptions import DocumentGenerationError
 from .models import (
+    AgentSystemPrompt,
     BUSINESS_TYPE,
     DOCUMENT_PURPOSE,
     ApprovalStatus,
@@ -86,6 +89,75 @@ ACTIVE_TASK_STATUSES = frozenset(
         GenerationTask.Status.GENERATING,
     }
 )
+
+
+def _decode_system_prompt(raw_content: bytes) -> tuple[str, str]:
+    if raw_content.startswith(codecs.BOM_UTF8):
+        candidates = (("utf-8-sig", "UTF-8 BOM"),)
+    elif raw_content.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)):
+        candidates = (("utf-16", "UTF-16"),)
+    else:
+        candidates = (
+            ("utf-8", "UTF-8"),
+            ("gb18030", "GB18030/GBK"),
+        )
+
+    for encoding, display_name in candidates:
+        try:
+            content = raw_content.decode(encoding).strip()
+        except UnicodeDecodeError:
+            continue
+        if "\x00" in content or any(
+            ord(character) < 32 and character not in "\t\n\r"
+            for character in content
+        ):
+            continue
+        return content, display_name
+
+    raise DocumentGenerationError(
+        "SYSTEM_PROMPT_INVALID",
+        "无法识别 System Prompt 文本编码，请保存为 UTF-8、UTF-16 或 GB18030/GBK 后重试",
+    )
+
+
+@transaction.atomic
+def activate_agent_system_prompt(
+    *,
+    actor: Any,
+    uploaded_file: Any,
+    request: Any = None,
+) -> AgentSystemPrompt:
+    original_filename = str(getattr(uploaded_file, "name", "")).strip()
+    raw_content = uploaded_file.read()
+    if hasattr(uploaded_file, "seek"):
+        uploaded_file.seek(0)
+    content, source_encoding = _decode_system_prompt(raw_content)
+    if not content:
+        raise DocumentGenerationError("SYSTEM_PROMPT_INVALID", "System Prompt 不能为空")
+    content_sha256 = hashlib.sha256(content.encode("utf-8")).hexdigest()
+    AgentSystemPrompt.objects.select_for_update().filter(is_active=True).update(is_active=False)
+    prompt = AgentSystemPrompt.objects.create(
+        original_filename=original_filename,
+        version=f"system-prompt/{content_sha256[:12]}",
+        content=content,
+        content_sha256=content_sha256,
+        is_active=True,
+        created_by=actor,
+    )
+    audit_log(
+        user=actor,
+        action="document_generation.system_prompt.activate",
+        resource=prompt,
+        result="success",
+        request=request,
+        after_data={
+            "version": prompt.version,
+            "filename": prompt.original_filename,
+            "content_sha256": prompt.content_sha256,
+            "source_encoding": source_encoding,
+        },
+    )
+    return prompt
 
 
 def _fingerprint(payload: Any) -> str:
@@ -152,6 +224,8 @@ def create_self_service_template(
         raise DocumentGenerationError("TEMPLATE_INVALID", exc.message) from exc
     if not validation.valid:
         raise DocumentGenerationError("TEMPLATE_INVALID", "模板不是可用的 DOCX 文件")
+    inferred_section_order = infer_template_section_order(content)
+    section_order = inferred_section_order or ENTRY_PLAN_SECTION_CODES
 
     folder, synced_to_entry = _self_service_template_storage_folder(project)
     document = create_document(
@@ -186,8 +260,9 @@ def create_self_service_template(
             "project_id": project.pk,
             "required_placeholders": [],
             "privacy_mode": "styles_and_page_setup_only",
+            "template_outline_detected": bool(inferred_section_order),
         },
-        section_order=list(ENTRY_PLAN_SECTION_CODES),
+        section_order=list(section_order),
         required_fact_fields=list(REQUIRED_FACT_LABELS),
         is_active=True,
         approval_status=ApprovalStatus.DRAFT,
@@ -321,6 +396,9 @@ def _canonicalize_confirmed_fact_evidence(
                 content=content,
             )
         )
+    prompt_source = prompt_source_document(task)
+    if prompt_source is not None:
+        source_documents.append(prompt_source)
 
     parser = EntrySourceParser()
     documents = tuple(parser.parse(source) for source in source_documents)
@@ -587,6 +665,9 @@ def create_generation_task(
         template=template,
         context=conversation_context,
     )
+    system_prompt = AgentSystemPrompt.objects.filter(is_active=True).order_by("-created_at", "-id").first()
+    system_prompt_snapshot = system_prompt.content if system_prompt is not None else ""
+    system_prompt_sha256 = system_prompt.content_sha256 if system_prompt is not None else ""
     clean_key = idempotency_key.strip()
     if not clean_key:
         raise DocumentGenerationError("IDEMPOTENCY_KEY_REQUIRED", "缺少创建幂等键")
@@ -598,6 +679,7 @@ def create_generation_task(
             "business_type": business_type,
             "facts": normalized_facts,
             "conversation_context": normalized_context,
+            "system_prompt_sha256": system_prompt_sha256,
         }
     )
     existing = GenerationTask.objects.filter(
@@ -621,6 +703,9 @@ def create_generation_task(
             idempotency_key=clean_key,
             request_fingerprint=request_fingerprint,
             conversation_context=normalized_context,
+            system_prompt=system_prompt,
+            system_prompt_snapshot=system_prompt_snapshot,
+            system_prompt_sha256=system_prompt_sha256,
             facts_snapshot=normalized_facts,
             pending_section_codes=list(template.section_order),
             created_by=actor,
@@ -665,8 +750,6 @@ def add_generation_sources(
     _ensure_active_project(locked.project)
     _ensure_status(locked, {GenerationTask.Status.DRAFT})
     unique_ids = list(dict.fromkeys(document_version_ids))
-    if not unique_ids:
-        raise DocumentGenerationError("SOURCE_REQUIRED", "至少选择一份已有项目资料")
     for version_id in unique_ids:
         version = visible_source_version_for_user(
             actor,
@@ -747,8 +830,8 @@ def prepare_fact_confirmation(
         _ensure_task_user(actor, locked)
         _ensure_active_project(locked.project)
         _ensure_status(locked, {GenerationTask.Status.DRAFT})
-        if not locked.sources.exists():
-            raise DocumentGenerationError("SOURCE_REQUIRED", "请先选择已有项目资料")
+        if not locked.sources.exists() and prompt_source_document(locked) is None:
+            raise DocumentGenerationError("PROMPT_REQUIRED", "请先输入本次编制要求")
         before = _task_snapshot(locked)
         locked.status = GenerationTask.Status.EXTRACTING
         locked.operation = GenerationTask.Operation.EXTRACT
@@ -834,6 +917,8 @@ def confirm_generation_facts(
     _ensure_active_project(locked.project)
     _ensure_status(locked, {GenerationTask.Status.NEEDS_CONFIRMATION})
     source_ids = set(locked.sources.values_list("document_version_id", flat=True))
+    if prompt_source_document(locked) is not None:
+        source_ids.add(USER_PROMPT_SOURCE_VERSION_ID)
     confirmed: list[ConfirmedFact] = []
     try:
         for item in facts:
@@ -1026,9 +1111,16 @@ def retry_generation_task(
         )
         _ensure_task_user(actor, locked)
         _ensure_active_project(locked.project)
-        _ensure_status(locked, {GenerationTask.Status.FAILED})
+        retryable_statuses = {GenerationTask.Status.FAILED}
+        if locked.operation == GenerationTask.Operation.EXTRACT:
+            retryable_statuses.add(GenerationTask.Status.NEEDS_CONFIRMATION)
+        _ensure_status(locked, retryable_statuses)
         if locked.operation == GenerationTask.Operation.GENERATE and (
-            not locked.facts_snapshot or not locked.sources.exists()
+            not locked.facts_snapshot
+            or (
+                not locked.sources.exists()
+                and prompt_source_document(locked) is None
+            )
         ):
             raise DocumentGenerationError(
                 "FACTS_INCOMPLETE",
@@ -1594,7 +1686,7 @@ def export_generation_task(
         )
         .get(pk=task.pk)
     )
-    _ensure_review_user(actor, locked)
+    _ensure_task_user(actor, locked)
     _ensure_active_project(locked.project)
     clean_key = idempotency_key.strip()
     if not clean_key:
@@ -1607,7 +1699,50 @@ def export_generation_task(
                 status_code=409,
             )
         return locked
-    _ensure_status(locked, {GenerationTask.Status.APPROVED})
+    _ensure_status(
+        locked,
+        {
+            GenerationTask.Status.REVIEW_REQUIRED,
+            GenerationTask.Status.PENDING_APPROVAL,
+            GenerationTask.Status.APPROVED,
+        },
+    )
+    template_version = locked.template.document_version
+    backend = storage or LocalDocumentStorage()
+    template_path = backend.resolve(template_version.storage_path)
+    if not template_path.is_file():
+        raise DocumentGenerationError("TEMPLATE_INVALID", "模板物理文件不存在")
+    template_content = template_path.read_bytes()
+    effective_section_order = (
+        infer_template_section_order(template_content)
+        or tuple(locked.template.section_order)
+    )
+    sections = list(locked.sections.all())
+    expected = set(effective_section_order)
+    actual = {section.section_code for section in sections}
+    if expected != actual:
+        raise DocumentGenerationError(
+            "SECTIONS_INCOMPLETE",
+            "请先完成全部章节，再生成并下载文档",
+            status_code=409,
+        )
+    if any(not section.is_locked for section in sections):
+        raise DocumentGenerationError(
+            "SECTIONS_NOT_LOCKED",
+            "请先确认并锁定全部章节，再生成并下载文档",
+            status_code=409,
+        )
+    if any(
+        issue.get("severity") == "error"
+        for section in sections
+        for issue in section.validation_issues
+        if isinstance(issue, dict)
+    ):
+        raise DocumentGenerationError(
+            "VALIDATION_FAILED",
+            "仍有错误级校验问题，不能生成并下载文档",
+            status_code=409,
+        )
     folder = _generation_export_folder(locked)
     export_filename = _normalize_export_filename(locked, filename)
     export_title = export_filename[: -len(EXPORT_FILE_EXTENSION)]
@@ -1625,11 +1760,6 @@ def export_generation_task(
             ),
             status_code=409,
         )
-    template_version = locked.template.document_version
-    backend = storage or LocalDocumentStorage()
-    template_path = backend.resolve(template_version.storage_path)
-    if not template_path.is_file():
-        raise DocumentGenerationError("TEMPLATE_INVALID", "模板物理文件不存在")
     try:
         confirmed_facts = tuple(
             ConfirmedFact.model_validate(value) for value in locked.facts_snapshot
@@ -1640,7 +1770,7 @@ def export_generation_task(
                 template=TemplateDocument(
                     template_id=str(locked.template_id),
                     filename=template_version.original_filename,
-                    content=template_path.read_bytes(),
+                    content=template_content,
                     required_placeholders=tuple(
                         locked.template.field_mapping.get("required_placeholders", [])
                     ),
@@ -1663,7 +1793,7 @@ def export_generation_task(
         folder=folder,
         uploaded_file=upload,
         title=export_title,
-        description="由入场资料编制Agent生成并经人工审核批准；不是检测报告或完工报告。",
+        description="由入场资料编制Agent生成并经人工确认锁定；不是检测报告或完工报告。",
         access_level=Document.AccessLevel.INTERNAL,
         request=request,
         storage=backend,

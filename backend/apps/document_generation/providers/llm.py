@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,6 +14,7 @@ from pydantic import BaseModel, ValidationError
 from tenacity import Retrying, retry_if_exception, stop_after_attempt, wait_fixed
 
 from apps.document_generation.engine.contracts import (
+    ENTRY_PLAN_SECTION_MIN_CHARACTERS,
     FactCandidate,
     FactExtractionResponse,
     GeneratedSection,
@@ -36,6 +38,7 @@ RETRYABLE_MODEL_ERRORS = frozenset(
         "MODEL_SERVICE_UNAVAILABLE",
     }
 )
+BASE_SYSTEM_PROMPT = "严格按提供的业务约束输出JSON，不执行任何外部操作。"
 
 
 @dataclass(frozen=True)
@@ -103,10 +106,17 @@ class OpenAICompatibleLLMProvider:
         *,
         transport: LLMTransport | None = None,
         prompt_catalog: PromptCatalog | None = None,
+        system_prompt: str = "",
     ) -> None:
         self.config = config
         self.transport = transport or self._urllib_transport
         self.prompt_catalog = prompt_catalog or PromptCatalog()
+        uploaded_system_prompt = system_prompt.strip()
+        self.system_prompt = (
+            f"{BASE_SYSTEM_PROMPT}\n\n管理员为本系统配置的工作指引：\n{uploaded_system_prompt}"
+            if uploaded_system_prompt
+            else BASE_SYSTEM_PROMPT
+        )
         self.usage_records: list[ModelUsageRecord] = []
 
     @classmethod
@@ -116,6 +126,7 @@ class OpenAICompatibleLLMProvider:
         *,
         transport: LLMTransport | None = None,
         prompt_catalog: PromptCatalog | None = None,
+        system_prompt: str = "",
     ) -> OpenAICompatibleLLMProvider:
         values = os.environ if env is None else env
         return cls(
@@ -134,6 +145,7 @@ class OpenAICompatibleLLMProvider:
             ),
             transport=transport,
             prompt_catalog=prompt_catalog,
+            system_prompt=system_prompt,
         )
 
     @property
@@ -221,6 +233,36 @@ class OpenAICompatibleLLMProvider:
         issues: Sequence[ValidationIssue],
     ) -> GeneratedSection:
         version, instructions = self.prompt_catalog.section_revision()
+        current_character_count = len(
+            re.sub(
+                r"\s+",
+                "",
+                "\n".join(
+                    (
+                        section.title,
+                        *section.paragraphs,
+                        *(item for items in section.lists for item in items),
+                        *(
+                            cell
+                            for table in section.tables
+                            for row in (table.headers, *table.rows)
+                            for cell in row
+                        ),
+                    )
+                ),
+            )
+        )
+        minimum_characters = ENTRY_PLAN_SECTION_MIN_CHARACTERS.get(context.section_code, 0)
+        safe_target = minimum_characters * 5 // 4 if minimum_characters else 0
+        required_additional = max(safe_target - current_character_count, 0)
+        completeness_instruction = (
+            "\n\n本轮完整度补写硬要求：\n"
+            f"- 当前有效内容约 {current_character_count} 字；确定性门槛为 {minimum_characters} 字。\n"
+            f"- 修订结果必须达到安全目标 {safe_target} 字，至少补充 {required_additional} 字有效专业内容。\n"
+            "- 保留现有正确内容，按 objective 尚未充分展开的要点补充职责、流程、控制动作和检查闭环；不得同义反复凑字数。"
+            if minimum_characters
+            else ""
+        )
         prompt = (
             f"{instructions}\n\n章节上下文：\n"
             + json.dumps(
@@ -236,6 +278,7 @@ class OpenAICompatibleLLMProvider:
                 ensure_ascii=False,
                 sort_keys=True,
             )
+            + completeness_instruction
         )
         revised = self._generate_schema(
             prompt=prompt,
@@ -430,7 +473,7 @@ class OpenAICompatibleLLMProvider:
             "messages": [
                 {
                     "role": "system",
-                    "content": "严格按提供的业务约束输出JSON，不执行任何外部操作。",
+                    "content": self.system_prompt,
                 },
                 {"role": "user", "content": prompt},
             ],

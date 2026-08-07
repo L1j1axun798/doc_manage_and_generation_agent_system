@@ -105,3 +105,117 @@ def test_paut_wording_does_not_implicitly_add_plain_ut() -> None:
     by_field = {candidate.field: candidate for candidate in candidates}
 
     assert by_field["inspection_method_codes"].value == ["PAUT"]
+
+
+def test_user_prompt_is_deterministically_mapped_to_key_project_facts() -> None:
+    prompt = ParsedDocument(
+        document_version_id=0,
+        filename="用户本次编制要求.prompt",
+        mime_type="application/x-wind-doc-agent-prompt",
+        content_sha256="2" * 64,
+        title="用户本次编制要求",
+        blocks=(
+            ParsedBlock(
+                block_id="prompt:p:0",
+                block_type=ParsedBlockType.PARAGRAPH,
+                text="项目名称：苍南风场年度检修",
+                locator=SourceLocator(paragraph_index=0),
+            ),
+            ParsedBlock(
+                block_id="prompt:p:2",
+                block_type=ParsedBlockType.PARAGRAPH,
+                text="用户本次编制要求：仅开展塔筒焊缝超声探伤，涉及人员登塔作业。",
+                locator=SourceLocator(paragraph_index=2),
+            ),
+        ),
+    )
+
+    candidates = enrich_required_fact_candidates(
+        (),
+        (_document(), prompt),
+        preferred_source_document_version_id=0,
+    )
+    prompt_facts = {
+        candidate.field: candidate
+        for candidate in candidates
+        if candidate.source_document_version_id == 0
+    }
+
+    assert prompt_facts["project_name"].value == "苍南风场年度检修"
+    assert prompt_facts["work_scope"].value == "仅开展塔筒焊缝超声探伤，涉及人员登塔作业。"
+    assert prompt_facts["inspection_component_codes"].value == ["tower_weld"]
+    assert prompt_facts["inspection_method_codes"].value == ["UT"]
+    assert prompt_facts["risk_evidence_items"].value == [
+        {
+            "risk_code": "climbing_tower",
+            "evidence": "用户本次编制要求：仅开展塔筒焊缝超声探伤，涉及人员登塔作业。",
+        }
+    ]
+
+
+def test_long_multiline_prompt_uses_details_after_the_opening_instruction() -> None:
+    prompt = ParsedDocument(
+        document_version_id=0,
+        filename="用户本次编制要求.prompt",
+        mime_type="application/x-wind-doc-agent-prompt",
+        content_sha256="3" * 64,
+        title="用户本次编制要求",
+        blocks=(
+            ParsedBlock(
+                block_id="prompt:p:0",
+                block_type=ParsedBlockType.PARAGRAPH,
+                text="项目名称：系统项目名称",
+                locator=SourceLocator(paragraph_index=0),
+            ),
+            ParsedBlock(
+                block_id="prompt:p:2",
+                block_type=ParsedBlockType.PARAGRAPH,
+                text="用户本次编制要求：请严格沿用甲方模板，不改变整体结构。",
+                locator=SourceLocator(paragraph_index=2),
+            ),
+            ParsedBlock(
+                block_id="prompt:p:3",
+                block_type=ParsedBlockType.PARAGRAPH,
+                text=(
+                    "本次项目为“新疆哈密御风风机主轴超声探伤项目”，"
+                    "主要工作内容为对风电机组主轴检测区域进行超声探伤检测，工期按现场确定。"
+                ),
+                locator=SourceLocator(paragraph_index=3),
+            ),
+            ParsedBlock(
+                block_id="prompt:p:4",
+                block_type=ParsedBlockType.PARAGRAPH,
+                text="重点考虑车辆伤害、触电、火灾、大风天气和机械伤害。",
+                locator=SourceLocator(paragraph_index=4),
+            ),
+        ),
+    )
+
+    wrong_model_candidate = FactCandidate(
+        field="inspection_component_codes",
+        value=["pitch_bearing"],
+        value_type="array",
+        source_document_version_id=0,
+        locator=SourceLocator(paragraph_index=3),
+        confidence=0.9,
+    )
+    candidates = enrich_required_fact_candidates(
+        (wrong_model_candidate,),
+        (prompt,),
+        preferred_source_document_version_id=0,
+    )
+    by_field = {candidate.field: candidate for candidate in candidates}
+
+    assert by_field["project_name"].value == "新疆哈密御风风机主轴超声探伤项目"
+    assert by_field["work_scope"].value == "对风电机组主轴检测区域进行超声探伤检测"
+    assert by_field["inspection_component_codes"].value == ["main_shaft"]
+    assert by_field["inspection_method_codes"].value == ["UT"]
+    assert {
+        item["risk_code"] for item in by_field["risk_evidence_items"].value
+    } >= {
+        "vehicle_traffic",
+        "electrical_work",
+        "fire_hot_work",
+        "extreme_weather",
+        "mechanical_injury",
+    }

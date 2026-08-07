@@ -1,4 +1,5 @@
 import pytest
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.test import override_settings
 from django.urls import reverse
@@ -195,7 +196,8 @@ def test_inactive_user_cannot_login(client):
 
 @pytest.mark.django_db
 @override_settings(LOGIN_REQUIRE_WEBAUTHN=True)
-def test_login_requires_webauthn_before_session(client, monkeypatch):
+@pytest.mark.parametrize("remember_me", [False, True])
+def test_login_requires_webauthn_before_session(client, monkeypatch, remember_me):
     user = User.objects.create_user(
         username="operator",
         password="OperatorPass123!",
@@ -206,7 +208,11 @@ def test_login_requires_webauthn_before_session(client, monkeypatch):
 
     login_response = client.post(
         reverse("auth-login"),
-        {"username": "operator", "password": "OperatorPass123!"},
+        {
+            "username": "operator",
+            "password": "OperatorPass123!",
+            "remember_me": remember_me,
+        },
         content_type="application/json",
     )
 
@@ -224,10 +230,18 @@ def test_login_requires_webauthn_before_session(client, monkeypatch):
         },
         content_type="application/json",
     )
+
+    assert verify_response.status_code == 200
+    assert client.session.get_expire_at_browser_close() is (not remember_me)
+    session_cookie_max_age = verify_response.cookies[settings.SESSION_COOKIE_NAME]["max-age"]
+    if remember_me:
+        assert int(session_cookie_max_age) == settings.SESSION_COOKIE_AGE
+    else:
+        assert session_cookie_max_age == ""
+
     me_response = client.get(reverse("auth-me"))
     logout_response = client.post(reverse("auth-logout"))
 
-    assert verify_response.status_code == 200
     assert me_response.status_code == 200
     assert me_response.json()["id"] == user.id
     assert logout_response.status_code == 204
@@ -285,7 +299,11 @@ def test_password_login_creates_usable_session_when_webauthn_is_disabled(client)
 
     response = client.post(
         reverse("auth-login"),
-        {"username": user.username, "password": "PasswordOnly123!"},
+        {
+            "username": user.username,
+            "password": "PasswordOnly123!",
+            "remember_me": False,
+        },
         content_type="application/json",
     )
     me_response = client.get(reverse("auth-me"))
@@ -293,9 +311,39 @@ def test_password_login_creates_usable_session_when_webauthn_is_disabled(client)
     assert response.status_code == 200
     assert response.json()["status"] == "authenticated"
     assert response.json()["user"]["id"] == user.id
+    assert client.session.get_expire_at_browser_close() is True
+    assert response.cookies[settings.SESSION_COOKIE_NAME]["max-age"] == ""
     assert me_response.status_code == 200
     login_audit = AuditLog.objects.get(action="auth.login", result="success")
     assert login_audit.after_data == {"verification_method": "password"}
+
+
+@pytest.mark.django_db
+@override_settings(LOGIN_REQUIRE_WEBAUTHN=False)
+def test_password_login_remember_me_uses_configured_session_lifetime(client):
+    user = User.objects.create_user(
+        username="remembered-login",
+        password="RememberedLogin123!",
+        real_name="Remembered user",
+        role=User.Role.DATA_OPERATOR,
+    )
+
+    response = client.post(
+        reverse("auth-login"),
+        {
+            "username": user.username,
+            "password": "RememberedLogin123!",
+            "remember_me": True,
+        },
+        content_type="application/json",
+    )
+
+    assert response.status_code == 200
+    assert client.session.get_expire_at_browser_close() is False
+    assert (
+        int(response.cookies[settings.SESSION_COOKIE_NAME]["max-age"])
+        == settings.SESSION_COOKIE_AGE
+    )
 
 
 @pytest.mark.django_db

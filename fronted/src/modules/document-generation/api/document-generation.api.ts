@@ -1,6 +1,7 @@
 import { apiClient } from '@/core/http/client'
 import type { ApiPage } from '@/shared/types/api.types'
 import type {
+  AgentSystemPrompt,
   ConfirmedFactPayload,
   CreateGenerationPipelinePayload,
   CreateGenerationTaskPayload,
@@ -16,6 +17,19 @@ import type {
 
 const TASKS = '/document-generation/tasks'
 const KNOWLEDGE_UPLOADS = '/document-generation/knowledge-uploads'
+const SYSTEM_PROMPTS = '/document-generation/system-prompts'
+
+export async function fetchAgentSystemPrompts(): Promise<AgentSystemPrompt[]> {
+  const response = await apiClient.get<AgentSystemPrompt[]>(`${SYSTEM_PROMPTS}/`)
+  return response.data
+}
+
+export async function uploadAgentSystemPrompt(file: File): Promise<AgentSystemPrompt> {
+  const payload = new FormData()
+  payload.append('file', file)
+  const response = await apiClient.post<AgentSystemPrompt>(`${SYSTEM_PROMPTS}/`, payload)
+  return response.data
+}
 
 export async function fetchRagOverview(): Promise<RagOverview> {
   const response = await apiClient.get<RagOverview>('/document-generation/overview/')

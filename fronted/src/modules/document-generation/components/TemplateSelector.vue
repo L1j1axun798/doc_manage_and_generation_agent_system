@@ -119,9 +119,12 @@ function handleFile(event: Event): void {
 
 .template-selector__list {
   display: grid;
+  height: 330px;
   max-height: 330px;
   overflow-y: auto;
+  align-content: start;
   gap: 8px;
+  scrollbar-gutter: stable;
 }
 
 .template-selector__item {
@@ -156,6 +159,11 @@ function handleFile(event: Event): void {
 @media (max-width: 640px) {
   .template-selector__toolbar {
     grid-template-columns: 1fr;
+  }
+
+  .template-selector__list {
+    height: 280px;
+    max-height: 40vh;
   }
 }
 </style>
