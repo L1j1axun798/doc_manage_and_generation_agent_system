@@ -6,6 +6,7 @@ from collections.abc import Mapping
 import pytest
 
 from apps.document_generation.engine.contracts import (
+    GeneratedSection,
     ModelCallPurpose,
     ParsedBlock,
     ParsedBlockType,
@@ -13,6 +14,8 @@ from apps.document_generation.engine.contracts import (
     RiskProfile,
     SectionContext,
     SourceLocator,
+    ValidationIssue,
+    ValidationSeverity,
 )
 from apps.document_generation.engine.errors import AgentError
 from apps.document_generation.providers.llm import (
@@ -474,3 +477,43 @@ def test_section_revision_has_separate_usage_purpose() -> None:
     assert revised.section_code == "overview"
     assert provider.usage_records[-1].purpose == ModelCallPurpose.SECTION_REVISION
     assert "安全目标 1500 字" in calls[-1]["messages"][-1]["content"]
+
+
+def test_short_section_revision_requests_additions_only() -> None:
+    calls = []
+
+    def transport(endpoint, headers, payload, timeout):
+        calls.append(payload)
+        return (
+            _response(
+                {
+                    "section_code": "overview",
+                    "title": "工程概况",
+                    "paragraphs": ["新增施工接口与验收闭环。"],
+                }
+            ),
+            "targeted-supplement-request",
+        )
+
+    provider = OpenAICompatibleLLMProvider(_config(), transport=transport)
+    existing = GeneratedSection(
+        section_code="overview",
+        title="工程概况",
+        paragraphs=("原有正确内容。",),
+    )
+    issue = ValidationIssue(
+        code="SECTION_CONTENT_TOO_SHORT",
+        message="章节有效内容仅1079字，最低完整度要求为1200字",
+        severity=ValidationSeverity.ERROR,
+        section_code="overview",
+    )
+
+    supplement = provider.revise_section(_context(), existing, (issue,))
+
+    assert supplement.paragraphs == ("新增施工接口与验收闭环。",)
+    prompt = calls[-1]["messages"][-1]["content"]
+    assert "本轮是定向补写" in prompt
+    assert "不得改写、删减或复述" in prompt
+    assert "只包含需要新增的有效内容" in prompt
+    assert "确定性门槛为 1200 字" in prompt
+    assert "安全目标 1500 字" in prompt

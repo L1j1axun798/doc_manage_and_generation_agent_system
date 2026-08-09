@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-from collections import Counter
 from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
@@ -12,22 +11,33 @@ from zipfile import BadZipFile, ZipFile
 
 from docx import Document
 from docx.document import Document as DocumentObject
-from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
-from docx.oxml.text.font import CT_RPr
-from docx.shared import Pt
 from docx.table import Table
 from docx.text.paragraph import Paragraph
-from docx.text.run import Run
 from docxtpl import DocxTemplate
 from jinja2 import Environment, StrictUndefined
 
 from .contracts import (
+    GeneratedSection,
     RenderedArtifact,
     RenderRequest,
     TemplateDocument,
     TemplateValidationResult,
+)
+from .docx_formatting import (
+    ParagraphFormatSample,
+    TemplateFormatProfile,
+    apply_body_paragraph_layout,
+    apply_paragraph_format,
+    apply_table_format,
+    clean_generated_text,
+    ensure_page_number_fields,
+    format_list_item,
+    infer_template_format_profile,
+    is_subheading_text,
+    matching_template_table,
+    paragraph_sample,
+    without_outline_level,
 )
 from .errors import SourcePurposeMismatchError, TemplateInvalidError
 from .parsing import REPORT_FILENAME_MARKERS
@@ -35,7 +45,6 @@ from .parsing import REPORT_FILENAME_MARKERS
 PLACEHOLDER_RE = re.compile(r"{{\s*([A-Za-z_][A-Za-z0-9_.]*)\s*}}")
 STYLE_ONLY_TEMPLATE_WARNING = "模板不含占位符，将仅继承样式并清除历史正文和页眉页脚"
 SECTION_NUMBER_PREFIXES = ("一", "二", "三", "四", "五", "六", "七", "八")
-SUBHEADING_RE = re.compile(r"^(?:[（(][一二三四五六七八九十]+[）)]|[一二三四五六七八九十]+、)")
 CHAPTER_HEADING_RE = re.compile(
     r"^第\s*[一二三四五六七八九十百0-9]+\s*章\s*[、,.，．]?\s*(?P<title>.+?)\s*$"
 )
@@ -115,6 +124,7 @@ def _ensure_entry_template(template: TemplateDocument) -> None:
 def _prepare_style_only_baseline(
     source_document: DocumentObject,
     context: Mapping[str, object],
+    profile: TemplateFormatProfile,
 ) -> DocumentObject:
     document = Document()
     document.part._styles_part._element = deepcopy(source_document.part._styles_part._element)
@@ -142,113 +152,38 @@ def _prepare_style_only_baseline(
     project_name = context.get("project_name")
     if not isinstance(project_name, str) or not project_name.strip():
         raise TemplateInvalidError("样式基线渲染必须提供项目名称")
-    cover_run_properties = _cover_run_properties(source_document)
-    _add_cover_line(document, project_name.strip(), cover_run_properties)
-    _add_cover_line(document, "入场四措两案", cover_run_properties)
+    _add_cover_line(document, project_name.strip(), profile.cover)
+    _add_cover_line(document, "入场四措两案", profile.cover)
     client_name = context.get("client_name")
     if isinstance(client_name, str) and client_name.strip():
         _add_cover_line(
             document,
             f"委托方：{client_name.strip()}",
-            _dominant_body_run_properties(source_document),
+            profile.body,
+            centered=True,
         )
     document.add_page_break()
     return document
 
 
-def _cover_run_properties(source_document: DocumentObject) -> CT_RPr | None:
-    for paragraph in source_document.paragraphs:
-        if paragraph.text.strip() and paragraph.alignment == WD_ALIGN_PARAGRAPH.CENTER:
-            for run in paragraph.runs:
-                if run.text.strip() and run._r.rPr is not None:
-                    return deepcopy(run._r.rPr)
-    return None
-
-
-def _dominant_body_run_properties(
-    source_document: DocumentObject,
-) -> CT_RPr | None:
-    weights: Counter[str] = Counter()
-    properties: dict[str, CT_RPr] = {}
-    for paragraph in source_document.paragraphs:
-        style_name = paragraph.style.name.lower() if paragraph.style is not None else ""
-        if (
-            not paragraph.text.strip()
-            or paragraph.alignment == WD_ALIGN_PARAGRAPH.CENTER
-            or style_name.startswith(("heading", "title", "toc"))
-        ):
-            continue
-        for run in paragraph.runs:
-            text = run.text.strip()
-            if not text or run._r.rPr is None:
-                continue
-            key = str(run._r.rPr.xml)
-            weights[key] += len(text)
-            properties.setdefault(key, deepcopy(run._r.rPr))
-    if not weights:
-        return None
-    return properties[weights.most_common(1)[0][0]]
-
-
-def _heading_run_properties(source_document: DocumentObject) -> CT_RPr | None:
-    for paragraph in source_document.paragraphs:
-        style_name = paragraph.style.name.lower() if paragraph.style is not None else ""
-        if not style_name.startswith("heading"):
-            continue
-        for run in paragraph.runs:
-            if run.text.strip() and run._r.rPr is not None:
-                return deepcopy(run._r.rPr)
-    return None
-
-
-def _apply_run_properties(run: Run, properties: CT_RPr | None) -> None:
-    if properties is None:
-        return
-    run_element = run._r
-    if run_element.rPr is not None:
-        run_element.remove(run_element.rPr)
-    run_element.insert(0, deepcopy(properties))
-
-
 def _add_cover_line(
     document: DocumentObject,
     text: str,
-    run_properties: CT_RPr | None,
+    sample: ParagraphFormatSample,
+    *,
+    centered: bool = False,
 ) -> None:
     paragraph = document.add_paragraph()
-    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = paragraph.add_run(text)
-    _apply_run_properties(run, run_properties)
+    paragraph.add_run(text)
+    apply_paragraph_format(paragraph, sample)
+    if centered:
+        from docx.enum.text import WD_ALIGN_PARAGRAPH
 
-
-def _apply_body_format(
-    paragraph: Paragraph,
-    run_properties: CT_RPr | None,
-    *,
-    first_line_indent: bool,
-) -> None:
-    for run in paragraph.runs:
-        _apply_run_properties(run, run_properties)
-    paragraph_format = paragraph.paragraph_format
-    paragraph_format.space_after = Pt(0)
-    paragraph_format.line_spacing = 1.5
-    if first_line_indent:
-        paragraph.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-        sizes = [run.font.size.pt for run in paragraph.runs if run.font.size is not None]
-        paragraph_format.first_line_indent = Pt(2 * (sizes[0] if sizes else 12))
+        paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
 
 def _has_style(document: DocumentObject, style_name: str) -> bool:
     return any(style.name == style_name for style in document.styles)
-
-
-def _add_list_item(document: DocumentObject, text: str) -> Paragraph:
-    # Some approved customer baselines intentionally contain only the styles used
-    # by their historical body.  Requiring Word's English built-in style name
-    # makes those otherwise valid templates fail late in the rendering stage.
-    if _has_style(document, "List Bullet"):
-        return document.add_paragraph(text, style="List Bullet")
-    return document.add_paragraph(f"• {text}")
 
 
 def _add_generated_table(
@@ -263,45 +198,16 @@ def _add_generated_table(
     return table
 
 
-def _safe_add_heading(
-    document: DocumentObject,
-    text: str,
-    *,
-    level: int,
-) -> Paragraph:
-    style_name = f"Heading {level}"
-    if _has_style(document, style_name):
-        return document.add_heading(text, level=level)
-    return document.add_paragraph(text)
-
-
-def _paragraph_run_properties(paragraph: Paragraph | None) -> CT_RPr | None:
-    if paragraph is None:
-        return None
-    for run in paragraph.runs:
-        if run._r.rPr is not None:
-            return deepcopy(run._r.rPr)
-    return None
-
-
-def _copy_paragraph_format(source: Paragraph | None, target: Paragraph) -> None:
-    if source is not None and source._p.pPr is not None:
-        if target._p.pPr is not None:
-            target._p.remove(target._p.pPr)
-        target._p.insert(0, deepcopy(source._p.pPr))
-    properties = _paragraph_run_properties(source)
-    for run in target.runs:
-        _apply_run_properties(run, properties)
-
-
 def _render_into_template_outline(
     document: DocumentObject,
-    sections: tuple[object, ...],
+    sections: tuple[GeneratedSection, ...],
     outline: tuple[TemplateOutlineItem, ...],
+    profile: TemplateFormatProfile,
 ) -> None:
-    section_by_code = {getattr(section, "section_code"): section for section in sections}
+    section_by_code = {section.section_code: section for section in sections}
     paragraphs = list(document.paragraphs)
     heading_paragraphs = [paragraphs[item.paragraph_index] for item in outline]
+    heading_paragraphs[0].paragraph_format.page_break_before = True
     body = document.element.body
 
     for outline_index in range(len(outline) - 1, -1, -1):
@@ -316,8 +222,9 @@ def _render_into_template_outline(
             else None
         )
         removable: list[object] = []
-        body_example: Paragraph | None = None
+        body_examples: list[Paragraph] = []
         subheading_example: Paragraph | None = None
+        source_tables: list[Table] = []
         sibling = heading._p.getnext()
         while sibling is not None and (next_heading is None or sibling is not next_heading._p):
             if sibling.tag == qn("w:sectPr"):
@@ -325,43 +232,69 @@ def _render_into_template_outline(
             if sibling.tag == qn("w:p"):
                 paragraph = Paragraph(sibling, document)
                 text = paragraph.text.strip()
-                if text and body_example is None:
-                    body_example = paragraph
-                if text and SUBHEADING_RE.match(text) and subheading_example is None:
-                    subheading_example = paragraph
+                if text and is_subheading_text(text):
+                    if subheading_example is None:
+                        subheading_example = paragraph
+                elif text:
+                    body_examples.append(paragraph)
+            elif sibling.tag == qn("w:tbl"):
+                source_tables.append(Table(sibling, document))
             removable.append(sibling)
             sibling = sibling.getnext()
         for element in removable:
             body.remove(element)
 
         anchor = heading._p
-        for text in getattr(section, "paragraphs"):
-            is_subheading = bool(SUBHEADING_RE.match(text.strip()))
-            paragraph = document.add_paragraph(text)
-            _copy_paragraph_format(
-                subheading_example if is_subheading else body_example,
-                paragraph,
+        body_sample = without_outline_level(
+            paragraph_sample(
+                next((value for value in body_examples if len(value.text.strip()) >= 20), None)
+                or (body_examples[0] if body_examples else None)
             )
+        )
+        if body_sample.paragraph_properties is None and body_sample.run_properties is None:
+            body_sample = profile.body
+        subheading_sample = (
+            paragraph_sample(subheading_example)
+            if subheading_example is not None
+            else profile.subheading
+        )
+        for raw_text in section.paragraphs:
+            text = clean_generated_text(raw_text)
+            is_subheading = is_subheading_text(text)
+            paragraph = document.add_paragraph(text)
+            apply_paragraph_format(
+                paragraph,
+                subheading_sample if is_subheading else body_sample,
+            )
+            if not is_subheading:
+                apply_body_paragraph_layout(paragraph)
             anchor.addnext(paragraph._p)
             anchor = paragraph._p
-        for items in getattr(section, "lists"):
-            for value in items:
-                paragraph = document.add_paragraph(f"• {value}")
-                _copy_paragraph_format(body_example, paragraph)
+        for items in section.lists:
+            for item_index, value in enumerate(items, start=1):
+                paragraph = document.add_paragraph(
+                    format_list_item(value, index=item_index, profile=profile)
+                )
+                apply_paragraph_format(paragraph, profile.list_item)
                 anchor.addnext(paragraph._p)
                 anchor = paragraph._p
-        for generated_table in getattr(section, "tables"):
+        for generated_table in section.tables:
             table = _add_generated_table(
                 document,
                 rows=1,
                 cols=len(generated_table.headers),
             )
             for index, header in enumerate(generated_table.headers):
-                table.rows[0].cells[index].text = header
+                table.rows[0].cells[index].text = clean_generated_text(header)
             for row in generated_table.rows:
                 cells = table.add_row().cells
                 for index, value in enumerate(row):
-                    cells[index].text = value
+                    cells[index].text = clean_generated_text(value)
+            apply_table_format(
+                matching_template_table(source_tables, columns=len(generated_table.headers)),
+                table,
+                profile=profile,
+            )
             anchor.addnext(table._tbl)
             anchor = table._tbl
 
@@ -412,13 +345,17 @@ class DocxTemplateRenderer:
             raise TemplateInvalidError(f"模板预检失败，缺少字段或占位符：{missing}")
 
         try:
+            source_document = Document(BytesIO(request.template.content))
+            outline = template_outline(source_document)
+            profile = infer_template_format_profile(
+                source_document,
+                chapter_indexes={item.paragraph_index for item in outline},
+            )
             if not validation.declared_placeholders:
-                source_document = Document(BytesIO(request.template.content))
-                outline = template_outline(source_document)
                 if outline:
                     document = source_document
                 else:
-                    document = _prepare_style_only_baseline(source_document, context)
+                    document = _prepare_style_only_baseline(source_document, context, profile)
             else:
                 template = DocxTemplate(BytesIO(request.template.content))
                 environment = Environment(
@@ -436,54 +373,37 @@ class DocxTemplateRenderer:
             raise TemplateInvalidError("模板渲染失败") from exc
 
         if not validation.declared_placeholders and outline:
-            _render_into_template_outline(document, request.sections, outline)
-            sections_to_append: tuple[object, ...] = ()
+            _render_into_template_outline(document, request.sections, outline, profile)
+            sections_to_append: tuple[GeneratedSection, ...] = ()
         else:
             sections_to_append = tuple(request.sections)
 
-        body_run_properties = (
-            _dominant_body_run_properties(source_document)
-            if not validation.declared_placeholders
-            else None
-        )
-        heading_run_properties = (
-            _heading_run_properties(source_document)
-            if not validation.declared_placeholders
-            else None
-        )
         for section_index, section in enumerate(sections_to_append):
             prefix = (
                 SECTION_NUMBER_PREFIXES[section_index]
                 if section_index < len(SECTION_NUMBER_PREFIXES)
                 else str(section_index + 1)
             )
-            heading = _safe_add_heading(
-                document,
-                f"{prefix}、{section.title}",
-                level=2,
+            heading = document.add_paragraph(
+                f"{prefix}、{clean_generated_text(section.title)}"
             )
-            for run in heading.runs:
-                _apply_run_properties(run, heading_run_properties)
-            for paragraph in section.paragraphs:
-                is_subheading = bool(SUBHEADING_RE.match(paragraph.strip()))
-                rendered_paragraph = (
-                    _safe_add_heading(document, paragraph, level=3)
-                    if is_subheading
-                    else document.add_paragraph(paragraph)
-                )
-                _apply_body_format(
+            apply_paragraph_format(heading, profile.chapter_heading)
+            for raw_paragraph in section.paragraphs:
+                paragraph = clean_generated_text(raw_paragraph)
+                is_subheading = is_subheading_text(paragraph)
+                rendered_paragraph = document.add_paragraph(paragraph)
+                apply_paragraph_format(
                     rendered_paragraph,
-                    body_run_properties,
-                    first_line_indent=not is_subheading,
+                    profile.subheading if is_subheading else profile.body,
                 )
+                if not is_subheading:
+                    apply_body_paragraph_layout(rendered_paragraph)
             for items in section.lists:
-                for item in items:
-                    rendered_item = _add_list_item(document, item)
-                    _apply_body_format(
-                        rendered_item,
-                        body_run_properties,
-                        first_line_indent=False,
+                for item_index, item in enumerate(items, start=1):
+                    rendered_item = document.add_paragraph(
+                        format_list_item(item, index=item_index, profile=profile)
                     )
+                    apply_paragraph_format(rendered_item, profile.list_item)
             for generated_table in section.tables:
                 table = _add_generated_table(
                     document,
@@ -491,25 +411,23 @@ class DocxTemplateRenderer:
                     cols=len(generated_table.headers),
                 )
                 for index, header in enumerate(generated_table.headers):
-                    table.rows[0].cells[index].text = header
-                    _apply_body_format(
-                        table.rows[0].cells[index].paragraphs[0],
-                        body_run_properties,
-                        first_line_indent=False,
-                    )
+                    table.rows[0].cells[index].text = clean_generated_text(header)
                 for row in generated_table.rows:
                     cells = table.add_row().cells
                     for index, value in enumerate(row):
-                        cells[index].text = value
-                        _apply_body_format(
-                            cells[index].paragraphs[0],
-                            body_run_properties,
-                            first_line_indent=False,
-                        )
+                        cells[index].text = clean_generated_text(value)
+                apply_table_format(
+                    matching_template_table(
+                        list(source_document.tables),
+                        columns=len(generated_table.headers),
+                    ),
+                    table,
+                    profile=profile,
+                )
 
-        update_fields = OxmlElement("w:updateFields")
-        update_fields.set(qn("w:val"), "true")
-        document.settings.element.append(update_fields)
+        page_summary = ensure_page_number_fields(document, profile=profile)
+        if not page_summary.valid:
+            raise TemplateInvalidError("页码字段校验失败，当前页或总页数字段不正确")
         output = BytesIO()
         document.save(output)
         content = output.getvalue()

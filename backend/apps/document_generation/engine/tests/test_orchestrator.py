@@ -197,6 +197,62 @@ def test_section_gets_multiple_controlled_revisions_until_validation_passes(
     assert tools.count("revalidate_document_section") == 2
 
 
+def test_short_section_revision_appends_supplement_without_rewriting_original(
+    orchestrator: GenerationOrchestrator,
+    generation_request: GenerationRequest,
+) -> None:
+    original_paragraph = "原有且已经确认正确的工程概况。"
+    supplement_paragraph = "新增施工接口、责任分工与验收闭环。"
+
+    class SupplementingLLMProvider(FakeLLMProvider):
+        revise_call_count = 0
+
+        def draft_section(self, context):
+            self.draft_call_count += 1
+            return GeneratedSection(
+                section_code=context.section_code,
+                title="工程概况",
+                paragraphs=(original_paragraph,),
+            )
+
+        def revise_section(self, context, section, issues):
+            self.revise_call_count += 1
+            return GeneratedSection(
+                section_code=context.section_code,
+                title=section.title,
+                paragraphs=(supplement_paragraph,),
+            )
+
+    class RequiresSupplementValidator:
+        def validate(self, section, context):
+            if supplement_paragraph in section.paragraphs:
+                return ()
+            return (
+                ValidationIssue(
+                    code="SECTION_CONTENT_TOO_SHORT",
+                    message="fixture short section",
+                    severity=ValidationSeverity.ERROR,
+                    section_code=context.section_code,
+                ),
+            )
+
+    provider = SupplementingLLMProvider(section_titles={"overview": "工程概况"})
+    orchestrator.llm_provider = provider
+    orchestrator.section_validator = RequiresSupplementValidator()
+
+    result = orchestrator.run(generation_request)
+
+    assert result.sections[0].paragraphs == (
+        original_paragraph,
+        supplement_paragraph,
+    )
+    assert provider.revise_call_count == 1
+    tools = [event.tool for event in result.trace.events]
+    assert tools.count("supplement_short_section") == 1
+    assert "revise_document_section" not in tools
+    assert tools.count("revalidate_document_section") == 1
+
+
 def test_locked_section_is_reused_without_calling_model_again(
     orchestrator: GenerationOrchestrator,
     generation_request: GenerationRequest,

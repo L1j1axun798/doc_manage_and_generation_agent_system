@@ -255,14 +255,27 @@ class OpenAICompatibleLLMProvider:
         minimum_characters = ENTRY_PLAN_SECTION_MIN_CHARACTERS.get(context.section_code, 0)
         safe_target = minimum_characters * 5 // 4 if minimum_characters else 0
         required_additional = max(safe_target - current_character_count, 0)
+        targeted_supplement = bool(issues) and all(
+            issue.code == "SECTION_CONTENT_TOO_SHORT" for issue in issues
+        )
         completeness_instruction = (
             "\n\n本轮完整度补写硬要求：\n"
-            f"- 当前有效内容约 {current_character_count} 字；确定性门槛为 {minimum_characters} 字。\n"
-            f"- 修订结果必须达到安全目标 {safe_target} 字，至少补充 {required_additional} 字有效专业内容。\n"
-            "- 保留现有正确内容，按 objective 尚未充分展开的要点补充职责、流程、控制动作和检查闭环；不得同义反复凑字数。"
+            f"- 当前有效内容约 {current_character_count} 字；"
+            f"确定性门槛为 {minimum_characters} 字。\n"
+            f"- 修订结果必须达到安全目标 {safe_target} 字，"
+            f"至少补充 {required_additional} 字有效专业内容。\n"
+            "- 保留现有正确内容，按 objective 尚未充分展开的要点补充职责、"
+            "流程、控制动作和检查闭环；不得同义反复凑字数。"
             if minimum_characters
             else ""
         )
+        if targeted_supplement:
+            completeness_instruction += (
+                "\n- 本轮是定向补写：不得改写、删减或复述待修订章节已有内容。"
+                "返回 JSON 的 paragraphs、lists、tables 只包含需要新增的有效内容，"
+                "citations、used_fact_fields、used_clause_ids 只登记新增内容实际使用的来源；"
+                "系统会把新增内容与原正文无损合并后重新校验。"
+            )
         prompt = (
             f"{instructions}\n\n章节上下文：\n"
             + json.dumps(

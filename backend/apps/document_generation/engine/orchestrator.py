@@ -4,7 +4,6 @@ import json
 from collections.abc import Callable, Sequence
 from functools import partial
 from hashlib import sha256
-from typing import TypeVar
 
 from .contracts import (
     AgentConversationContext,
@@ -47,8 +46,49 @@ from .ports import (
 from .sections import SectionContextBuilder
 from .validation import normalize_section_provenance
 
-T = TypeVar("T")
 MAX_SECTION_VALIDATION_REVISIONS = 3
+SHORT_CONTENT_ISSUE_CODE = "SECTION_CONTENT_TOO_SHORT"
+
+
+def _ordered_union[T](
+    existing: Sequence[T],
+    additions: Sequence[T],
+) -> tuple[T, ...]:
+    merged = list(existing)
+    for item in additions:
+        if item not in merged:
+            merged.append(item)
+    return tuple(merged)
+
+
+def _only_short_content_issue(issues: Sequence[ValidationIssue]) -> bool:
+    return bool(issues) and all(issue.code == SHORT_CONTENT_ISSUE_CODE for issue in issues)
+
+
+def _merge_short_section_supplement(
+    existing: GeneratedSection,
+    supplement: GeneratedSection,
+) -> GeneratedSection:
+    """Append model additions without allowing a short repair to shrink the draft."""
+
+    return existing.model_copy(
+        update={
+            "paragraphs": _ordered_union(existing.paragraphs, supplement.paragraphs),
+            "lists": _ordered_union(existing.lists, supplement.lists),
+            "tables": _ordered_union(existing.tables, supplement.tables),
+            "citations": _ordered_union(existing.citations, supplement.citations),
+            "used_fact_fields": _ordered_union(
+                existing.used_fact_fields,
+                supplement.used_fact_fields,
+            ),
+            "used_clause_ids": _ordered_union(
+                existing.used_clause_ids,
+                supplement.used_clause_ids,
+            ),
+            "missing_items": _ordered_union(existing.missing_items, supplement.missing_items),
+            "warnings": _ordered_union(existing.warnings, supplement.warnings),
+        }
+    )
 
 
 class _TraceBuilder:
@@ -83,7 +123,7 @@ class _TraceBuilder:
         if self.event_sink is not None:
             self.event_sink(event)
 
-    def invoke(
+    def invoke[T](
         self,
         stage: WorkflowStage,
         tool: str,
@@ -354,9 +394,14 @@ class GenerationOrchestrator:
                 revision_attempt = 0
                 while blocking_issues and revision_attempt < MAX_SECTION_VALIDATION_REVISIONS:
                     revision_attempt += 1
-                    section = trace.invoke(
+                    targeted_supplement = _only_short_content_issue(blocking_issues)
+                    revised_section = trace.invoke(
                         WorkflowStage.GENERATING_SECTIONS,
-                        "revise_document_section",
+                        (
+                            "supplement_short_section"
+                            if targeted_supplement
+                            else "revise_document_section"
+                        ),
                         partial(
                             self.llm_provider.revise_section,
                             context,
@@ -364,6 +409,11 @@ class GenerationOrchestrator:
                             blocking_issues,
                         ),
                         detail=f"{section_code}:attempt={revision_attempt}",
+                    )
+                    section = (
+                        _merge_short_section_supplement(section, revised_section)
+                        if targeted_supplement
+                        else revised_section
                     )
                     section = trace.invoke(
                         WorkflowStage.VALIDATING_SECTIONS,
