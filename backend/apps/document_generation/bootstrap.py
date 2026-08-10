@@ -221,6 +221,10 @@ def bootstrap_document_agent(
                     "paragraph_end": chunk.paragraph_end,
                 },
                 "text": chunk.text,
+                "block_type": chunk.block_type,
+                "structured_content": {
+                    "rows": [list(row) for row in chunk.structured_rows]
+                },
                 "content_sha256": chunk.content_sha256,
                 "component_tags": list(chunk.component_tags),
                 "method_tags": list(chunk.method_tags),

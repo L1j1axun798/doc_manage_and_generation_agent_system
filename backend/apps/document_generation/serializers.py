@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from django.urls import reverse
 from rest_framework import serializers
 
 from common.validators import (
@@ -10,6 +11,7 @@ from common.validators import (
 
 from .models import (
     AgentSystemPrompt,
+    ApprovedDocumentIllustration,
     BUSINESS_TYPE,
     DOCUMENT_PURPOSE,
     ApprovalStatus,
@@ -19,6 +21,7 @@ from .models import (
     GenerationReview,
     GenerationSource,
     GenerationTask,
+    GenerationTaskAsset,
     GenerationTraceEvent,
     KnowledgeCorpusUpload,
     KnowledgeSection,
@@ -89,6 +92,7 @@ class DocumentTemplateSerializer(serializers.ModelSerializer):
             "document_version_id",
             "filename",
             "field_mapping",
+            "layout_schema",
             "section_order",
             "required_fact_fields",
         ]
@@ -297,6 +301,42 @@ class GenerationTraceEventSerializer(serializers.ModelSerializer):
         ]
 
 
+class GenerationTaskAssetSerializer(serializers.ModelSerializer):
+    preview_url = serializers.SerializerMethodField()
+
+    def get_preview_url(self, obj: GenerationTaskAsset) -> str:
+        url = reverse(
+            "docgen-task-asset-preview",
+            kwargs={"pk": obj.task_id, "asset_id": obj.pk},
+        )
+        request = self.context.get("request")
+        return request.build_absolute_uri(url) if request is not None else url
+
+    class Meta:
+        model = GenerationTaskAsset
+        fields = [
+            "id",
+            "kind",
+            "approved_illustration_id",
+            "filename",
+            "media_type",
+            "sha256",
+            "width_px",
+            "height_px",
+            "caption",
+            "alt_text",
+            "metadata",
+            "confirmed_at",
+            "preview_url",
+        ]
+
+
+class ApprovedDocumentIllustrationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ApprovedDocumentIllustration
+        fields = ["id", "title", "kind", "caption", "alt_text", "applicability"]
+
+
 class GenerationTaskSerializer(serializers.ModelSerializer):
     project_name = serializers.CharField(source="project.name", read_only=True)
     template_name = serializers.SerializerMethodField()
@@ -309,6 +349,7 @@ class GenerationTaskSerializer(serializers.ModelSerializer):
     sources = GenerationSourceSerializer(many=True, read_only=True)
     sections = GeneratedSectionSerializer(many=True, read_only=True)
     reviews = GenerationReviewSerializer(many=True, read_only=True)
+    assets = GenerationTaskAssetSerializer(many=True, read_only=True)
     reference_summary = serializers.SerializerMethodField()
 
     class Meta:
@@ -324,6 +365,7 @@ class GenerationTaskSerializer(serializers.ModelSerializer):
             "status",
             "operation",
             "progress",
+            "completion_state",
             "conversation_context",
             "system_prompt_id",
             "system_prompt_sha256",
@@ -350,6 +392,7 @@ class GenerationTaskSerializer(serializers.ModelSerializer):
             "sources",
             "sections",
             "reviews",
+            "assets",
             "reference_summary",
         ]
 
@@ -455,7 +498,23 @@ class GenerationFactConfirmSerializer(serializers.Serializer):
 
 class GeneratedSectionUpdateSerializer(serializers.Serializer):
     content = serializers.CharField(trim_whitespace=True, allow_blank=False)
+    structured_content = serializers.JSONField(required=False)
     expected_revision = serializers.IntegerField(min_value=1)
+
+
+class HospitalRouteSearchSerializer(serializers.Serializer):
+    origin = serializers.RegexField(r"^-?\d+(?:\.\d+)?,-?\d+(?:\.\d+)?$", max_length=80)
+
+
+class RescueRouteConfirmSerializer(HospitalRouteSearchSerializer):
+    hospital_name = serializers.CharField(max_length=160)
+    hospital_location = serializers.RegexField(
+        r"^-?\d+(?:\.\d+)?,-?\d+(?:\.\d+)?$", max_length=80
+    )
+
+
+class IllustrationSelectSerializer(serializers.Serializer):
+    illustration_id = serializers.IntegerField(min_value=1)
 
 
 class SectionLockSerializer(serializers.Serializer):

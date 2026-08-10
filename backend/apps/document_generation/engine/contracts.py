@@ -327,6 +327,16 @@ class RetrievedSection(ContractModel):
     component_tags: tuple[str, ...] = ()
     method_tags: tuple[str, ...] = ()
     risk_tags: tuple[str, ...] = ()
+    block_type: Literal["text", "table"] = "text"
+    structured_rows: tuple[tuple[str, ...], ...] = ()
+
+    @model_validator(mode="after")
+    def validate_structured_rows(self) -> RetrievedSection:
+        if self.block_type == "table" and not self.structured_rows:
+            raise ValueError("table retrieval sections require structured rows")
+        if self.block_type != "table" and self.structured_rows:
+            raise ValueError("only table retrieval sections may contain structured rows")
+        return self
 
 
 class RetrievalQuery(ContractModel):
@@ -399,6 +409,7 @@ class AgentTemplateContext(ContractModel):
     document_version_id: int = Field(gt=0)
     format_locked: bool = True
     constraints: TemplateFormatConstraints = Field(default_factory=TemplateFormatConstraints)
+    layout_schema: dict[str, JsonValue] = Field(default_factory=dict)
 
 
 class AgentConversationContext(ContractModel):
@@ -422,6 +433,14 @@ class SectionContext(ContractModel):
 
 
 class GeneratedTable(ContractModel):
+    block_key: str = ""
+    title: str = ""
+    required: bool = False
+    insertion_reason: str = ""
+    omission_reason: str = ""
+    source_chunk_ids: tuple[str, ...] = ()
+    missing_cells: tuple[str, ...] = ()
+    prototype_table_index: int | None = Field(default=None, ge=0)
     headers: tuple[str, ...] = Field(min_length=1)
     rows: tuple[tuple[str, ...], ...] = ()
 
@@ -433,12 +452,38 @@ class GeneratedTable(ContractModel):
         return self
 
 
+class GeneratedImage(ContractModel):
+    block_key: NonBlankString
+    asset_id: NonBlankString
+    title: NonBlankString
+    caption: NonBlankString
+    alt_text: NonBlankString
+    required: bool = False
+    insertion_reason: NonBlankString
+    source_kind: Literal[
+        "rescue_route",
+        "height_escape_plan",
+        "height_rescue_plan",
+    ]
+
+
+class CompositionDecision(ContractModel):
+    block_key: NonBlankString
+    block_type: Literal["table", "image"]
+    selected: bool
+    reason: NonBlankString
+    source_chunk_ids: tuple[str, ...] = ()
+    missing_items: tuple[str, ...] = ()
+
+
 class GeneratedSection(ContractModel):
     section_code: NonBlankString
     title: NonBlankString
     paragraphs: tuple[str, ...] = ()
     lists: tuple[tuple[str, ...], ...] = ()
     tables: tuple[GeneratedTable, ...] = ()
+    images: tuple[GeneratedImage, ...] = ()
+    composition_decisions: tuple[CompositionDecision, ...] = ()
     citations: tuple[SourceCitation, ...] = ()
     used_fact_fields: tuple[str, ...] = ()
     used_clause_ids: tuple[str, ...] = ()
@@ -509,10 +554,21 @@ class TemplateValidationResult(ContractModel):
     warnings: tuple[str, ...] = ()
 
 
+class RenderImageAsset(ContractModel):
+    asset_id: NonBlankString
+    filename: NonBlankString
+    media_type: Literal["image/png", "image/jpeg"]
+    content: bytes = Field(repr=False, min_length=1)
+    sha256: Sha256String
+    width_px: int = Field(gt=0)
+    height_px: int = Field(gt=0)
+
+
 class RenderRequest(ContractModel):
     template: TemplateDocument
     facts: tuple[ConfirmedFact, ...]
     sections: tuple[GeneratedSection, ...]
+    image_assets: tuple[RenderImageAsset, ...] = ()
 
 
 class RenderedArtifact(ContractModel):
@@ -616,6 +672,8 @@ class KnowledgeChunkDraft(ContractModel):
     paragraph_start: int = Field(ge=0)
     paragraph_end: int = Field(ge=0)
     text: NonBlankString
+    block_type: Literal["text", "table"] = "text"
+    structured_rows: tuple[tuple[str, ...], ...] = ()
     component_tags: tuple[str, ...] = ()
     method_tags: tuple[str, ...] = ()
     risk_tags: tuple[str, ...] = ()
@@ -626,6 +684,10 @@ class KnowledgeChunkDraft(ContractModel):
     def validate_range(self) -> KnowledgeChunkDraft:
         if self.paragraph_end < self.paragraph_start:
             raise ValueError("paragraph_end must be greater than or equal to paragraph_start")
+        if self.block_type == "table" and not self.structured_rows:
+            raise ValueError("table chunks require structured rows")
+        if self.block_type != "table" and self.structured_rows:
+            raise ValueError("only table chunks may contain structured rows")
         return self
 
 

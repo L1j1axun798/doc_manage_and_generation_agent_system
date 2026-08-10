@@ -26,6 +26,7 @@ from .contracts import (
     ValidationSeverity,
     WorkflowStage,
 )
+from .content_composition import compose_section
 from .errors import (
     AgentError,
     IdempotencyConflictError,
@@ -76,6 +77,11 @@ def _merge_short_section_supplement(
             "paragraphs": _ordered_union(existing.paragraphs, supplement.paragraphs),
             "lists": _ordered_union(existing.lists, supplement.lists),
             "tables": _ordered_union(existing.tables, supplement.tables),
+            "images": _ordered_union(existing.images, supplement.images),
+            "composition_decisions": _ordered_union(
+                existing.composition_decisions,
+                supplement.composition_decisions,
+            ),
             "citations": _ordered_union(existing.citations, supplement.citations),
             "used_fact_fields": _ordered_union(
                 existing.used_fact_fields,
@@ -311,6 +317,12 @@ class GenerationOrchestrator:
                                 context,
                             ),
                         )
+                        reusable_section = trace.invoke(
+                            WorkflowStage.GENERATING_SECTIONS,
+                            "compose_persisted_structured_blocks",
+                            partial(compose_section, reusable_section, context),
+                            detail=section_code,
+                        )
                     persisted_issues = trace.invoke(
                         WorkflowStage.VALIDATING_SECTIONS,
                         "revalidate_persisted_section",
@@ -377,6 +389,12 @@ class GenerationOrchestrator:
                     detail=section_code,
                 )
                 section = trace.invoke(
+                    WorkflowStage.GENERATING_SECTIONS,
+                    "compose_structured_blocks",
+                    partial(compose_section, section, context),
+                    detail=section_code,
+                )
+                section = trace.invoke(
                     WorkflowStage.VALIDATING_SECTIONS,
                     "normalize_section_provenance",
                     partial(normalize_section_provenance, section, context),
@@ -419,6 +437,12 @@ class GenerationOrchestrator:
                         WorkflowStage.VALIDATING_SECTIONS,
                         "normalize_revised_section_provenance",
                         partial(normalize_section_provenance, section, context),
+                        detail=f"{section_code}:attempt={revision_attempt}",
+                    )
+                    section = trace.invoke(
+                        WorkflowStage.GENERATING_SECTIONS,
+                        "compose_revised_structured_blocks",
+                        partial(compose_section, section, context),
                         detail=f"{section_code}:attempt={revision_attempt}",
                     )
                     issues = trace.invoke(

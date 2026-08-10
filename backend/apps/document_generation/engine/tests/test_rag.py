@@ -147,6 +147,8 @@ def test_chunker_splits_by_section_and_repeats_table_header() -> None:
     assert all(len(chunk.text) <= 160 for chunk in chunks)
     assert all(chunk.section_code == "safety_measures" for chunk in chunks)
     assert all(chunk.heading_path == ("四、安全措施", "风险表") for chunk in chunks)
+    assert all(chunk.block_type == "table" for chunk in chunks)
+    assert all(chunk.structured_rows[0] == ("风险", "控制措施") for chunk in chunks)
 
 
 def test_chunker_uses_section_code_when_source_has_no_heading() -> None:

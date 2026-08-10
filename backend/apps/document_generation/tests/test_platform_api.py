@@ -15,7 +15,8 @@ from apps.folders.models import Folder, PersonnelProfile
 from apps.projects.models import Project, ProjectMember
 from common.storage import LocalDocumentStorage
 
-from ..engine.contracts import RenderedArtifact
+from ..engine.contracts import GeneratedSection as ContractGeneratedSection
+from ..engine.contracts import GeneratedTable, RenderedArtifact
 from ..jobs import run_generation_task
 from ..models import (
     AgentSystemPrompt,
@@ -24,6 +25,7 @@ from ..models import (
     GeneratedSection,
     GenerationReview,
     GenerationTask,
+    GenerationTaskAsset,
     GenerationTraceEvent,
 )
 
@@ -233,6 +235,44 @@ def create_task_via_api(client, case):
     return GenerationTask.objects.get(pk=response.json()["id"])
 
 
+@pytest.mark.django_db
+def test_confirmed_task_asset_has_authorized_hash_checked_preview(client, tmp_path):
+    case = setup_generation_case(tmp_path)
+    client.force_login(case["manager"])
+    task = create_task_via_api(client, case)
+    content = b"normalized-private-image"
+    stored = LocalDocumentStorage(root=tmp_path).save_uploaded_file(
+        SimpleUploadedFile("route.png", content, content_type="image/png")
+    )
+    asset = GenerationTaskAsset.objects.create(
+        task=task,
+        kind=GenerationTaskAsset.Kind.RESCUE_ROUTE,
+        storage_path=stored.relative_path,
+        filename="route.png",
+        media_type="image/png",
+        sha256=hashlib.sha256(content).hexdigest(),
+        width_px=2048,
+        height_px=1536,
+        caption="救援路线图",
+        alt_text="风场至确认医院的救援路线",
+        confirmed_by=case["manager"],
+    )
+
+    detail = client.get(f"/api/v1/document-generation/tasks/{task.pk}/")
+    with override_settings(FILE_STORAGE_ROOT=tmp_path):
+        preview = client.get(
+            f"/api/v1/document-generation/tasks/{task.pk}/assets/{asset.pk}/preview/"
+        )
+
+    assert detail.status_code == 200
+    assert detail.json()["assets"][0]["preview_url"].endswith(
+        f"/api/v1/document-generation/tasks/{task.pk}/assets/{asset.pk}/preview/"
+    )
+    assert preview.status_code == 200
+    assert b"".join(preview.streaming_content) == content
+    assert preview["Cache-Control"] == "private, no-store"
+
+
 def prepare_confirmation_task(client, case):
     task = create_task_via_api(client, case)
     response = client.post(
@@ -245,6 +285,54 @@ def prepare_confirmation_task(client, case):
     task.progress = 20
     task.save(update_fields=["status", "progress", "updated_at"])
     return task
+
+
+@pytest.mark.django_db
+def test_plain_text_edit_preserves_structured_tables(client, tmp_path):
+    case = setup_generation_case(tmp_path)
+    client.force_login(case["manager"])
+    task = GenerationTask.objects.create(
+        project=case["project"],
+        template=case["template"],
+        status=GenerationTask.Status.REVIEW_REQUIRED,
+        idempotency_key="structured-edit",
+        request_fingerprint="a" * 64,
+        created_by=case["manager"],
+    )
+    structured = ContractGeneratedSection(
+        section_code="overview",
+        title="工程概况",
+        paragraphs=("原正文",),
+        tables=(
+            GeneratedTable(
+                block_key="inspection_tools",
+                title="检测工具清单",
+                headers=("名称", "数量"),
+                rows=(("超声波检测仪", ""), ("钢卷尺", "")),
+                missing_cells=("检测工具清单：第1行“数量”",),
+            ),
+        ),
+    )
+    section = GeneratedSection.objects.create(
+        task=task,
+        section_code="overview",
+        title="工程概况",
+        content="原正文",
+        structured_content=structured.model_dump(mode="json"),
+    )
+
+    response = client.patch(
+        f"/api/v1/document-generation/tasks/{task.pk}/sections/overview/",
+        {"content": "人工修改后的正文", "expected_revision": 1},
+        content_type="application/json",
+    )
+
+    assert response.status_code == 200
+    section.refresh_from_db()
+    saved = ContractGeneratedSection.model_validate(section.structured_content)
+    assert saved.paragraphs == ("人工修改后的正文",)
+    assert saved.tables == structured.tables
+    assert saved.missing_items == structured.missing_items
 
 
 @pytest.mark.django_db(transaction=True)

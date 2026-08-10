@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from hashlib import sha256
 from typing import Any
 
 from django.conf import settings
+from django.http import FileResponse
 from drf_spectacular.utils import extend_schema
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
@@ -14,13 +16,32 @@ from rest_framework.views import APIView
 from apps.accounts.permissions import IsSystemAdmin
 from apps.folders.personnel import personnel_folders
 from apps.folders.serializers import PersonnelRecordSerializer
+from common.storage import LocalDocumentStorage
 
-from .exceptions import DocumentAgentDisabled, DocumentAgentPhase5Blocked
+from .exceptions import (
+    DocumentAgentDisabled,
+    DocumentAgentPhase5Blocked,
+    DocumentGenerationError,
+)
 from .knowledge_corpus import (
     create_knowledge_corpus_upload,
     retry_knowledge_corpus_upload,
 )
-from .models import AgentSystemPrompt, DocumentTemplate, GenerationTask, KnowledgeCorpusUpload
+from .models import (
+    AgentSystemPrompt,
+    ApprovalStatus,
+    ApprovedDocumentIllustration,
+    DocumentTemplate,
+    GenerationTask,
+    GenerationTaskAsset,
+    KnowledgeCorpusUpload,
+)
+from .image_assets import (
+    confirm_rescue_route,
+    illustration_is_applicable,
+    search_hospital_routes,
+    select_approved_illustration,
+)
 from .overview import get_rag_overview
 from .permissions import IsDocumentGenerationUser
 from .selectors import (
@@ -32,12 +53,15 @@ from .serializers import (
     AgentSystemPromptSerializer,
     AgentSystemPromptUploadSerializer,
     AvailablePersonnelQuerySerializer,
+    ApprovedDocumentIllustrationSerializer,
     ClientTemplateSelectSerializer,
     ClientTemplateUploadSerializer,
     DocumentTemplateSerializer,
     ExportSerializer,
     GeneratedSectionSerializer,
     GeneratedSectionUpdateSerializer,
+    HospitalRouteSearchSerializer,
+    IllustrationSelectSerializer,
     GenerationExportInfoSerializer,
     GenerationFactConfirmSerializer,
     GenerationPipelineCreateSerializer,
@@ -49,6 +73,7 @@ from .serializers import (
     KnowledgeCorpusUploadSerializer,
     RagOverviewSerializer,
     ReviewActionSerializer,
+    RescueRouteConfirmSerializer,
     SectionLockSerializer,
     SectionRegenerateSerializer,
     TraceEventQuerySerializer,
@@ -301,6 +326,9 @@ class GenerationTaskViewSet(
             "submit_review": ReviewActionSerializer,
             "approve": ReviewActionSerializer,
             "export": ExportSerializer,
+            "hospital_routes": HospitalRouteSearchSerializer,
+            "confirm_rescue_route": RescueRouteConfirmSerializer,
+            "select_illustration": IllustrationSelectSerializer,
         }.get(self.action, GenerationTaskSerializer)
 
     @extend_schema(
@@ -569,6 +597,81 @@ class GenerationTaskViewSet(
         info = generation_export_info(self.get_object())
         return Response(GenerationExportInfoSerializer(info).data)
 
+    @extend_schema(request=HospitalRouteSearchSerializer)
+    @action(detail=True, methods=["post"], url_path="assets/hospital-routes")
+    def hospital_routes(self, request, pk=None):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        return Response(
+            {"results": search_hospital_routes(origin=serializer.validated_data["origin"])}
+        )
+
+    @extend_schema(request=RescueRouteConfirmSerializer)
+    @action(detail=True, methods=["post"], url_path="assets/rescue-route")
+    def confirm_rescue_route(self, request, pk=None):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        confirm_rescue_route(
+            task=self.get_object(),
+            actor=request.user,
+            origin=data["origin"],
+            hospital_name=data["hospital_name"],
+            hospital_location=data["hospital_location"],
+        )
+        return Response(GenerationTaskSerializer(self.get_object()).data)
+
+    @extend_schema(responses=ApprovedDocumentIllustrationSerializer(many=True))
+    @action(detail=True, methods=["get"], url_path="assets/illustrations")
+    def illustrations(self, request, pk=None):
+        task = self.get_object()
+        risks = set((task.risk_profile or {}).get("risk_codes", []))
+        queryset = ApprovedDocumentIllustration.objects.none()
+        if risks.intersection({"high_altitude", "climbing_tower"}):
+            candidates = ApprovedDocumentIllustration.objects.filter(
+                is_active=True,
+                approval_status=ApprovalStatus.APPROVED,
+            )
+            queryset = [item for item in candidates if illustration_is_applicable(item, task)]
+        return Response(ApprovedDocumentIllustrationSerializer(queryset, many=True).data)
+
+    @extend_schema(request=IllustrationSelectSerializer)
+    @action(detail=True, methods=["post"], url_path="assets/illustrations/select")
+    def select_illustration(self, request, pk=None):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        select_approved_illustration(
+            task=self.get_object(),
+            actor=request.user,
+            illustration_id=serializer.validated_data["illustration_id"],
+        )
+        return Response(GenerationTaskSerializer(self.get_object()).data)
+
+    @extend_schema(responses={(200, "image/png"): bytes})
+    @action(
+        detail=True,
+        methods=["get"],
+        url_path=r"assets/(?P<asset_id>\d+)/preview",
+        url_name="asset-preview",
+    )
+    def asset_preview(self, request, pk=None, asset_id=None):
+        task = self.get_object()
+        asset = get_object_or_404(GenerationTaskAsset, pk=asset_id, task=task)
+        path = LocalDocumentStorage().resolve(asset.storage_path)
+        if not path.is_file():
+            raise DocumentGenerationError("IMAGE_MISSING", "已确认图片文件不存在")
+        if sha256(path.read_bytes()).hexdigest() != asset.sha256:
+            raise DocumentGenerationError("IMAGE_INTEGRITY_FAILED", "已确认图片哈希校验失败")
+        response = FileResponse(
+            path.open("rb"),
+            as_attachment=False,
+            filename=asset.filename,
+            content_type=asset.media_type,
+        )
+        response["Cache-Control"] = "private, no-store"
+        response["X-Content-Type-Options"] = "nosniff"
+        return response
+
     def update_section(self, request, pk=None, section_code=None):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -577,6 +680,7 @@ class GenerationTaskViewSet(
             task=self.get_object(),
             section_code=section_code,
             content=serializer.validated_data["content"],
+            structured_content=serializer.validated_data.get("structured_content"),
             expected_revision=serializer.validated_data["expected_revision"],
             request=request,
         )

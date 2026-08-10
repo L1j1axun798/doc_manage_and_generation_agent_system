@@ -228,6 +228,10 @@ def _complete_corpus_upload(
                         "paragraph_end": chunk.paragraph_end,
                     },
                     text=chunk.text,
+                    block_type=chunk.block_type,
+                    structured_content={
+                        "rows": [list(row) for row in chunk.structured_rows]
+                    },
                     content_sha256=chunk.content_sha256,
                     component_tags=list(chunk.component_tags),
                     method_tags=list(chunk.method_tags),
@@ -792,6 +796,11 @@ def _build_request(task_id: str) -> GenerationRequest:
                     section_code=row.section_code,
                     heading_path=tuple(row.heading_path),
                     text=row.text,
+                    block_type=row.block_type,
+                    structured_rows=tuple(
+                        tuple(str(cell) for cell in values)
+                        for values in row.structured_content.get("rows", [])
+                    ),
                     similarity=1,
                     final_score=1,
                     client_code=row.client_code or None,

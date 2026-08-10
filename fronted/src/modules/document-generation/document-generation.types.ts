@@ -124,6 +124,7 @@ export interface DocumentGenerationTemplate {
   document_version_id: number
   filename: string
   field_mapping: Record<string, unknown>
+  layout_schema: Record<string, unknown>
   section_order: string[]
   required_fact_fields: string[]
 }
@@ -218,11 +219,54 @@ export interface GenerationSource {
   created_at: string
 }
 
+export interface StructuredGeneratedTable {
+  block_key: string
+  title: string
+  required: boolean
+  insertion_reason: string
+  omission_reason: string
+  source_chunk_ids: string[]
+  missing_cells: string[]
+  headers: string[]
+  rows: string[][]
+}
+
+export interface StructuredGeneratedImage {
+  block_key: string
+  asset_id: string
+  title: string
+  caption: string
+  alt_text: string
+  required: boolean
+  insertion_reason: string
+  source_kind: 'rescue_route' | 'height_escape_plan' | 'height_rescue_plan'
+}
+
+export interface CompositionDecision {
+  block_key: string
+  block_type: 'table' | 'image'
+  selected: boolean
+  reason: string
+  source_chunk_ids: string[]
+  missing_items: string[]
+}
+
+export interface StructuredGeneratedSection extends Record<string, unknown> {
+  section_code?: string
+  title?: string
+  paragraphs?: string[]
+  lists?: string[][]
+  tables?: StructuredGeneratedTable[]
+  images?: StructuredGeneratedImage[]
+  composition_decisions?: CompositionDecision[]
+  missing_items?: string[]
+}
+
 export interface GeneratedSection {
   section_code: string
   title: string
   content: string
-  structured_content: Record<string, unknown>
+  structured_content: StructuredGeneratedSection
   citations: Array<Record<string, unknown>>
   validation_issues: Array<{
     code: string
@@ -233,6 +277,40 @@ export interface GeneratedSection {
   is_locked: boolean
   generated_at: string
   updated_at: string
+}
+
+export interface GenerationTaskAsset {
+  id: number
+  kind: 'rescue_route' | 'height_escape_plan' | 'height_rescue_plan'
+  approved_illustration_id: number | null
+  filename: string
+  media_type: string
+  sha256: string
+  width_px: number
+  height_px: number
+  caption: string
+  alt_text: string
+  metadata: Record<string, unknown>
+  confirmed_at: string
+  preview_url: string
+}
+
+export interface HospitalRouteCandidate {
+  hospital_id: string
+  hospital_name: string
+  address: string
+  location: string
+  distance_m: number
+  duration_s: number
+}
+
+export interface ApprovedDocumentIllustration {
+  id: number
+  title: string
+  kind: 'height_escape_plan' | 'height_rescue_plan'
+  caption: string
+  alt_text: string
+  applicability: Record<string, unknown>
 }
 
 export interface GenerationReview {
@@ -285,6 +363,7 @@ export interface GenerationTask {
   status: GenerationTaskStatus
   operation: GenerationOperation
   progress: number
+  completion_state: 'complete' | 'pending_manual_fill'
   conversation_context: AgentConversationContext
   system_prompt_id?: number | null
   system_prompt_sha256?: string
@@ -311,6 +390,7 @@ export interface GenerationTask {
   sources: GenerationSource[]
   sections: GeneratedSection[]
   reviews: GenerationReview[]
+  assets: GenerationTaskAsset[]
   reference_summary: GenerationReferenceSummary
 }
 

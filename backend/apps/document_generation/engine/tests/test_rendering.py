@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 from io import BytesIO
 from zipfile import ZipFile
 
@@ -11,12 +12,15 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Inches, Pt
+from PIL import Image
 
 from apps.document_generation.engine.contracts import (
     ConfirmedFact,
     GeneratedSection,
+    GeneratedImage,
     GeneratedTable,
     RenderRequest,
+    RenderImageAsset,
     SourceLocator,
     TemplateDocument,
 )
@@ -139,6 +143,58 @@ def test_template_preflight_and_render_produce_openable_docx() -> None:
         document_xml = archive.read("word/document.xml").decode()
     assert "w:updateFields" in settings_xml
     assert "{{" not in document_xml
+
+
+def test_confirmed_image_renders_with_caption_alt_text_and_adequate_dpi() -> None:
+    image = Image.new("RGB", (1600, 900), color=(235, 245, 255))
+    image_buffer = BytesIO()
+    image.save(image_buffer, format="PNG")
+    content = image_buffer.getvalue()
+    artifact = DocxTemplateRenderer().render(
+        RenderRequest(
+            template=TemplateDocument(
+                template_id="image-template",
+                filename="entry-plan.docx",
+                content=_template_bytes(),
+            ),
+            facts=_facts(),
+            sections=(
+                GeneratedSection(
+                    section_code="emergency_plan",
+                    title="应急预案",
+                    images=(
+                        GeneratedImage(
+                            block_key="rescue_route",
+                            asset_id="route-1",
+                            title="救援路线图",
+                            caption="风场至最近医院救援路线",
+                            alt_text="风场至最近医院的驾车救援路线图",
+                            insertion_reason="用户确认路线后冻结",
+                            source_kind="rescue_route",
+                        ),
+                    ),
+                ),
+            ),
+            image_assets=(
+                RenderImageAsset(
+                    asset_id="route-1",
+                    filename="route.png",
+                    media_type="image/png",
+                    content=content,
+                    sha256=hashlib.sha256(content).hexdigest(),
+                    width_px=1600,
+                    height_px=900,
+                ),
+            ),
+        )
+    )
+
+    rendered = Document(BytesIO(artifact.content))
+    assert "风场至最近医院救援路线" in [paragraph.text for paragraph in rendered.paragraphs]
+    with ZipFile(BytesIO(artifact.content)) as archive:
+        assert any(name.startswith("word/media/") for name in archive.namelist())
+        document_xml = archive.read("word/document.xml").decode("utf-8")
+    assert "风场至最近医院的驾车救援路线图" in document_xml
 
 
 def test_template_missing_required_placeholder_is_rejected() -> None:
@@ -478,7 +534,7 @@ def test_bad_total_page_field_and_stale_results_are_repaired() -> None:
     assert settings_xml.count("w:updateFields") == 1
 
 
-def test_customer_outline_controls_section_order_and_keeps_existing_heading_format() -> None:
+def test_customer_outline_controls_section_order_without_leaking_historical_cover() -> None:
     baseline = Document()
     baseline.add_paragraph("甲方封面标题")
     baseline.add_paragraph("第一章、项目简介")
@@ -530,18 +586,19 @@ def test_customer_outline_controls_section_order_and_keeps_existing_heading_form
     rendered = Document(BytesIO(artifact.content))
     texts = [paragraph.text for paragraph in rendered.paragraphs if paragraph.text.strip()]
     assert texts == [
-        "甲方封面标题",
-        "第一章、项目简介",
+        "示例风电场入场项目",
+        "入场四措两案",
+        "一、系统概况标题",
         "当前项目概况",
-        "第二章、安全措施",
+        "二、系统安全标题",
         "当前安全正文",
-        "第三章、施工方案",
+        "三、系统施工标题",
         "当前施工正文",
     ]
+    assert "甲方封面标题" not in texts
     assert "历史项目概况" not in texts
-    assert "系统概况标题" not in texts
-    first_chapter = next(p for p in rendered.paragraphs if p.text == "第一章、项目简介")
-    assert first_chapter.paragraph_format.page_break_before is True
+    first_chapter = next(p for p in rendered.paragraphs if p.text == "一、系统概况标题")
+    assert first_chapter.style.name == baseline.paragraphs[1].style.name
 
 
 def test_multiple_subheadings_do_not_become_the_body_format_sample() -> None:

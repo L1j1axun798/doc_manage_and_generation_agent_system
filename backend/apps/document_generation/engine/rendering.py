@@ -11,7 +11,9 @@ from zipfile import BadZipFile, ZipFile
 
 from docx import Document
 from docx.document import Document as DocumentObject
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
+from docx.shared import Inches
 from docx.table import Table
 from docx.text.paragraph import Paragraph
 from docxtpl import DocxTemplate
@@ -19,6 +21,7 @@ from jinja2 import Environment, StrictUndefined
 
 from .contracts import (
     GeneratedSection,
+    RenderImageAsset,
     RenderedArtifact,
     RenderRequest,
     TemplateDocument,
@@ -203,6 +206,8 @@ def _render_into_template_outline(
     sections: tuple[GeneratedSection, ...],
     outline: tuple[TemplateOutlineItem, ...],
     profile: TemplateFormatProfile,
+    image_assets: Mapping[str, RenderImageAsset],
+    prototype_tables: tuple[Table, ...],
 ) -> None:
     section_by_code = {section.section_code: section for section in sections}
     paragraphs = list(document.paragraphs)
@@ -291,12 +296,68 @@ def _render_into_template_outline(
                 for index, value in enumerate(row):
                     cells[index].text = clean_generated_text(value)
             apply_table_format(
-                matching_template_table(source_tables, columns=len(generated_table.headers)),
+                (
+                    prototype_tables[generated_table.prototype_table_index]
+                    if generated_table.prototype_table_index is not None
+                    and generated_table.prototype_table_index < len(prototype_tables)
+                    else matching_template_table(
+                        source_tables,
+                        columns=len(generated_table.headers),
+                    )
+                ),
                 table,
                 profile=profile,
             )
             anchor.addnext(table._tbl)
             anchor = table._tbl
+        for generated_image in section.images:
+            asset = image_assets.get(generated_image.asset_id)
+            if asset is None:
+                raise TemplateInvalidError(
+                    f"结构化图片缺少已确认文件：{generated_image.block_key}"
+                )
+            image_paragraph, caption_paragraph = _add_generated_image(
+                document,
+                asset=asset,
+                caption=generated_image.caption,
+                alt_text=generated_image.alt_text,
+                profile=profile,
+            )
+            anchor.addnext(image_paragraph._p)
+            image_paragraph._p.addnext(caption_paragraph._p)
+            anchor = caption_paragraph._p
+
+
+def _add_generated_image(
+    document: DocumentObject,
+    *,
+    asset: RenderImageAsset,
+    caption: str,
+    alt_text: str,
+    profile: TemplateFormatProfile,
+) -> tuple[Paragraph, Paragraph]:
+    if sha256(asset.content).hexdigest() != asset.sha256:
+        raise TemplateInvalidError("结构化图片哈希校验失败")
+    section = document.sections[-1]
+    available_inches = float(
+        (section.page_width - section.left_margin - section.right_margin) / 914400
+    )
+    target_inches = min(available_inches, asset.width_px / 200)
+    if target_inches < 2:
+        raise TemplateInvalidError("结构化图片在200 DPI下过小，无法保证A4阅读清晰度")
+    image_paragraph = document.add_paragraph()
+    image_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    image_paragraph.paragraph_format.keep_with_next = True
+    run = image_paragraph.add_run()
+    run.add_picture(BytesIO(asset.content), width=Inches(target_inches))
+    for drawing_property in image_paragraph._p.xpath(".//wp:docPr"):
+        drawing_property.set("descr", alt_text)
+        drawing_property.set("title", alt_text)
+    caption_paragraph = document.add_paragraph(clean_generated_text(caption))
+    apply_paragraph_format(caption_paragraph, profile.body)
+    caption_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    caption_paragraph.paragraph_format.keep_together = True
+    return image_paragraph, caption_paragraph
 
 
 class DocxTemplateRenderer:
@@ -352,10 +413,7 @@ class DocxTemplateRenderer:
                 chapter_indexes={item.paragraph_index for item in outline},
             )
             if not validation.declared_placeholders:
-                if outline:
-                    document = source_document
-                else:
-                    document = _prepare_style_only_baseline(source_document, context, profile)
+                document = _prepare_style_only_baseline(source_document, context, profile)
             else:
                 template = DocxTemplate(BytesIO(request.template.content))
                 environment = Environment(
@@ -372,11 +430,8 @@ class DocxTemplateRenderer:
                 raise
             raise TemplateInvalidError("模板渲染失败") from exc
 
-        if not validation.declared_placeholders and outline:
-            _render_into_template_outline(document, request.sections, outline, profile)
-            sections_to_append: tuple[GeneratedSection, ...] = ()
-        else:
-            sections_to_append = tuple(request.sections)
+        image_assets = {asset.asset_id: asset for asset in request.image_assets}
+        sections_to_append = tuple(request.sections)
 
         for section_index, section in enumerate(sections_to_append):
             prefix = (
@@ -417,11 +472,29 @@ class DocxTemplateRenderer:
                     for index, value in enumerate(row):
                         cells[index].text = clean_generated_text(value)
                 apply_table_format(
-                    matching_template_table(
-                        list(source_document.tables),
-                        columns=len(generated_table.headers),
+                    (
+                        source_document.tables[generated_table.prototype_table_index]
+                        if generated_table.prototype_table_index is not None
+                        and generated_table.prototype_table_index < len(source_document.tables)
+                        else matching_template_table(
+                            list(source_document.tables),
+                            columns=len(generated_table.headers),
+                        )
                     ),
                     table,
+                    profile=profile,
+                )
+            for generated_image in section.images:
+                asset = image_assets.get(generated_image.asset_id)
+                if asset is None:
+                    raise TemplateInvalidError(
+                        f"结构化图片缺少已确认文件：{generated_image.block_key}"
+                    )
+                _add_generated_image(
+                    document,
+                    asset=asset,
+                    caption=generated_image.caption,
+                    alt_text=generated_image.alt_text,
                     profile=profile,
                 )
 

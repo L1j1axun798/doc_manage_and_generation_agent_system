@@ -334,6 +334,7 @@ def apply_table_format(
     *,
     profile: TemplateFormatProfile,
 ) -> None:
+    target.autofit = False
     if source is not None:
         if source._tbl.tblPr is not None:
             if target._tbl.tblPr is not None:
@@ -346,6 +347,11 @@ def apply_table_format(
             target._tbl.insert(insert_at, deepcopy(source._tbl.tblGrid))
 
     for row_index, row in enumerate(target.rows):
+        row_properties = row._tr.get_or_add_trPr()
+        if row_index == 0 and row_properties.find(qn("w:tblHeader")) is None:
+            row_properties.append(OxmlElement("w:tblHeader"))
+        if row_properties.find(qn("w:cantSplit")) is None:
+            row_properties.append(OxmlElement("w:cantSplit"))
         source_row = None
         if source is not None and source.rows:
             source_row = source.rows[min(row_index, len(source.rows) - 1)]

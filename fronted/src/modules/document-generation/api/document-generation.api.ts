@@ -2,11 +2,14 @@ import { apiClient } from '@/core/http/client'
 import type { ApiPage } from '@/shared/types/api.types'
 import type {
   AgentSystemPrompt,
+  ApprovedDocumentIllustration,
   ConfirmedFactPayload,
   CreateGenerationPipelinePayload,
   CreateGenerationTaskPayload,
   DocumentGenerationTemplate,
   GeneratedSection,
+  HospitalRouteCandidate,
+  StructuredGeneratedSection,
   GenerationExportInfo,
   GenerationTask,
   GenerationTraceEvent,
@@ -199,10 +202,62 @@ export async function updateGeneratedSection(
   sectionCode: string,
   content: string,
   expectedRevision: number,
+  structuredContent?: StructuredGeneratedSection,
 ): Promise<GeneratedSection> {
   const response = await apiClient.patch<GeneratedSection>(
     `${TASKS}/${taskId}/sections/${sectionCode}/`,
-    { content, expected_revision: expectedRevision },
+    {
+      content,
+      expected_revision: expectedRevision,
+      ...(structuredContent ? { structured_content: structuredContent } : {}),
+    },
+  )
+  return response.data
+}
+
+export async function searchHospitalRoutes(
+  taskId: string,
+  origin: string,
+): Promise<HospitalRouteCandidate[]> {
+  const response = await apiClient.post<{ results: HospitalRouteCandidate[] }>(
+    `${TASKS}/${taskId}/assets/hospital-routes/`,
+    { origin },
+  )
+  return response.data.results
+}
+
+export async function confirmRescueRoute(
+  taskId: string,
+  origin: string,
+  candidate: HospitalRouteCandidate,
+): Promise<GenerationTask> {
+  const response = await apiClient.post<GenerationTask>(
+    `${TASKS}/${taskId}/assets/rescue-route/`,
+    {
+      origin,
+      hospital_name: candidate.hospital_name,
+      hospital_location: candidate.location,
+    },
+  )
+  return response.data
+}
+
+export async function fetchApprovedIllustrations(
+  taskId: string,
+): Promise<ApprovedDocumentIllustration[]> {
+  const response = await apiClient.get<ApprovedDocumentIllustration[]>(
+    `${TASKS}/${taskId}/assets/illustrations/`,
+  )
+  return response.data
+}
+
+export async function selectApprovedIllustration(
+  taskId: string,
+  illustrationId: number,
+): Promise<GenerationTask> {
+  const response = await apiClient.post<GenerationTask>(
+    `${TASKS}/${taskId}/assets/illustrations/select/`,
+    { illustration_id: illustrationId },
   )
   return response.data
 }

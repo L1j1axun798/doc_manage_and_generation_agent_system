@@ -26,6 +26,7 @@ class DocumentTemplate(models.Model):
         verbose_name="模板文件版本",
     )
     field_mapping = models.JSONField("字段映射", default=dict, blank=True)
+    layout_schema = models.JSONField("结构化版式定义", default=dict, blank=True)
     section_order = models.JSONField("章节顺序", default=list)
     required_fact_fields = models.JSONField("必填事实字段", default=list)
     is_active = models.BooleanField("启用", default=False)
@@ -143,6 +144,8 @@ class KnowledgeSection(models.Model):
     paragraph_end = models.PositiveIntegerField("结束段落", default=0)
     locator = models.JSONField("来源定位", default=dict)
     text = models.TextField("正文")
+    block_type = models.CharField("内容块类型", max_length=20, default="text")
+    structured_content = models.JSONField("结构化内容", default=dict, blank=True)
     content_sha256 = models.CharField("正文SHA-256", max_length=64)
     component_tags = models.JSONField("部件标签", default=list)
     method_tags = models.JSONField("方法标签", default=list)
@@ -309,6 +312,10 @@ class GenerationTask(models.Model):
         FAILED = "failed", "失败"
         CANCELLED = "cancelled", "已停止"
 
+    class CompletionState(models.TextChoices):
+        COMPLETE = "complete", "内容完整"
+        PENDING_MANUAL_FILL = "pending_manual_fill", "待人工补录"
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     project = models.ForeignKey(
         "projects.Project",
@@ -342,6 +349,12 @@ class GenerationTask(models.Model):
         default=Operation.EXTRACT,
     )
     progress = models.PositiveSmallIntegerField("进度", default=0)
+    completion_state = models.CharField(
+        "内容完整状态",
+        max_length=30,
+        choices=CompletionState.choices,
+        default=CompletionState.COMPLETE,
+    )
     idempotency_key = models.CharField("创建幂等键", max_length=120)
     request_fingerprint = models.CharField("请求指纹", max_length=64)
     conversation_context = models.JSONField("会话上下文快照", default=dict)
@@ -527,6 +540,109 @@ class GenerationSource(models.Model):
 
     def __str__(self) -> str:
         return f"{self.task_id}:{self.document_version_id}"
+
+
+class ApprovedDocumentIllustration(models.Model):
+    class Kind(models.TextChoices):
+        HEIGHT_ESCAPE_PLAN = "height_escape_plan", "高空应急逃生预案图"
+        HEIGHT_RESCUE_PLAN = "height_rescue_plan", "高空应急救援预案图"
+
+    title = models.CharField("名称", max_length=160)
+    kind = models.CharField("图片类型", max_length=40, choices=Kind.choices)
+    document_version = models.ForeignKey(
+        "documents.DocumentVersion",
+        on_delete=models.PROTECT,
+        related_name="approved_generation_illustrations",
+        verbose_name="图片文件版本",
+    )
+    caption = models.CharField("图注", max_length=300)
+    alt_text = models.CharField("替代文本", max_length=300)
+    applicability = models.JSONField("适用条件", default=dict, blank=True)
+    width_px = models.PositiveIntegerField("像素宽度", default=0, editable=False)
+    height_px = models.PositiveIntegerField("像素高度", default=0, editable=False)
+    sha256 = models.CharField("图片SHA-256", max_length=64, blank=True, editable=False)
+    is_active = models.BooleanField("启用", default=False)
+    approval_status = models.CharField(
+        "审核状态",
+        max_length=20,
+        choices=ApprovalStatus.choices,
+        default=ApprovalStatus.DRAFT,
+    )
+    approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="approved_generation_illustrations",
+    )
+    approved_at = models.DateTimeField(null=True, blank=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="created_generation_illustrations",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["kind", "title", "id"]
+        indexes = [
+            models.Index(
+                fields=["kind", "is_active", "approval_status"],
+                name="docgen_illus_active_idx",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.kind}:{self.title}"
+
+
+class GenerationTaskAsset(models.Model):
+    class Kind(models.TextChoices):
+        RESCUE_ROUTE = "rescue_route", "救援路线图"
+        HEIGHT_ESCAPE_PLAN = "height_escape_plan", "高空应急逃生预案图"
+        HEIGHT_RESCUE_PLAN = "height_rescue_plan", "高空应急救援预案图"
+
+    task = models.ForeignKey(
+        GenerationTask,
+        on_delete=models.CASCADE,
+        related_name="assets",
+    )
+    kind = models.CharField("图片类型", max_length=40, choices=Kind.choices)
+    approved_illustration = models.ForeignKey(
+        ApprovedDocumentIllustration,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="task_assets",
+    )
+    storage_path = models.CharField("存储路径", max_length=500)
+    filename = models.CharField("文件名", max_length=255)
+    media_type = models.CharField("媒体类型", max_length=80)
+    sha256 = models.CharField("图片SHA-256", max_length=64)
+    width_px = models.PositiveIntegerField("像素宽度")
+    height_px = models.PositiveIntegerField("像素高度")
+    caption = models.CharField("图注", max_length=300)
+    alt_text = models.CharField("替代文本", max_length=300)
+    metadata = models.JSONField("冻结信息", default=dict, blank=True)
+    confirmed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="confirmed_generation_assets",
+    )
+    confirmed_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["task_id", "kind"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["task", "kind"],
+                name="docgen_task_asset_kind_uq",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.task_id}:{self.kind}"
 
 
 class GeneratedSection(models.Model):

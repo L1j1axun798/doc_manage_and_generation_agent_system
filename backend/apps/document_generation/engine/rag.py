@@ -137,6 +137,8 @@ class _Piece:
     paragraph_end: int
     heading_path: tuple[str, ...]
     atomic: bool = False
+    block_type: str = "text"
+    structured_rows: tuple[tuple[str, ...], ...] = ()
 
 
 class SectionChunker:
@@ -178,7 +180,9 @@ class SectionChunker:
         drafts: list[KnowledgeChunkDraft] = []
         seen_hashes: set[str] = set()
         for group in grouped:
-            for text, start, end, heading_path in self._combine_group(group):
+            for text, start, end, heading_path, block_type, structured_rows in self._combine_group(
+                group
+            ):
                 content_hash = sha256(text.encode("utf-8")).hexdigest()
                 if content_hash in seen_hashes:
                     continue
@@ -197,6 +201,8 @@ class SectionChunker:
                         paragraph_start=start,
                         paragraph_end=end,
                         text=text,
+                        block_type=block_type,
+                        structured_rows=structured_rows,
                         component_tags=tuple(sorted(set(section.component_tags))),
                         method_tags=tuple(sorted(set(section.method_tags))),
                         risk_tags=tuple(sorted(set(section.risk_tags))),
@@ -231,6 +237,15 @@ class SectionChunker:
             for text in texts:
                 cleaned_text = _clean_text(text)
                 if cleaned_text:
+                    structured_rows = (
+                        tuple(
+                            tuple(cell.strip() for cell in line.split(" | "))
+                            for line in cleaned_text.splitlines()
+                            if line.strip()
+                        )
+                        if block.block_type == ParsedBlockType.TABLE
+                        else ()
+                    )
                     pieces.append(
                         _Piece(
                             text=cleaned_text,
@@ -238,6 +253,12 @@ class SectionChunker:
                             paragraph_end=paragraph_index,
                             heading_path=block.heading_path,
                             atomic=atomic,
+                            block_type=(
+                                "table"
+                                if block.block_type == ParsedBlockType.TABLE
+                                else "text"
+                            ),
+                            structured_rows=structured_rows,
                         )
                     )
         return pieces
@@ -245,7 +266,16 @@ class SectionChunker:
     def _combine_group(
         self,
         pieces: Sequence[_Piece],
-    ) -> Iterable[tuple[str, int, int, tuple[str, ...]]]:
+    ) -> Iterable[
+        tuple[
+            str,
+            int,
+            int,
+            tuple[str, ...],
+            str,
+            tuple[tuple[str, ...], ...],
+        ]
+    ]:
         text = "\n".join(piece.text for piece in pieces)
         spans: list[tuple[int, int, _Piece]] = []
         offset = 0
@@ -272,6 +302,8 @@ class SectionChunker:
                     min(piece.paragraph_start for piece in intersecting),
                     max(piece.paragraph_end for piece in intersecting),
                     pieces[0].heading_path,
+                    pieces[0].block_type,
+                    pieces[0].structured_rows if len(pieces) == 1 else (),
                 )
 
 
@@ -519,6 +551,8 @@ class RagRetriever:
             component_tags=chunk.component_tags,
             method_tags=chunk.method_tags,
             risk_tags=chunk.risk_tags,
+            block_type=chunk.block_type,
+            structured_rows=chunk.structured_rows,
         )
 
     def _empty_result(self, query: RetrievalQuery) -> RetrievalResult:

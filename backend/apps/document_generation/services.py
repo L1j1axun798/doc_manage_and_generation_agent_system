@@ -33,9 +33,12 @@ from .engine.contracts import (
     ENTRY_PLAN_SECTION_CODES,
     FORBIDDEN_FACT_FIELD_PARTS,
     ConfirmedFact,
+    CompositionDecision,
+    GeneratedImage,
     ParsedBlock,
     ParsedDocument,
     RenderRequest,
+    RenderImageAsset,
     SourceDocument,
     SourceLocator,
     TemplateDocument,
@@ -47,6 +50,7 @@ from .engine.errors import AgentError
 from .engine.facts import FactEvidenceGate
 from .engine.parsing import EntrySourceParser
 from .engine.rendering import DocxTemplateRenderer, infer_template_section_order
+from .engine.layout_schema import infer_template_layout_schema
 from .conversation_sources import USER_PROMPT_SOURCE_VERSION_ID, prompt_source_document
 from .exceptions import DocumentGenerationError
 from .models import (
@@ -59,6 +63,7 @@ from .models import (
     GenerationReview,
     GenerationSource,
     GenerationTask,
+    GenerationTaskAsset,
 )
 from .permissions import can_review_generation, can_use_generation
 from .queues import stop_generation_job
@@ -225,6 +230,7 @@ def create_self_service_template(
     if not validation.valid:
         raise DocumentGenerationError("TEMPLATE_INVALID", "模板不是可用的 DOCX 文件")
     inferred_section_order = infer_template_section_order(content)
+    layout_schema = infer_template_layout_schema(content)
     section_order = inferred_section_order or ENTRY_PLAN_SECTION_CODES
 
     folder, synced_to_entry = _self_service_template_storage_folder(project)
@@ -261,7 +267,9 @@ def create_self_service_template(
             "required_placeholders": [],
             "privacy_mode": "styles_and_page_setup_only",
             "template_outline_detected": bool(inferred_section_order),
+            "derived_rendering": "sanitized_semantic_blocks",
         },
+        layout_schema=layout_schema,
         section_order=list(section_order),
         required_fact_fields=list(REQUIRED_FACT_LABELS),
         is_active=True,
@@ -607,6 +615,13 @@ def _normalize_conversation_context(
                 },
             }
         )
+    layout_schema = template.layout_schema or {}
+    if not layout_schema:
+        template_path = LocalDocumentStorage().resolve(template.document_version.storage_path)
+        if template_path.is_file():
+            layout_schema = infer_template_layout_schema(template_path.read_bytes())
+            DocumentTemplate.objects.filter(pk=template.pk).update(layout_schema=layout_schema)
+            template.layout_schema = layout_schema
     return {
         "initial_message": initial_message,
         "personnel": personnel,
@@ -627,6 +642,7 @@ def _normalize_conversation_context(
                 "preserve_typography_and_numbering": True,
                 "fill_only_allowed_positions": True,
             },
+            "layout_schema": layout_schema,
         },
     }
 
@@ -1328,6 +1344,7 @@ def edit_generated_section(
     task: GenerationTask,
     section_code: str,
     content: str,
+    structured_content: dict[str, Any] | None = None,
     expected_revision: int,
     request: Any = None,
 ) -> GeneratedSection:
@@ -1351,9 +1368,63 @@ def edit_generated_section(
     clean_content = content.strip()
     if not clean_content:
         raise DocumentGenerationError("SECTION_EMPTY", "章节正文不能为空")
+    try:
+        original = ContractGeneratedSection.model_validate(section.structured_content)
+    except PydanticValidationError:
+        original = ContractGeneratedSection(
+            section_code=section.section_code,
+            title=section.title,
+        )
+    paragraphs = tuple(line.strip() for line in clean_content.splitlines() if line.strip())
+    if structured_content is None:
+        updated_structure = original.model_copy(update={"paragraphs": paragraphs})
+    else:
+        try:
+            requested = ContractGeneratedSection.model_validate(structured_content)
+        except PydanticValidationError as exc:
+            raise DocumentGenerationError(
+                "SECTION_STRUCTURE_INVALID",
+                "结构化章节内容不符合约束",
+            ) from exc
+        if requested.section_code != section.section_code:
+            raise DocumentGenerationError(
+                "SECTION_STRUCTURE_INVALID",
+                "结构化章节编码与当前章节不一致",
+            )
+        retained_table_keys = {table.block_key for table in requested.tables}
+        retained_image_keys = {image.block_key for image in requested.images}
+        removed_required = [
+            block.block_key
+            for block in (*original.tables, *original.images)
+            if block.required
+            and block.block_key
+            and block.block_key
+            not in (retained_table_keys | retained_image_keys)
+        ]
+        if removed_required:
+            raise DocumentGenerationError(
+                "REQUIRED_BLOCK_REMOVAL_FORBIDDEN",
+                "必需结构块只能在确认不适用或替换为正确内容后移除",
+                status_code=409,
+            )
+        updated_structure = requested.model_copy(
+            update={"title": section.title, "paragraphs": paragraphs}
+        )
     section.content = clean_content
+    section.structured_content = updated_structure.model_dump(mode="json")
+    section.citations = [
+        citation.model_dump(mode="json") for citation in updated_structure.citations
+    ]
     section.revision += 1
-    section.save(update_fields=["content", "revision", "updated_at"])
+    section.save(
+        update_fields=[
+            "content",
+            "structured_content",
+            "citations",
+            "revision",
+            "updated_at",
+        ]
+    )
     GenerationReview.objects.create(
         task=locked_task,
         section=section,
@@ -1765,6 +1836,17 @@ def export_generation_task(
             ConfirmedFact.model_validate(value) for value in locked.facts_snapshot
         )
         rendered_sections = tuple(_section_for_export(section) for section in locked.sections.all())
+        rendered_sections, image_assets = _sections_with_task_assets(
+            task=locked,
+            sections=rendered_sections,
+            template_content=template_content,
+            storage=backend,
+        )
+        pending_manual_fill = any(
+            table.missing_cells
+            for section in rendered_sections
+            for table in section.tables
+        )
         artifact = DocxTemplateRenderer().render(
             RenderRequest(
                 template=TemplateDocument(
@@ -1777,6 +1859,7 @@ def export_generation_task(
                 ),
                 facts=confirmed_facts,
                 sections=rendered_sections,
+                image_assets=image_assets,
             )
         )
     except DocumentGenerationError:
@@ -1793,7 +1876,10 @@ def export_generation_task(
         folder=folder,
         uploaded_file=upload,
         title=export_title,
-        description="由入场资料编制Agent生成并经人工确认锁定；不是检测报告或完工报告。",
+        description=(
+            "由入场资料编制Agent生成并经人工确认锁定；不是检测报告或完工报告。"
+            + (" 状态：pending_manual_fill，表格中的空白项目专属字段需人工补录。" if pending_manual_fill else "")
+        ),
         access_level=Document.AccessLevel.INTERNAL,
         request=request,
         storage=backend,
@@ -1801,12 +1887,18 @@ def export_generation_task(
     before = _task_snapshot(locked)
     locked.status = GenerationTask.Status.EXPORTED
     locked.progress = 100
+    locked.completion_state = (
+        GenerationTask.CompletionState.PENDING_MANUAL_FILL
+        if pending_manual_fill
+        else GenerationTask.CompletionState.COMPLETE
+    )
     locked.output_document_version = output_document.current_version
     locked.export_idempotency_key = clean_key
     locked.save(
         update_fields=[
             "status",
             "progress",
+            "completion_state",
             "output_document_version",
             "export_idempotency_key",
             "updated_at",
@@ -1908,7 +2000,120 @@ def _section_for_export(section: GeneratedSection) -> ContractGeneratedSection:
         update={
             "title": section.title,
             "paragraphs": paragraphs,
-            "lists": (),
-            "tables": (),
         }
     )
+
+
+def _sections_with_task_assets(
+    *,
+    task: GenerationTask,
+    sections: tuple[ContractGeneratedSection, ...],
+    template_content: bytes,
+    storage: LocalDocumentStorage,
+) -> tuple[tuple[ContractGeneratedSection, ...], tuple[RenderImageAsset, ...]]:
+    assets = list(task.assets.all())
+    schema = task.template.layout_schema or infer_template_layout_schema(template_content)
+    image_slots = schema.get("image_slots", []) if isinstance(schema, dict) else []
+    configured_kinds = {asset.kind for asset in assets}
+    required_missing = [
+        str(slot.get("block_key"))
+        for slot in image_slots
+        if isinstance(slot, dict)
+        and slot.get("required") is True
+        and slot.get("block_key") not in configured_kinds
+    ]
+    if required_missing:
+        raise DocumentGenerationError(
+            "REQUIRED_IMAGE_MISSING",
+            "模板要求的应急图片尚未确认，不能导出",
+            status_code=409,
+        )
+    if not assets:
+        return sections, ()
+    allowed = {
+        str(slot.get("block_key"))
+        for slot in image_slots
+        if isinstance(slot, dict) and slot.get("section_code") == "emergency_plan"
+    }
+    missing_slots = [asset.kind for asset in assets if asset.kind not in allowed]
+    if missing_slots:
+        raise DocumentGenerationError(
+            "TEMPLATE_IMAGE_SLOT_MISSING",
+            "当前模板没有经过验证的应急图片位置，不能插入已确认图片",
+            status_code=409,
+        )
+    emergency_index = next(
+        (index for index, section in enumerate(sections) if section.section_code == "emergency_plan"),
+        None,
+    )
+    if emergency_index is None:
+        raise DocumentGenerationError(
+            "TEMPLATE_IMAGE_SLOT_MISSING",
+            "当前文档缺少应急预案章节，不能插入已确认图片",
+            status_code=409,
+        )
+    titles = {
+        GenerationTaskAsset.Kind.RESCUE_ROUTE: "救援路线图",
+        GenerationTaskAsset.Kind.HEIGHT_ESCAPE_PLAN: "高空应急逃生预案图",
+        GenerationTaskAsset.Kind.HEIGHT_RESCUE_PLAN: "高空应急救援预案图",
+    }
+    generated_images: list[GeneratedImage] = []
+    render_assets: list[RenderImageAsset] = []
+    decisions: list[CompositionDecision] = []
+    for asset in sorted(assets, key=lambda value: value.kind):
+        path = storage.resolve(asset.storage_path)
+        if not path.is_file():
+            raise DocumentGenerationError("IMAGE_ASSET_MISSING", "已确认图片物理文件不存在")
+        content = path.read_bytes()
+        if hashlib.sha256(content).hexdigest() != asset.sha256:
+            raise DocumentGenerationError("IMAGE_ASSET_INTEGRITY_FAILED", "已确认图片哈希校验失败")
+        asset_id = str(asset.pk)
+        reason = (
+            "用户确认风场起点、医院和驾车路线后冻结生成"
+            if asset.kind == GenerationTaskAsset.Kind.RESCUE_ROUTE
+            else "管理员审核图库中已确认适用于当前高处作业任务"
+        )
+        generated_images.append(
+            GeneratedImage(
+                block_key=asset.kind,
+                asset_id=asset_id,
+                title=titles[asset.kind],
+                caption=asset.caption,
+                alt_text=asset.alt_text,
+                insertion_reason=reason,
+                source_kind=asset.kind,
+            )
+        )
+        decisions.append(
+            CompositionDecision(
+                block_key=asset.kind,
+                block_type="image",
+                selected=True,
+                reason=reason,
+            )
+        )
+        render_assets.append(
+            RenderImageAsset(
+                asset_id=asset_id,
+                filename=asset.filename,
+                media_type=asset.media_type,
+                content=content,
+                sha256=asset.sha256,
+                width_px=asset.width_px,
+                height_px=asset.height_px,
+            )
+        )
+    result = list(sections)
+    emergency = result[emergency_index]
+    result[emergency_index] = emergency.model_copy(
+        update={
+            "images": tuple(generated_images),
+            "composition_decisions": tuple(
+                decision
+                for decision in emergency.composition_decisions
+                if decision.block_type != "image"
+            )
+            + tuple(decisions),
+        }
+    )
+    return tuple(result), tuple(render_assets)

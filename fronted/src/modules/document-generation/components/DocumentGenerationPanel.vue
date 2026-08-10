@@ -10,6 +10,7 @@ import type { DocumentItem } from '@/modules/documents/documents.types'
 import type { Project } from '@/modules/projects/projects.types'
 import { formatDateTime } from '@/shared/utils/format'
 import {
+  confirmRescueRoute,
   confirmAndGenerate,
   deleteGenerationTask,
   exportGenerationTask,
@@ -18,9 +19,12 @@ import {
   fetchGenerationTask,
   fetchGenerationTasks,
   fetchGenerationTemplates,
+  fetchApprovedIllustrations,
   generateEntryPlan,
   lockAllGeneratedSections,
   regenerateSection,
+  searchHospitalRoutes,
+  selectApprovedIllustration,
   retryGenerationTask,
   setGeneratedSectionLock,
   selectGenerationTemplate,
@@ -32,6 +36,7 @@ import {
   BUSINESS_TYPE,
   DOCUMENT_PURPOSE,
   type AgentPersonnelContext,
+  type ApprovedDocumentIllustration,
   type AvailableAgentPersonnel,
   type ConfirmedFactPayload,
   type ConversationSourceAttachment,
@@ -43,7 +48,9 @@ import {
   type GenerationTask,
   type GenerationTaskStatus,
   type GenerationTraceEvent,
+  type HospitalRouteCandidate,
   type SourceLocator,
+  type StructuredGeneratedSection,
 } from '../document-generation.types'
 import { uploadClientTemplate, uploadConversationAttachment } from '../services/client-template.service'
 import { fetchAvailableAgentPersonnel } from '../services/personnel.service'
@@ -102,6 +109,11 @@ const exportDialogVisible = ref(false)
 const exportInfoLoading = ref(false)
 const exportInfo = ref<GenerationExportInfo | null>(null)
 const exportFilename = ref('')
+const assetDialogVisible = ref(false)
+const routeOrigin = ref('')
+const hospitalRoutes = ref<HospitalRouteCandidate[]>([])
+const approvedIllustrations = ref<ApprovedDocumentIllustration[]>([])
+const assetLoading = ref(false)
 const templates = ref<DocumentGenerationTemplate[]>([])
 const documents = ref<DocumentItem[]>([])
 const availablePersonnel = ref<AvailableAgentPersonnel[]>([])
@@ -1108,6 +1120,109 @@ async function saveSection(section: GeneratedSection): Promise<void> {
   })
 }
 
+function sectionTables(section: GeneratedSection) {
+  return section.structured_content.tables || []
+}
+
+function sectionImages(section: GeneratedSection) {
+  return section.structured_content.images || []
+}
+
+function sectionMissingItems(section: GeneratedSection): string[] {
+  return section.structured_content.missing_items || []
+}
+
+function omittedCompositionDecisions(section: GeneratedSection) {
+  return (section.structured_content.composition_decisions || []).filter(
+    (decision) => !decision.selected,
+  )
+}
+
+async function removeOptionalBlock(
+  section: GeneratedSection,
+  blockType: 'table' | 'image',
+  blockKey: string,
+): Promise<void> {
+  const structured = JSON.parse(
+    JSON.stringify(section.structured_content),
+  ) as StructuredGeneratedSection
+  if (blockType === 'table') {
+    structured.tables = (structured.tables || []).filter((table) => table.block_key !== blockKey)
+  } else {
+    structured.images = (structured.images || []).filter((image) => image.block_key !== blockKey)
+  }
+  await runAction(async () => {
+    await updateGeneratedSection(
+      selectedTask.value!.id,
+      section.section_code,
+      sectionDrafts[section.section_code] || '',
+      section.revision,
+      structured,
+    )
+    await refreshSelectedTask()
+    ElMessage.success('可选结构块已移除')
+  })
+}
+
+async function openAssetDialog(): Promise<void> {
+  if (!selectedTask.value) return
+  assetDialogVisible.value = true
+  assetLoading.value = true
+  try {
+    approvedIllustrations.value = await fetchApprovedIllustrations(selectedTask.value.id)
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error))
+  } finally {
+    assetLoading.value = false
+  }
+}
+
+async function findHospitalRoutes(): Promise<void> {
+  if (!selectedTask.value || !routeOrigin.value.trim()) {
+    ElMessage.warning('请先填写风场经纬度，格式为经度,纬度')
+    return
+  }
+  assetLoading.value = true
+  try {
+    hospitalRoutes.value = await searchHospitalRoutes(
+      selectedTask.value.id,
+      routeOrigin.value.trim(),
+    )
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error))
+  } finally {
+    assetLoading.value = false
+  }
+}
+
+async function chooseHospitalRoute(candidate: HospitalRouteCandidate): Promise<void> {
+  if (!selectedTask.value) return
+  assetLoading.value = true
+  try {
+    await confirmRescueRoute(selectedTask.value.id, routeOrigin.value.trim(), candidate)
+    await refreshSelectedTask()
+    ElMessage.success('救援路线已确认并冻结')
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error))
+  } finally {
+    assetLoading.value = false
+  }
+}
+
+async function chooseIllustration(illustrationId: number): Promise<void> {
+  if (!selectedTask.value) return
+  assetLoading.value = true
+  try {
+    await selectApprovedIllustration(selectedTask.value.id, illustrationId)
+    await refreshSelectedTask()
+    ElMessage.success('审核图库图片已确认')
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error))
+  } finally {
+    assetLoading.value = false
+  }
+}
+
 async function toggleSectionLock(section: GeneratedSection): Promise<void> {
   await runAction(async () => {
     await setGeneratedSectionLock(
@@ -1612,6 +1727,64 @@ async function runAction(action: () => Promise<void>): Promise<void> {
             Agent 正在处理修改
           </el-tag>
         </div>
+        <div class="doc-agent__asset-bar">
+          <div>
+            <strong>已确认应急图片</strong>
+            <span v-if="!selectedTask.assets?.length">暂无；依据不足时可以保持不插入</span>
+            <div v-if="selectedTask.assets?.length" class="doc-agent__asset-previews">
+              <figure v-for="asset in selectedTask.assets || []" :key="asset.id">
+                <img :src="asset.preview_url" :alt="asset.alt_text" loading="lazy" />
+                <figcaption>{{ asset.caption }}</figcaption>
+              </figure>
+            </div>
+          </div>
+          <el-button @click="openAssetDialog">配置救援路线 / 审核图库</el-button>
+        </div>
+        <el-dialog v-model="assetDialogVisible" title="应急图片配置" width="760px">
+          <el-alert
+            title="只插入已确认且与当前任务适用的图片；不会使用模板历史图片或AI临时图片。"
+            type="info"
+            :closable="false"
+          />
+          <div class="doc-agent__asset-config">
+            <h4>救援路线图（最多一张）</h4>
+            <div class="doc-agent__asset-route-input">
+              <el-input v-model="routeOrigin" placeholder="风场经纬度，例如 121.123,28.456" />
+              <el-button :loading="assetLoading" type="primary" @click="findHospitalRoutes">
+                查询最近医院
+              </el-button>
+            </div>
+            <el-table v-if="hospitalRoutes.length" :data="hospitalRoutes" border size="small">
+              <el-table-column prop="hospital_name" label="医院" min-width="180" />
+              <el-table-column prop="address" label="地址" min-width="220" />
+              <el-table-column label="驾车时间" width="100">
+                <template #default="{ row }">{{ Math.max(1, Math.round(row.duration_s / 60)) }} 分钟</template>
+              </el-table-column>
+              <el-table-column label="操作" width="90">
+                <template #default="{ row }">
+                  <el-button text type="primary" @click="chooseHospitalRoute(row)">确认</el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+            <h4>高空预案审核图库（各最多一张）</h4>
+            <el-empty
+              v-if="!assetLoading && !approvedIllustrations.length"
+              description="当前风险不适用，或管理员图库没有可用图片"
+              :image-size="64"
+            />
+            <div v-else class="doc-agent__illustration-list">
+              <article v-for="image in approvedIllustrations" :key="image.id">
+                <div>
+                  <strong>{{ image.title }}</strong>
+                  <small>{{ image.caption }}</small>
+                </div>
+                <el-button :loading="assetLoading" @click="chooseIllustration(image.id)">
+                  选择此图
+                </el-button>
+              </article>
+            </div>
+          </div>
+        </el-dialog>
         <el-collapse>
           <el-collapse-item
             v-for="section in selectedTask.sections"
@@ -1636,6 +1809,94 @@ async function runAction(action: () => Promise<void>): Promise<void> {
                   :rows="16"
                   :disabled="section.is_locked || isSectionRegenerating(section)"
                 />
+                <section
+                  v-if="sectionTables(section).length || sectionImages(section).length"
+                  class="doc-agent__structured-preview"
+                >
+                  <div class="doc-agent__panel-label">
+                    <strong>结构化内容预览</strong>
+                    <span>表格与图片不会被正文编辑清空</span>
+                  </div>
+                  <article
+                    v-for="table in sectionTables(section)"
+                    :key="table.block_key"
+                    class="doc-agent__structured-block"
+                  >
+                    <header>
+                      <div>
+                        <strong>{{ table.title || table.block_key }}</strong>
+                        <small>{{ table.insertion_reason }}</small>
+                      </div>
+                      <el-button
+                        v-if="!table.required"
+                        text
+                        type="danger"
+                        :disabled="section.is_locked"
+                        @click="removeOptionalBlock(section, 'table', table.block_key)"
+                      >
+                        删除可选表格
+                      </el-button>
+                    </header>
+                    <el-table :data="table.rows" border size="small">
+                      <el-table-column
+                        v-for="(header, columnIndex) in table.headers"
+                        :key="`${table.block_key}-${columnIndex}`"
+                        :label="header"
+                        min-width="130"
+                      >
+                        <template #default="{ row }">
+                          <span :class="{ 'doc-agent__blank-cell': !row[columnIndex] }">
+                            {{ row[columnIndex] || '待人工填写' }}
+                          </span>
+                        </template>
+                      </el-table-column>
+                    </el-table>
+                    <small v-if="table.source_chunk_ids.length">
+                      来源片段：{{ table.source_chunk_ids.join('、') }}
+                    </small>
+                  </article>
+                  <article
+                    v-for="image in sectionImages(section)"
+                    :key="image.block_key"
+                    class="doc-agent__structured-block doc-agent__structured-block--image"
+                  >
+                    <div>
+                      <strong>{{ image.title }}</strong>
+                      <small>{{ image.caption }} · {{ image.insertion_reason }}</small>
+                    </div>
+                    <el-button
+                      v-if="!image.required"
+                      text
+                      type="danger"
+                      :disabled="section.is_locked"
+                      @click="removeOptionalBlock(section, 'image', image.block_key)"
+                    >
+                      删除可选图片
+                    </el-button>
+                  </article>
+                </section>
+                <el-alert
+                  v-if="sectionMissingItems(section).length"
+                  class="doc-agent__missing-items"
+                  type="warning"
+                  :closable="false"
+                  title="导出后仍需人工填写的空白单元格"
+                >
+                  <ul>
+                    <li v-for="item in sectionMissingItems(section)" :key="item">{{ item }}</li>
+                  </ul>
+                </el-alert>
+                <details v-if="omittedCompositionDecisions(section).length">
+                  <summary>查看未插入内容及原因</summary>
+                  <ul>
+                    <li
+                      v-for="decision in omittedCompositionDecisions(section)"
+                      :key="`${decision.block_type}-${decision.block_key}`"
+                    >
+                      {{ decision.block_key }}：{{ decision.reason }}
+                    </li>
+                  </ul>
+                </details>
                 <div v-if="section.validation_issues.length" class="doc-agent__issues">
                   <el-alert
                     v-for="issue in section.validation_issues"
@@ -2519,6 +2780,128 @@ async function runAction(action: () => Promise<void>): Promise<void> {
 .doc-agent__section-editor,
 .doc-agent__revision-chat {
   min-width: 0;
+}
+
+.doc-agent__structured-preview {
+  display: grid;
+  gap: 14px;
+  margin-top: 16px;
+  padding: 14px;
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 12px;
+  background: var(--el-fill-color-lighter);
+}
+
+.doc-agent__asset-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 12px 0;
+  padding: 12px 14px;
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 12px;
+  background: var(--el-fill-color-lighter);
+}
+
+.doc-agent__asset-bar > div,
+.doc-agent__asset-config,
+.doc-agent__illustration-list article > div {
+  display: grid;
+  gap: 8px;
+}
+
+.doc-agent__asset-bar span,
+.doc-agent__illustration-list small {
+  color: var(--el-text-color-secondary);
+}
+
+.doc-agent__asset-previews {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 240px));
+  gap: 12px;
+}
+
+.doc-agent__asset-previews figure {
+  overflow: hidden;
+  margin: 0;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 8px;
+  background: var(--el-bg-color);
+}
+
+.doc-agent__asset-previews img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: contain;
+  background: var(--el-fill-color-light);
+}
+
+.doc-agent__asset-previews figcaption {
+  padding: 8px 10px;
+  color: var(--el-text-color-regular);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.doc-agent__asset-config {
+  margin-top: 16px;
+}
+
+.doc-agent__asset-route-input,
+.doc-agent__illustration-list article {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.doc-agent__illustration-list article {
+  justify-content: space-between;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+}
+
+.doc-agent__structured-block {
+  display: grid;
+  gap: 9px;
+  padding: 12px;
+  overflow: hidden;
+  border: 1px solid var(--el-border-color);
+  border-radius: 10px;
+  background: var(--el-bg-color);
+}
+
+.doc-agent__structured-block header,
+.doc-agent__structured-block--image {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.doc-agent__structured-block header > div,
+.doc-agent__structured-block--image > div {
+  display: grid;
+  gap: 4px;
+}
+
+.doc-agent__structured-block small {
+  color: var(--el-text-color-secondary);
+}
+
+.doc-agent__blank-cell {
+  color: var(--el-color-warning);
+  font-style: italic;
+}
+
+.doc-agent__missing-items {
+  margin-top: 14px;
+}
+
+.doc-agent__missing-items ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
 }
 
 .doc-agent__panel-label {

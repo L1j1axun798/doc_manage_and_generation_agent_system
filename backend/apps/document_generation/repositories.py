@@ -51,6 +51,10 @@ class ORMKnowledgeRepository:
                         "paragraph_end": chunk.paragraph_end,
                     },
                     "text": chunk.text,
+                    "block_type": chunk.block_type,
+                    "structured_content": {
+                        "rows": [list(row) for row in chunk.structured_rows]
+                    },
                     "content_sha256": chunk.content_sha256,
                     "component_tags": list(chunk.component_tags),
                     "method_tags": list(chunk.method_tags),
@@ -96,6 +100,11 @@ class ORMKnowledgeRepository:
                 paragraph_start=row.paragraph_start,
                 paragraph_end=row.paragraph_end,
                 text=row.text,
+                block_type=row.block_type,
+                structured_rows=tuple(
+                    tuple(str(cell) for cell in values)
+                    for values in row.structured_content.get("rows", [])
+                ),
                 component_tags=tuple(row.component_tags) or infer_component_codes(row.text),
                 method_tags=tuple(row.method_tags) or infer_method_codes(row.text),
                 risk_tags=tuple(row.risk_tags) or infer_risk_codes(row.text),
