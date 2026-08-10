@@ -2,7 +2,7 @@
   "phase": 4,
   "status": "approved_for_blind_evaluation",
   "completed_at": "2026-07-26",
-  "post_freeze_change_note": "2026-08-09 implemented quality-first structured table and confirmed-image composition; current real-model evaluation evidence must be regenerated before production activation.",
+  "post_freeze_change_note": "2026-08-10 implemented quality-first structured table and confirmed-image composition, then corrected numeric provenance so frozen personnel and approved structured-reference values survive validation while fully rejected tables are omitted; current real-model evaluation evidence must be regenerated before production activation.",
   "corrective_freeze_note": "第一次专家反馈暴露了旧稿横向纸张、样式失真、内容偏短和专业完整度不足；现已升级章节生成与修订Prompt，增加分章完整度和结构门禁、人类可读编码归一化、无损Schema归一化、样式基线渲染修复及模型错误诊断。运行态确认又发现事实抽取Prompt未声明五项标准必填事实，现升级为fact_extraction/v2，并加入来源锚定的标准事实确定性补齐和受控编码校验。2026-08-09新增短章节定向补写：仅当阻断项全部为SECTION_CONTENT_TOO_SHORT时保留原文、追加模型补充内容并重新执行确定性校验；各章节最低完整度门槛和三次修订上限不变。phase5-v2的B001、B005和B008仅保留为历史冻结评测结果，当前实现需重新生成评测证据。",
   "document_purpose": "entry_four_measures_two_plans",
   "business_type": "wind_turbine_inspection_four_measures_two_plans",
@@ -46,7 +46,7 @@
     "llm_provider_implementation_sha256": "0de92b035e81ea6583ff42dd221f1200f700ddddfebcedcdb0e3fd287810fb79",
     "embedding_provider_implementation_sha256": "9aa7ed32a2971bf0f83e409d9caff098ef686ff1aaecb9c6a3b1adf58be894bd",
     "rag_implementation_sha256": "1346b34c57c5aa7ad67241d42692892659fe595c76d25d24497b1747bcba89f5",
-    "validation_implementation_sha256": "bc387afcc1d9c3c46585463fe30f76cb1b277b962fed7be67171ec29bc7ff488"
+    "validation_implementation_sha256": "cceb76e404ff772f03bd3d519e75b0e6b317cdbdb7dcfd242a74e007b362e5a1"
   },
   "completion_gates": {
     "fact_citation_coverage": 1.0,

@@ -2,12 +2,30 @@
 import {
   ArrowDown,
   ArrowUp,
+  Bottom,
   ChatDotRound,
   DocumentAdd,
   Paperclip,
   User,
 } from '@element-plus/icons-vue'
-import { ref } from 'vue'
+import type { InputInstance } from 'element-plus'
+import { computed, nextTick, ref } from 'vue'
+
+const GENERAL_PROJECT_PROMPT_TEMPLATE = `请根据当前已选择的甲方模板，编制本项目完整的工程技术文件，保持模板现有结构和排版。
+
+项目名称：{项目名称}
+项目地点：{项目地点}
+作业/检测单位：{单位名称}
+工作内容：{主要工作内容}
+工期要求：{工期要求}
+相关风险：{可选}
+特殊要求：{可选}
+
+项目人员以当前系统已选择人员为准。
+
+其余施工/检测流程、技术措施、安全措施、危险源分析和应急处置等内容，请结合当前项目资料、系统专业规则及已审核知识库合理编制。
+
+无法确认的项目事实标记“【待确认】”，不得自行编造。`
 
 const props = defineProps<{
   modelValue: string
@@ -34,8 +52,32 @@ const emit = defineEmits<{
 }>()
 
 const fileInput = ref<HTMLInputElement>()
+const composerInput = ref<InputInstance>()
+const canApplyPromptTemplate = computed(
+  () => Boolean(props.editableContext) && !props.disabled && !props.modelValue.trim(),
+)
+
+function applyPromptTemplate(): void {
+  if (!canApplyPromptTemplate.value) return
+  emit('update:modelValue', GENERAL_PROJECT_PROMPT_TEMPLATE)
+  void nextTick(() => {
+    composerInput.value?.focus()
+    const textarea = composerInput.value?.textarea
+    textarea?.setSelectionRange(textarea.value.length, textarea.value.length)
+  })
+}
 
 function handleKeydown(event: KeyboardEvent): void {
+  if (
+    event.key === 'Tab' &&
+    !event.shiftKey &&
+    !event.isComposing &&
+    canApplyPromptTemplate.value
+  ) {
+    event.preventDefault()
+    applyPromptTemplate()
+    return
+  }
   if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return
   event.preventDefault()
   if (props.canSend && !props.loading) emit('send')
@@ -74,18 +116,41 @@ function handleFile(event: Event): void {
     <Transition name="chat-composer-collapse">
       <div v-show="!collapsed" class="chat-composer__body-shell">
         <div class="chat-composer__body">
-          <div class="chat-composer__attachments">
+          <div
+            class="chat-composer__attachments"
+            :class="{ 'has-prompt-suggestion': canApplyPromptTemplate }"
+          >
             <slot name="attachments" />
+            <button
+              v-if="canApplyPromptTemplate"
+              type="button"
+              class="chat-composer__prompt-suggestion"
+              data-test="prompt-template-suggestion"
+              aria-label="按 Tab 或点击此处填入通用项目提示词"
+              @click="applyPromptTemplate"
+            >
+              <span class="chat-composer__prompt-copy">
+                <kbd>Tab</kbd><span class="chat-composer__prompt-label">一键补全</span>
+              </span>
+              <span class="chat-composer__prompt-arrow" aria-hidden="true">
+                <el-icon><Bottom /></el-icon>
+              </span>
+            </button>
           </div>
           <slot name="context-extra" />
           <el-input
+            ref="composerInput"
             :model-value="modelValue"
             type="textarea"
             :autosize="{ minRows: 2, maxRows: 7 }"
             maxlength="4000"
             resize="none"
             :disabled="disabled"
-            :placeholder="placeholder || '输入本次编制要求…'"
+            :placeholder="
+              canApplyPromptTemplate
+                ? '按 Tab 一键填入通用项目提示词，或直接输入项目关键信息…'
+                : placeholder || '输入本次编制要求…'
+            "
             @update:model-value="emit('update:modelValue', $event)"
             @keydown="handleKeydown"
           />
@@ -235,8 +300,13 @@ function handleFile(event: Event): void {
 }
 
 .chat-composer__attachments {
+  position: relative;
   min-width: 0;
   padding-right: 36px;
+}
+
+.chat-composer__attachments.has-prompt-suggestion {
+  padding-right: 158px;
 }
 
 .chat-composer__collapsed-copy {
@@ -261,6 +331,89 @@ function handleFile(event: Event): void {
 
 .chat-composer__collapse-button {
   flex: 0 0 auto;
+}
+
+.chat-composer__prompt-suggestion {
+  position: absolute;
+  z-index: 1;
+  top: 50%;
+  right: 0;
+  display: inline-flex;
+  min-height: 32px;
+  padding: 4px 7px 4px 9px;
+  align-items: center;
+  border: 1px solid color-mix(in srgb, var(--color-brand) 34%, var(--color-border));
+  border-radius: 999px;
+  appearance: none;
+  background: color-mix(in srgb, var(--color-brand) 8%, var(--color-bg-surface));
+  color: var(--color-text-primary);
+  cursor: pointer;
+  font: inherit;
+  gap: 7px;
+  text-align: left;
+  transform: translateY(-50%);
+  transition:
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    transform 180ms ease;
+}
+
+.chat-composer__prompt-suggestion:hover,
+.chat-composer__prompt-suggestion:focus-visible {
+  border-color: var(--color-brand);
+  box-shadow: var(--shadow-focus);
+  outline: none;
+  transform: translateY(calc(-50% - 1px));
+}
+
+.chat-composer__prompt-arrow {
+  display: grid;
+  width: 23px;
+  height: 23px;
+  border-radius: 50%;
+  background: var(--color-brand);
+  color: var(--color-text-inverse);
+  font-size: 14px;
+  place-items: center;
+  animation: prompt-arrow-bounce 1.25s ease-in-out infinite;
+}
+
+.chat-composer__prompt-copy {
+  display: inline-flex;
+  align-items: center;
+  color: var(--color-text-primary);
+  font-size: 12px;
+  font-weight: 600;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.chat-composer__prompt-copy kbd {
+  display: inline-flex;
+  min-width: 28px;
+  min-height: 20px;
+  padding-inline: 5px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid color-mix(in srgb, var(--color-brand) 45%, var(--color-border));
+  border-radius: 5px;
+  background: var(--color-bg-surface);
+  box-shadow: 0 2px 0 color-mix(in srgb, var(--color-brand) 22%, var(--color-border));
+  color: var(--color-brand);
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 1;
+}
+
+@keyframes prompt-arrow-bounce {
+  0%,
+  100% {
+    transform: translateY(-3px);
+  }
+
+  50% {
+    transform: translateY(4px);
+  }
 }
 
 .chat-composer :deep(.el-textarea__inner) {
@@ -314,6 +467,14 @@ function handleFile(event: Event): void {
 }
 
 @media (max-width: 720px) {
+  .chat-composer__attachments.has-prompt-suggestion {
+    padding-right: 80px;
+  }
+
+  .chat-composer__prompt-label {
+    display: none;
+  }
+
   .chat-composer__footer {
     align-items: stretch;
     flex-direction: column;
@@ -327,7 +488,9 @@ function handleFile(event: Event): void {
 @media (prefers-reduced-motion: reduce) {
   .chat-composer,
   .chat-composer-collapse-enter-active,
-  .chat-composer-collapse-leave-active {
+  .chat-composer-collapse-leave-active,
+  .chat-composer__prompt-arrow {
+    animation: none;
     transition: none;
   }
 }

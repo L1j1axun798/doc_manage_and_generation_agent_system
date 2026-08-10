@@ -6,9 +6,12 @@ from apps.document_generation.engine.contracts import (
     ClauseSelection,
     ConfirmedFact,
     GeneratedSection,
+    GeneratedTable,
+    PersonnelCertificationContext,
     PersonnelContext,
     RetrievalQuery,
     RetrievalResult,
+    RetrievedSection,
     RiskProfile,
     SectionContext,
     SourceCitation,
@@ -212,6 +215,119 @@ def test_normalizer_removes_unsourced_numeric_threshold_and_records_gap() -> Non
     assert any("确定性移除" in warning for warning in normalized.warnings)
     assert any("技术负责人" in item for item in normalized.missing_items)
     assert "UNSOURCED_NUMBER" not in _error_codes(normalized)
+
+
+def test_normalizer_preserves_numbers_from_frozen_personnel_table() -> None:
+    context = _context().model_copy(
+        update={
+            "conversation_context": AgentConversationContext(
+                personnel=(
+                    PersonnelContext(
+                        id="85",
+                        name="脱敏人员",
+                        phone="13800000000",
+                        id_card_number="110101199001011234",
+                        certifications=(
+                            PersonnelCertificationContext(
+                                name="UT2级",
+                                certificate_number="UT-2026-001",
+                                valid_until="2028-12-31",
+                            ),
+                        ),
+                    ),
+                ),
+            )
+        }
+    )
+    section = _valid_section().model_copy(
+        update={
+            "tables": (
+                GeneratedTable(
+                    block_key="personnel_information",
+                    title="作业人员信息表",
+                    headers=("序号", "姓名", "联系电话", "身份证号", "证书及有效期"),
+                    rows=(
+                        (
+                            "1",
+                            "脱敏人员",
+                            "13800000000",
+                            "110101199001011234",
+                            "UT2级 UT-2026-001（有效期至2028-12-31）",
+                        ),
+                    ),
+                ),
+            )
+        }
+    )
+
+    normalized = normalize_section_provenance(section, context)
+    issues = ControlledSectionValidator().validate(normalized, context)
+
+    assert normalized.tables[0].rows == section.tables[0].rows
+    assert "UNSOURCED_NUMBER" not in {
+        issue.code for issue in issues if issue.severity == ValidationSeverity.ERROR
+    }
+
+
+def test_normalizer_still_removes_untrusted_number_from_personnel_table() -> None:
+    context = _context().model_copy(
+        update={
+            "conversation_context": AgentConversationContext(
+                personnel=(PersonnelContext(id="85", name="脱敏人员", phone="13800000000"),)
+            )
+        }
+    )
+    section = _valid_section().model_copy(
+        update={
+            "tables": (
+                GeneratedTable(
+                    block_key="personnel_information",
+                    title="作业人员信息表",
+                    headers=("序号", "姓名", "联系电话"),
+                    rows=(("1", "脱敏人员", "13999999999"),),
+                ),
+            )
+        }
+    )
+
+    normalized = normalize_section_provenance(section, context)
+
+    assert normalized.tables == ()
+
+
+def test_normalizer_preserves_numbers_from_approved_structured_reference() -> None:
+    reference = RetrievedSection(
+        chunk_id="approved-table-1",
+        source_document_version_id=300,
+        section_code="safety_measures",
+        heading_path=("安全措施",),
+        text="序号 | 检查要求\n1 | 每6个月检查一次",
+        block_type="table",
+        structured_rows=(("序号", "检查要求"), ("1", "每6个月检查一次")),
+        similarity=0.9,
+        final_score=0.9,
+    )
+    context = _context().model_copy(update={"references": (reference,)})
+    section = _valid_section().model_copy(
+        update={
+            "tables": (
+                GeneratedTable(
+                    block_key="safety_equipment",
+                    title="安全器材表",
+                    headers=("序号", "检查要求"),
+                    rows=(("1", "每6个月检查一次"),),
+                ),
+            )
+        }
+    )
+
+    normalized = normalize_section_provenance(section, context)
+    issues = ControlledSectionValidator().validate(normalized, context)
+
+    assert normalized.tables[0].rows == (("1", "每6个月检查一次"),)
+    assert "UNSOURCED_NUMBER" not in {
+        issue.code for issue in issues if issue.severity == ValidationSeverity.ERROR
+    }
 
 
 def test_revision_keeps_reviewer_confirmed_personnel_literals_and_verifies_change() -> None:

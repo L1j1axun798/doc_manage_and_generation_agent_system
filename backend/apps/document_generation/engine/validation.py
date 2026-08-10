@@ -66,9 +66,7 @@ def _section_body_text(section: GeneratedSection) -> str:
     parts = list(section.paragraphs)
     parts.extend(item for items in section.lists for item in items)
     parts.extend(
-        " | ".join(row)
-        for table in section.tables
-        for row in (table.headers, *table.rows)
+        " | ".join(row) for table in section.tables for row in (table.headers, *table.rows)
     )
     return "\n".join(parts)
 
@@ -110,6 +108,49 @@ def _value_text(fact: ConfirmedFact) -> str:
     return json.dumps(fact.value, ensure_ascii=False, sort_keys=True)
 
 
+def _trusted_personnel_number_text(context: SectionContext) -> str:
+    """Return numeric-bearing values sourced from the frozen personnel snapshot.
+
+    Personnel tables are composed deterministically after model generation.  Their
+    row numbers and contact/certificate fields therefore have a different
+    provenance from model-authored numeric claims and must be included in the
+    numeric allow-list explicitly.
+    """
+
+    values: list[str] = []
+    for row_number, person in enumerate(context.conversation_context.personnel, start=1):
+        values.extend(
+            [
+                str(row_number),
+                person.phone,
+                person.contact,
+                person.id_card_number,
+                person.job_title,
+                person.department,
+                person.certificate_valid_until or "",
+            ]
+        )
+        for certification in person.certifications:
+            values.extend(
+                [
+                    certification.name,
+                    certification.certificate_number,
+                    certification.valid_until or "",
+                ]
+            )
+    return "\n".join(value for value in values if value)
+
+
+def _trusted_reference_number_text(context: SectionContext) -> str:
+    """Return numeric-bearing content from approved references selected for this section."""
+
+    values: list[str] = []
+    for reference in context.references:
+        values.append(reference.text)
+        values.extend(cell for row in reference.structured_rows for cell in row)
+    return "\n".join(value for value in values if value)
+
+
 def _strip_unsupported_numeric_sentences(
     text: str,
     *,
@@ -140,7 +181,12 @@ def _strip_forbidden_sentences(text: str) -> tuple[str, bool]:
 def _contains_fact_value(text: str, fact: ConfirmedFact) -> bool:
     value_text = _value_text(fact)
     if isinstance(fact.value, (int, float)) and not isinstance(fact.value, bool):
-        return value_text in NUMBER_RE.findall(text)
+        return bool(
+            re.search(
+                rf"(?<![A-Za-z0-9._/-]){re.escape(value_text)}(?![A-Za-z0-9._/-])",
+                text,
+            )
+        )
     return value_text in text
 
 
@@ -181,6 +227,8 @@ def normalize_section_provenance(
             ),
             *(clause.text for clause in context.clauses),
             context.revision_instruction,
+            _trusted_personnel_number_text(context),
+            _trusted_reference_number_text(context),
         ]
     )
     allowed_numbers = set(NUMBER_RE.findall(allowed_number_text))
@@ -217,14 +265,19 @@ def normalize_section_provenance(
         if kept_items:
             generated_lists.append(kept_items)
     generated_tables = []
+    omitted_table_keys: set[str] = set()
     for table in section.tables:
         if any(
             any(marker in header for marker in FORBIDDEN_OUTPUT_MARKERS) for header in table.headers
         ):
             forbidden_content_removed = True
+            if table.block_key:
+                omitted_table_keys.add(table.block_key)
             continue
         if any(set(NUMBER_RE.findall(header)) - allowed_numbers for header in table.headers):
             numeric_content_removed = True
+            if table.block_key:
+                omitted_table_keys.add(table.block_key)
             continue
         forbidden_rows = {
             row
@@ -244,6 +297,10 @@ def normalize_section_provenance(
         )
         forbidden_content_removed = forbidden_content_removed or bool(forbidden_rows)
         numeric_content_removed = numeric_content_removed or bool(unsupported_numeric_rows)
+        if table.rows and not kept_rows:
+            if table.block_key:
+                omitted_table_keys.add(table.block_key)
+            continue
         generated_tables.append(table.model_copy(update={"rows": kept_rows}))
     planned_facts = tuple(
         fact for fact in context.confirmed_facts if fact.field in PLANNED_VALUE_FIELDS
@@ -338,6 +395,17 @@ def normalize_section_provenance(
             "paragraphs": tuple(paragraphs),
             "lists": tuple(generated_lists),
             "tables": tuple(generated_tables),
+            "composition_decisions": tuple(
+                decision.model_copy(
+                    update={
+                        "selected": False,
+                        "reason": "所有候选数据行均未通过来源校验，已省略空表格",
+                    }
+                )
+                if decision.block_type == "table" and decision.block_key in omitted_table_keys
+                else decision
+                for decision in section.composition_decisions
+            ),
             "warnings": tuple(warnings),
             "missing_items": tuple(missing_items),
         }
@@ -427,9 +495,7 @@ class ControlledSectionValidator:
                     )
                 )
             missing_literals = [
-                literal
-                for literal in context.revision_required_literals
-                if literal not in text
+                literal for literal in context.revision_required_literals if literal not in text
             ]
             if missing_literals:
                 issues.append(
@@ -583,6 +649,8 @@ class ControlledSectionValidator:
                 ),
                 *(clause.text for clause in context.clauses),
                 context.revision_instruction,
+                _trusted_personnel_number_text(context),
+                _trusted_reference_number_text(context),
             ]
         )
         allowed_numbers = set(NUMBER_RE.findall(allowed_number_text))
