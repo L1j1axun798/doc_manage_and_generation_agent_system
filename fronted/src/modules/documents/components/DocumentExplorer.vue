@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { ArrowDown, Close, Delete, Download } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { computed, onMounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { onBeforeRouteLeave, useRoute } from 'vue-router'
 
 import { getErrorMessage } from '@/core/http/error-normalizer'
 import { useAuthStore } from '@/modules/auth/stores/auth.store'
 import type { ApiPage } from '@/shared/types/api.types'
 import {
+  cancelArchiveDownload as cancelArchiveDownloadRequest,
   deleteDocument,
   downloadDocumentCenter,
   downloadDocument,
@@ -100,6 +101,11 @@ const versionVisible = ref(false)
 const mutationLoading = ref(false)
 const folderDownloadLoading = ref(false)
 const centerDownloadLoading = ref(false)
+const archiveDownloadProgress = ref(0)
+const archiveDownloadProgressMeasurable = ref(false)
+const archiveDownloadController = ref<AbortController>()
+const archiveDownloadId = ref<string>()
+const archiveDownloadCancellationRequested = ref(false)
 const suppressNextFolderReload = ref(false)
 const hiddenDocumentResultsFolderId = ref<number>()
 
@@ -212,6 +218,12 @@ const canUpload = computed(
 const showDocumentCenterDownloads = computed(
   () => isTopPublicFolderMode.value && !isTrashMode.value,
 )
+const archiveDownloadLoading = computed(
+  () => folderDownloadLoading.value || centerDownloadLoading.value,
+)
+const archiveDownloadLabel = computed(() => (
+  centerDownloadLoading.value ? '正在下载中心全部资料' : '正在下载当前页资料'
+))
 const canCreateSubfolder = computed(
   () => authStore.isSystemAdmin && (isCompanyRoot.value || isStaffRoot.value),
 )
@@ -221,6 +233,35 @@ const subfolderCreateButtonText = computed(() => (isStaffRoot.value ? '添加用
 onMounted(async () => {
   applyRouteSearch(false)
   await reloadExplorer()
+})
+
+onBeforeRouteLeave(async () => {
+  if (!archiveDownloadLoading.value) {
+    return true
+  }
+
+  try {
+    await ElMessageBox.confirm(
+      '你在下载资料中心资料，切换页面会导致中断！是否离开？',
+      '下载尚未完成',
+      {
+        confirmButtonText: '离开并中断下载',
+        cancelButtonText: '继续下载',
+        type: 'warning',
+        closeOnClickModal: false,
+        closeOnPressEscape: false,
+      },
+    )
+  } catch {
+    return false
+  }
+
+  cancelArchiveDownload()
+  return true
+})
+
+onBeforeUnmount(() => {
+  cancelArchiveDownload()
 })
 
 watch(
@@ -667,14 +708,32 @@ async function handleFolderDownload(): Promise<void> {
     return
   }
 
+  const controller = new AbortController()
+  const downloadId = window.crypto.randomUUID()
+  archiveDownloadController.value = controller
+  archiveDownloadId.value = downloadId
+  archiveDownloadCancellationRequested.value = false
   folderDownloadLoading.value = true
+  resetArchiveDownloadProgress()
   try {
-    await downloadFolder(folderId)
+    await downloadFolder(
+      folderId,
+      updateArchiveDownloadProgress,
+      controller.signal,
+      downloadId,
+    )
     ElMessage.success('当前页资料压缩包已下载')
   } catch (error) {
-    ElMessage.error(getErrorMessage(error))
+    if (!archiveDownloadCancellationRequested.value && !isDownloadCanceled(error)) {
+      ElMessage.error(getErrorMessage(error))
+    }
   } finally {
+    if (archiveDownloadController.value === controller) {
+      archiveDownloadController.value = undefined
+      archiveDownloadId.value = undefined
+    }
     folderDownloadLoading.value = false
+    resetArchiveDownloadProgress()
   }
 }
 
@@ -683,15 +742,68 @@ async function handleCenterDownload(): Promise<void> {
     return
   }
 
+  const controller = new AbortController()
+  const downloadId = window.crypto.randomUUID()
+  archiveDownloadController.value = controller
+  archiveDownloadId.value = downloadId
+  archiveDownloadCancellationRequested.value = false
   centerDownloadLoading.value = true
+  resetArchiveDownloadProgress()
   try {
-    await downloadDocumentCenter()
+    await downloadDocumentCenter(
+      updateArchiveDownloadProgress,
+      controller.signal,
+      downloadId,
+    )
     ElMessage.success('资料中心全部资料压缩包已下载')
   } catch (error) {
-    ElMessage.error(getErrorMessage(error))
+    if (!archiveDownloadCancellationRequested.value && !isDownloadCanceled(error)) {
+      ElMessage.error(getErrorMessage(error))
+    }
   } finally {
+    if (archiveDownloadController.value === controller) {
+      archiveDownloadController.value = undefined
+      archiveDownloadId.value = undefined
+    }
     centerDownloadLoading.value = false
+    resetArchiveDownloadProgress()
   }
+}
+
+function cancelArchiveDownload(): void {
+  if (!archiveDownloadLoading.value || !archiveDownloadController.value) {
+    return
+  }
+  const downloadId = archiveDownloadId.value
+  archiveDownloadId.value = undefined
+  archiveDownloadCancellationRequested.value = true
+  archiveDownloadController.value.abort()
+  if (downloadId) {
+    void cancelArchiveDownloadRequest(downloadId).catch(() => undefined)
+  }
+}
+
+function isDownloadCanceled(error: unknown): boolean {
+  return (
+    typeof error === 'object'
+    && error !== null
+    && 'code' in error
+    && error.code === 'ERR_CANCELED'
+  )
+}
+
+function updateArchiveDownloadProgress(percentage: number | null): void {
+  if (percentage === null) {
+    archiveDownloadProgressMeasurable.value = false
+    return
+  }
+  archiveDownloadProgressMeasurable.value = true
+  archiveDownloadProgress.value = Math.max(0, Math.min(100, percentage))
+}
+
+function resetArchiveDownloadProgress(): void {
+  archiveDownloadProgress.value = 0
+  archiveDownloadProgressMeasurable.value = false
 }
 
 function handleDocumentCenterDownloadCommand(command: string | number | object): void {
@@ -862,14 +974,34 @@ async function handleRestore(document: DocumentItem): Promise<void> {
         v-if="showDocumentCenterDownloads"
         class="document-explorer__folder-download"
       >
+        <div
+          v-if="archiveDownloadLoading"
+          class="document-explorer__download-progress"
+          aria-busy="true"
+          aria-live="polite"
+        >
+          <div class="document-explorer__download-progress-meta">
+            <span>{{ archiveDownloadLabel }}</span>
+            <span>
+              {{ archiveDownloadProgressMeasurable ? `${archiveDownloadProgress}%` : '正在准备压缩包' }}
+            </span>
+          </div>
+          <el-progress
+            :duration="1.4"
+            :indeterminate="!archiveDownloadProgressMeasurable"
+            :percentage="archiveDownloadProgress"
+            :show-text="false"
+            :stroke-width="8"
+          />
+        </div>
         <el-dropdown
-          :disabled="folderDownloadLoading || centerDownloadLoading"
+          v-else
+          :disabled="archiveDownloadLoading"
           :trigger="['click', 'hover']"
           @command="handleDocumentCenterDownloadCommand"
         >
           <el-button
             :icon="Download"
-            :loading="folderDownloadLoading || centerDownloadLoading"
             type="primary"
           >
             下载全部资料

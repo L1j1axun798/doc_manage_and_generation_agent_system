@@ -1,0 +1,25 @@
+[Unit]
+Description=Wind document system RQ worker
+After=network.target mysql.service redis-server.service
+Requires=redis-server.service
+RequiresMountsFor=/data/documents /data/exports /data/backups
+
+[Service]
+Type=simple
+User=winddoc
+Group=winddoc
+WorkingDirectory=/opt/wind-doc-system/backend
+Environment=DJANGO_SETTINGS_MODULE=config.settings.production
+ExecStart=/opt/wind-doc-system/venv/bin/python manage.py run_document_generation_worker
+KillSignal=SIGTERM
+TimeoutStopSec=30
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/data/documents /data/exports /data/backups
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -84,6 +84,12 @@ export const useAuthStore = defineStore('auth', {
       }
     },
 
+    clearLocalSession(): void {
+      this.user = null
+      this.status = 'anonymous'
+      this.initialized = true
+    },
+
     async changePassword(payload: ChangePasswordPayload): Promise<void> {
       await changePassword(payload)
       if (this.user) {

@@ -11,6 +11,8 @@ import type {
   DocumentVersion,
 } from '../documents.types'
 
+export type DownloadProgressHandler = (percentage: number | null) => void
+
 export async function fetchDocuments(query: DocumentListQuery): Promise<ApiPage<DocumentItem>> {
   const response = await apiClient.get<ApiPage<DocumentItem>>('/documents/', {
     params: cleanQuery(query),
@@ -94,19 +96,40 @@ export async function downloadDocument(document: DocumentItem): Promise<void> {
   saveBlob(response.data, filename)
 }
 
-export async function downloadFolder(folderId: number): Promise<void> {
+export async function downloadFolder(
+  folderId: number,
+  onProgress?: DownloadProgressHandler,
+  signal?: AbortSignal,
+  downloadId?: string,
+): Promise<void> {
   await downloadArchive(
     '/documents/folder-download/',
-    { folder: folderId },
+    { folder: folderId, download_id: downloadId },
     '资料目录.zip',
+    onProgress,
+    signal,
   )
 }
 
-export async function downloadDocumentCenter(): Promise<void> {
+export async function downloadDocumentCenter(
+  onProgress?: DownloadProgressHandler,
+  signal?: AbortSignal,
+  downloadId?: string,
+): Promise<void> {
   await downloadArchive(
     '/documents/center-download/',
-    {},
+    { download_id: downloadId },
     '资料中心全部资料.zip',
+    onProgress,
+    signal,
+  )
+}
+
+export async function cancelArchiveDownload(downloadId: string): Promise<void> {
+  await apiClient.post(
+    '/documents/archive-download-cancel/',
+    { download_id: downloadId },
+    { timeout: 5000 },
   )
 }
 
@@ -114,13 +137,23 @@ async function downloadArchive(
   url: string,
   payload: Record<string, unknown>,
   fallbackFilename: string,
+  onProgress?: DownloadProgressHandler,
+  signal?: AbortSignal,
 ): Promise<void> {
   const response = await apiClient.post<Blob>(
     url,
     payload,
     {
       responseType: 'blob',
+      signal,
       validateStatus: () => true,
+      onDownloadProgress: (event) => {
+        if (!event.total || event.total <= 0) {
+          onProgress?.(null)
+          return
+        }
+        onProgress?.(Math.min(99, Math.round((event.loaded / event.total) * 100)))
+      },
     },
   )
   if (response.status < 200 || response.status >= 300) {
@@ -132,6 +165,7 @@ async function downloadArchive(
 
   const filename = getFilenameFromContentDisposition(response.headers['content-disposition'] ?? null)
     || fallbackFilename
+  onProgress?.(100)
   saveBlob(response.data, filename)
 }
 

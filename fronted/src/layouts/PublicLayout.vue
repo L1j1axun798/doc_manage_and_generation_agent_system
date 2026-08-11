@@ -1,5 +1,12 @@
+<script setup lang="ts">
+import SiteFooter from '@/shared/components/SiteFooter.vue'
+</script>
+
 <template>
   <main class="public-layout">
-    <RouterView />
+    <div class="public-layout__content">
+      <RouterView />
+    </div>
+    <SiteFooter />
   </main>
 </template>

@@ -21,6 +21,17 @@ USE_X_ACCEL_REDIRECT = True
 ENABLE_DJANGO_ADMIN = False
 ENABLE_API_DOCS = False
 
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.redis.RedisCache",
+        "LOCATION": REDIS_URL,  # noqa: F405
+        "OPTIONS": {
+            "socket_connect_timeout": 1,
+            "socket_timeout": 1,
+        },
+    }
+}
+
 if len(SECRET_KEY) < 50 or SECRET_KEY.startswith(("unsafe-", "replace-")):  # noqa: F405
     raise ImproperlyConfigured("DJANGO_SECRET_KEY 必须替换为至少 50 字符的随机生产密钥")
 if not ALLOWED_HOSTS or any(  # noqa: F405

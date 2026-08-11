@@ -6,6 +6,7 @@ import { useRoute, useRouter } from 'vue-router'
 
 import { appConfig } from '@/config/app'
 import { getErrorMessage } from '@/core/http/error-normalizer'
+import SiteFooter from '@/shared/components/SiteFooter.vue'
 import { setTheme } from '@/shared/composables/useTheme'
 import { useAuthStore } from '../stores/auth.store'
 
@@ -50,8 +51,9 @@ async function submitLogin(): Promise<void> {
 </script>
 
 <template>
-  <main class="login-page login-page--split">
-    <section class="login-page__visual" aria-labelledby="platform-title">
+  <div class="public-page-shell">
+    <main class="login-page login-page--split">
+      <section class="login-page__visual" aria-labelledby="platform-title">
       <div class="login-page__visual-content">
         <header class="login-page__intro">
           <h1 id="platform-title">绿能信盾企业资料管理与Agent平台</h1>
@@ -100,9 +102,9 @@ async function submitLogin(): Promise<void> {
           </article>
         </div>
       </div>
-    </section>
+      </section>
 
-    <section class="login-page__panel" aria-labelledby="login-title">
+      <section class="login-page__panel" aria-labelledby="login-title">
       <div class="login-page__brand">
         <img
           class="login-page__brand-mark"
@@ -169,6 +171,8 @@ async function submitLogin(): Promise<void> {
           <span>如需开通账号，请联系系统管理员</span>
         </p>
       </el-form>
-    </section>
-  </main>
+      </section>
+    </main>
+    <SiteFooter />
+  </div>
 </template>

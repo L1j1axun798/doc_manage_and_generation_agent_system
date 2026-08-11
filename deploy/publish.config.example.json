@@ -1,0 +1,11 @@
+{
+  "Host": "203.0.113.10",
+  "Port": 22,
+  "User": "root",
+  "IdentityFile": "D:\\path\\to\\server-key.pem",
+  "Domain": "documents.example.com",
+  "Python": "D:\\Anaconda\\envs\\doc_system\\python.exe",
+  "FrontendEnvFile": "fronted\\.env.local",
+  "KeepReleases": 5,
+  "DocumentAgentEnabled": true
+}

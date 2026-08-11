@@ -43,6 +43,14 @@ test('redirects anonymous users from root to login', async ({ page }) => {
     'background-color',
     'rgb(250, 251, 252)',
   )
+  const siteFooter = page.getByRole('contentinfo', { name: '网站备案与版权信息' })
+  const filingLink = siteFooter.getByRole('link', { name: '冀ICP备2026028278号-1' })
+  await expect(siteFooter).toBeVisible()
+  await expect(siteFooter).toHaveCSS('font-size', '12px')
+  await expect(filingLink).toHaveAttribute('href', 'https://beian.miit.gov.cn/')
+  const footerBox = await siteFooter.boundingBox()
+  expect(footerBox?.y).toBe(860)
+  expect(footerBox?.height).toBe(40)
   await expect(page).toHaveURL(/\/login/)
 })
 

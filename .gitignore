@@ -52,3 +52,6 @@ docs/document_agent/phase5/private/
 
 # Codex 本地验证日志和临时渲染工具
 .codex_tmp/
+
+# Local deployment connection settings (contains the private-key path)
+deploy/publish.config.local.json

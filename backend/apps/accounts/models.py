@@ -19,6 +19,13 @@ class User(AbstractUser):
     role = models.CharField("角色", max_length=32, choices=Role.choices, default=Role.DATA_OPERATOR)
     phone = models.CharField("手机号", max_length=30, blank=True)
     must_change_password = models.BooleanField("首次登录需修改密码", default=True)
+    active_session_key = models.CharField(
+        "当前登录会话键",
+        max_length=40,
+        null=True,
+        blank=True,
+        editable=False,
+    )
     created_at = models.DateTimeField("创建时间", auto_now_add=True)
 
     REQUIRED_FIELDS = ["real_name", "email"]

@@ -212,17 +212,40 @@ def dump_mysql_database(output_path: Path) -> None:
     command.append(str(name))
 
     env = _mysql_password_env(database)
+    result = _run_mysqldump(command=command, output_path=output_path, env=env)
+    stderr = result.stderr.decode("utf-8", errors="replace").strip()
+    if (
+        result.returncode != 0
+        and "--skip-masking-policies" in command
+        and "unknown option '--skip-masking-policies'" in stderr
+    ):
+        compatible_command = [
+            argument for argument in command if argument != "--skip-masking-policies"
+        ]
+        result = _run_mysqldump(
+            command=compatible_command,
+            output_path=output_path,
+            env=env,
+        )
+    if result.returncode != 0:
+        stderr = result.stderr.decode("utf-8", errors="replace").strip()
+        raise BackupProcessError(stderr or "mysqldump 执行失败")
+
+
+def _run_mysqldump(
+    *,
+    command: list[str],
+    output_path: Path,
+    env: dict[str, str],
+) -> subprocess.CompletedProcess[bytes]:
     with output_path.open("wb") as target:
-        result = subprocess.run(
+        return subprocess.run(
             command,
             stdout=target,
             stderr=subprocess.PIPE,
             env=env,
             check=False,
         )
-    if result.returncode != 0:
-        stderr = result.stderr.decode("utf-8", errors="replace").strip()
-        raise BackupProcessError(stderr or "mysqldump 执行失败")
 
 
 def verify_backup_archive(

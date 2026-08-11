@@ -1,7 +1,7 @@
 import pytest
 from django.conf import settings
 from django.contrib.auth import get_user_model
-from django.test import override_settings
+from django.test import Client, override_settings
 from django.urls import reverse
 
 from apps.accounts.models import WebAuthnCredential
@@ -347,6 +347,98 @@ def test_password_login_remember_me_uses_configured_session_lifetime(client):
 
 
 @pytest.mark.django_db
+@override_settings(LOGIN_REQUIRE_WEBAUTHN=False)
+def test_new_login_replaces_the_previous_session(client):
+    user = User.objects.create_user(
+        username="single-session-user",
+        password="SingleSession123!",
+        real_name="Single session user",
+        role=User.Role.DATA_OPERATOR,
+        must_change_password=False,
+    )
+    second_client = Client()
+
+    first_login = client.post(
+        reverse("auth-login"),
+        {"username": user.username, "password": "SingleSession123!"},
+        content_type="application/json",
+    )
+    first_session_key = client.session.session_key
+    second_login = second_client.post(
+        reverse("auth-login"),
+        {"username": user.username, "password": "SingleSession123!"},
+        content_type="application/json",
+    )
+    second_session_key = second_client.session.session_key
+
+    assert first_login.status_code == 200
+    assert second_login.status_code == 200
+    assert first_session_key != second_session_key
+    user.refresh_from_db()
+    assert user.active_session_key == second_session_key
+
+    replaced_response = client.get(reverse("auth-me"))
+    current_response = second_client.get(reverse("auth-me"))
+
+    assert replaced_response.status_code == 403
+    assert replaced_response.json()["code"] == "session_replaced"
+    assert "其他设备或浏览器重新登录" in replaced_response.json()["message"]
+    assert replaced_response.cookies[settings.SESSION_COOKIE_NAME]["max-age"] == 0
+    assert current_response.status_code == 200
+    replacement_audit = AuditLog.objects.filter(
+        action="auth.login",
+        result="success",
+        after_data__replaced_existing_session=True,
+    )
+    assert replacement_audit.exists()
+
+
+@pytest.mark.django_db
+@override_settings(LOGIN_REQUIRE_WEBAUTHN=False)
+def test_logout_from_replaced_session_does_not_clear_current_session(client):
+    user = User.objects.create_user(
+        username="replaced-logout-user",
+        password="ReplacedLogout123!",
+        real_name="Replaced logout user",
+        role=User.Role.DATA_OPERATOR,
+        must_change_password=False,
+    )
+    second_client = Client()
+    credentials = {"username": user.username, "password": "ReplacedLogout123!"}
+
+    assert client.post(
+        reverse("auth-login"), credentials, content_type="application/json"
+    ).status_code == 200
+    assert second_client.post(
+        reverse("auth-login"), credentials, content_type="application/json"
+    ).status_code == 200
+
+    assert client.post(reverse("auth-logout")).status_code == 204
+    assert second_client.get(reverse("auth-me")).status_code == 200
+    user.refresh_from_db()
+    assert user.active_session_key == second_client.session.session_key
+
+
+@pytest.mark.django_db
+def test_first_request_from_a_legacy_session_claims_the_single_session(client):
+    user = User.objects.create_user(
+        username="legacy-session-user",
+        password="LegacySession123!",
+        real_name="Legacy session user",
+        role=User.Role.DATA_OPERATOR,
+        must_change_password=False,
+    )
+    client.force_login(user)
+    assert user.active_session_key is None
+
+    response = client.get(reverse("auth-me"))
+
+    assert response.status_code == 200
+    user.refresh_from_db()
+    assert user.active_session_key == client.session.session_key
+
+
+@pytest.mark.django_db
 def test_admin_can_create_and_reset_webauthn_ticket(client):
     admin = User.objects.create_user(
         username="admin",
@@ -398,6 +490,7 @@ def test_change_password_clears_must_change_password(client):
     assert response.status_code == 204
     assert user.must_change_password is False
     assert user.check_password("NewPass123!")
+    assert user.active_session_key == client.session.session_key
 
 
 @pytest.mark.django_db

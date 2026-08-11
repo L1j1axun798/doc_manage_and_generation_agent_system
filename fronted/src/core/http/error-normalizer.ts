@@ -30,7 +30,11 @@ export function normalizeApiError(error: unknown): NormalizedApiError {
   if (isRecord(data)) {
     return {
       status,
-      code: typeof data.code === 'string' ? data.code : undefined,
+      code: typeof data.code === 'string'
+        ? data.code
+        : typeof error.code === 'string'
+          ? error.code
+          : undefined,
       detail: readDetail(data),
       fieldErrors: readFieldErrors(data),
     }
@@ -38,6 +42,7 @@ export function normalizeApiError(error: unknown): NormalizedApiError {
 
   return {
     status,
+    code: typeof error.code === 'string' ? error.code : undefined,
     detail: error.message || '请求处理失败',
   }
 }

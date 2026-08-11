@@ -22,6 +22,11 @@ from apps.folders.models import Folder
 from apps.folders.selectors import active_visible_folders_for_user
 from common.downloads import protected_download_response
 
+from .archive_download_cancellation import (
+    archive_download_is_canceled,
+    clear_archive_download_cancel,
+    request_archive_download_cancel,
+)
 from .models import Document
 from .selectors import (
     base_documents_for_user,
@@ -29,7 +34,9 @@ from .selectors import (
     visible_documents_for_user,
 )
 from .serializers import (
+    DocumentArchiveDownloadCancelSerializer,
     DocumentBatchDownloadSerializer,
+    DocumentCenterDownloadSerializer,
     DocumentFolderDownloadSerializer,
     DocumentMoveSerializer,
     DocumentMutationSerializer,
@@ -111,8 +118,12 @@ class DocumentViewSet(
             return DocumentMutationSerializer
         if self.action == "batch_download":
             return DocumentBatchDownloadSerializer
+        if self.action == "center_download":
+            return DocumentCenterDownloadSerializer
         if self.action == "folder_download":
             return DocumentFolderDownloadSerializer
+        if self.action == "archive_download_cancel":
+            return DocumentArchiveDownloadCancelSerializer
         return DocumentSerializer
 
     @extend_schema(request=DocumentUploadSerializer, responses=DocumentSerializer)
@@ -272,11 +283,14 @@ class DocumentViewSet(
         return response
 
     @extend_schema(
-        request=None,
+        request=DocumentCenterDownloadSerializer,
         responses={(200, "application/zip"): OpenApiTypes.BINARY},
     )
     @action(detail=False, methods=["post"], url_path="center-download")
     def center_download(self, request):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        download_id = serializer.validated_data.get("download_id")
         standard_root_codes = [
             *(definition.code for definition in STANDARD_PUBLIC_ROOTS),
             ARCHIVE_ROOT.code,
@@ -307,16 +321,31 @@ class DocumentViewSet(
             .order_by("folder_id", "id")
             .iterator(chunk_size=200)
         )
-        archive, filename, total_size, archive_size, document_count = (
-            build_document_center_download_zip(
-                actor=request.user,
-                root_folders=root_folders,
-                folders=folders,
-                folder_root_ids=folder_root_ids,
-                documents=documents,
-                request=request,
+        try:
+            archive, filename, total_size, archive_size, document_count = (
+                build_document_center_download_zip(
+                    actor=request.user,
+                    root_folders=root_folders,
+                    folders=folders,
+                    folder_root_ids=folder_root_ids,
+                    documents=documents,
+                    request=request,
+                    is_canceled=(
+                        lambda: archive_download_is_canceled(
+                            user_id=request.user.pk,
+                            download_id=download_id,
+                        )
+                        if download_id is not None
+                        else False
+                    ),
+                )
             )
-        )
+        finally:
+            if download_id is not None:
+                clear_archive_download_cancel(
+                    user_id=request.user.pk,
+                    download_id=download_id,
+                )
         return _zip_download_response(
             archive=archive,
             filename=filename,
@@ -333,6 +362,7 @@ class DocumentViewSet(
     def folder_download(self, request):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        download_id = serializer.validated_data.get("download_id")
         folder = get_object_or_404(
             active_visible_folders_for_user(request.user),
             pk=serializer.validated_data["folder"],
@@ -349,13 +379,28 @@ class DocumentViewSet(
             .order_by("folder_id", "id")
             .iterator(chunk_size=200)
         )
-        archive, filename, total_size, archive_size, document_count = build_folder_download_zip(
-            actor=request.user,
-            root_folder=folder,
-            folders=folders,
-            documents=documents,
-            request=request,
-        )
+        try:
+            archive, filename, total_size, archive_size, document_count = build_folder_download_zip(
+                actor=request.user,
+                root_folder=folder,
+                folders=folders,
+                documents=documents,
+                request=request,
+                is_canceled=(
+                    lambda: archive_download_is_canceled(
+                        user_id=request.user.pk,
+                        download_id=download_id,
+                    )
+                    if download_id is not None
+                    else False
+                ),
+            )
+        finally:
+            if download_id is not None:
+                clear_archive_download_cancel(
+                    user_id=request.user.pk,
+                    download_id=download_id,
+                )
         return _zip_download_response(
             archive=archive,
             filename=filename,
@@ -363,6 +408,20 @@ class DocumentViewSet(
             archive_size=archive_size,
             document_count=document_count,
         )
+
+    @extend_schema(
+        request=DocumentArchiveDownloadCancelSerializer,
+        responses={204: None},
+    )
+    @action(detail=False, methods=["post"], url_path="archive-download-cancel")
+    def archive_download_cancel(self, request):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        request_archive_download_cancel(
+            user_id=request.user.pk,
+            download_id=serializer.validated_data["download_id"],
+        )
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     @extend_schema(request=None, responses={200: bytes})
     @action(detail=True, methods=["get"])

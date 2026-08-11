@@ -354,6 +354,7 @@ def test_permanent_delete_requires_admin_and_removes_physical_files(client, tmp_
         content_type="application/json",
     )
     client.force_login(admin)
+    User.objects.filter(pk=admin.pk).update(active_session_key=client.session.session_key)
     deleted = client.post(
         f"/api/v1/documents/{document['id']}/permanent-delete/",
         {"expected_updated_at": expected(document["id"])},

@@ -4,6 +4,7 @@ import { computed, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { getErrorMessage } from '@/core/http/error-normalizer'
+import SiteFooter from '@/shared/components/SiteFooter.vue'
 import {
   beginWebAuthnRegistration,
   fetchCsrfToken,
@@ -52,8 +53,9 @@ async function submitRegistration(): Promise<void> {
 </script>
 
 <template>
-  <main class="login-page">
-    <section class="login-page__panel" aria-labelledby="webauthn-register-title">
+  <div class="public-page-shell">
+    <main class="login-page">
+      <section class="login-page__panel" aria-labelledby="webauthn-register-title">
       <div class="login-page__brand">
         <span class="login-page__brand-mark" aria-hidden="true">W</span>
         <div>
@@ -89,6 +91,8 @@ async function submitRegistration(): Promise<void> {
           绑定设备
         </el-button>
       </el-form>
-    </section>
-  </main>
+      </section>
+    </main>
+    <SiteFooter />
+  </div>
 </template>

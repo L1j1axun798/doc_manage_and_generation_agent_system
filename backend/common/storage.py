@@ -1,7 +1,7 @@
 import hashlib
 import os
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from uuid import uuid4
 
 from django.conf import settings
@@ -43,11 +43,25 @@ class LocalDocumentStorage:
             raise
 
     def resolve(self, relative_path: str) -> Path:
-        path = (self.root / relative_path).resolve()
+        canonical_path = self.canonical_relative_path(relative_path)
+        path = (self.root / Path(*PurePosixPath(canonical_path).parts)).resolve()
         root = self.root.resolve()
         if root != path and root not in path.parents:
             raise ValueError("文件路径越界")
         return path
+
+    def canonical_relative_path(self, relative_path: str) -> str:
+        normalized = str(relative_path).replace("\\", "/")
+        parts = normalized.split("/")
+        if (
+            not normalized
+            or normalized.startswith("/")
+            or any(part in {"", ".", ".."} for part in parts)
+            or ":" in parts[0]
+            or "\x00" in normalized
+        ):
+            raise ValueError("文件路径越界")
+        return PurePosixPath(*parts).as_posix()
 
     def exists(self, relative_path: str) -> bool:
         return self.resolve(relative_path).is_file()
@@ -62,4 +76,4 @@ class LocalDocumentStorage:
             return
 
     def _build_relative_path(self, digest: str) -> str:
-        return str(Path(digest[:2]) / digest[2:4] / f"{uuid4().hex}.bin")
+        return PurePosixPath(digest[:2], digest[2:4], f"{uuid4().hex}.bin").as_posix()

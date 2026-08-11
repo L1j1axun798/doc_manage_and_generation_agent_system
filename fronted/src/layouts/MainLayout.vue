@@ -16,6 +16,7 @@ import { appConfig } from '@/config/app'
 import { getRoleLabel } from '@/core/permissions/roles'
 import { buildMainMenu } from '@/core/router/menu-builder'
 import { useAuthStore } from '@/modules/auth'
+import SiteFooter from '@/shared/components/SiteFooter.vue'
 import { useTheme } from '@/shared/composables/useTheme'
 
 const route = useRoute()
@@ -429,6 +430,7 @@ async function handleCommand(command: string): Promise<void> {
           <RouterView />
         </div>
       </el-main>
+      <SiteFooter class="main-layout__site-footer" />
     </el-container>
   </el-container>
 </template>

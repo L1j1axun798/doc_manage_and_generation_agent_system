@@ -129,6 +129,15 @@ class DocumentBatchDownloadSerializer(serializers.Serializer):
 
 class DocumentFolderDownloadSerializer(serializers.Serializer):
     folder = serializers.IntegerField(min_value=1)
+    download_id = serializers.UUIDField(required=False)
+
+
+class DocumentCenterDownloadSerializer(serializers.Serializer):
+    download_id = serializers.UUIDField(required=False)
+
+
+class DocumentArchiveDownloadCancelSerializer(serializers.Serializer):
+    download_id = serializers.UUIDField()
 
 
 class DocumentUploadSerializer(serializers.Serializer):

@@ -1,8 +1,8 @@
 import re
 import tempfile
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from datetime import timedelta
-from pathlib import PurePath
+from pathlib import Path, PurePath
 from typing import Any
 from zipfile import ZIP_DEFLATED, ZipFile
 
@@ -41,6 +41,12 @@ class StoredFileMissing(APIException):
     default_code = "stored_file_missing"
 
 
+class ArchiveDownloadCanceled(APIException):
+    status_code = 409
+    default_detail = "资料下载已取消"
+    default_code = "archive_download_canceled"
+
+
 class DocumentConflict(APIException):
     status_code = 409
     default_detail = "文档已被其他操作更新，请刷新后重试"
@@ -55,6 +61,7 @@ class BatchDownloadTooLarge(APIException):
 
 BATCH_DOWNLOAD_MAX_FILES = 20
 BATCH_DOWNLOAD_MAX_BYTES = 500 * 1024 * 1024
+ARCHIVE_COPY_CHUNK_SIZE = 1024 * 1024
 
 
 def create_document(
@@ -507,6 +514,7 @@ def build_folder_download_zip(
     documents: Iterable[Document],
     request: Any = None,
     storage: LocalDocumentStorage | None = None,
+    is_canceled: Callable[[], bool] | None = None,
 ) -> tuple[Any, str, int, int, int]:
     backend = storage or LocalDocumentStorage()
     folder_paths = _folder_archive_paths(root_folder=root_folder, folders=folders)
@@ -522,6 +530,7 @@ def build_folder_download_zip(
         audit_resource=root_folder,
         request=request,
         storage=backend,
+        is_canceled=is_canceled,
     )
 
 
@@ -534,6 +543,7 @@ def build_document_center_download_zip(
     documents: Iterable[Document],
     request: Any = None,
     storage: LocalDocumentStorage | None = None,
+    is_canceled: Callable[[], bool] | None = None,
 ) -> tuple[Any, str, int, int, int]:
     root_by_id = {folder.pk: folder for folder in root_folders}
     folders_by_root: dict[int, list[Folder]] = {root_id: [] for root_id in root_by_id}
@@ -563,6 +573,7 @@ def build_document_center_download_zip(
         audit_resource_id="all",
         request=request,
         storage=storage or LocalDocumentStorage(),
+        is_canceled=is_canceled,
     )
 
 
@@ -580,6 +591,7 @@ def _build_authorized_download_zip(
     audit_resource: Any = None,
     audit_resource_type: str = "",
     audit_resource_id: str = "",
+    is_canceled: Callable[[], bool] | None = None,
 ) -> tuple[Any, str, int, int, int]:
     archive = tempfile.TemporaryFile()
     used_paths: set[str] = set()
@@ -589,6 +601,8 @@ def _build_authorized_download_zip(
     try:
         with ZipFile(archive, mode="w", compression=ZIP_DEFLATED, allowZip64=True) as zip_file:
             for document in documents:
+                if is_canceled is not None and is_canceled():
+                    raise ArchiveDownloadCanceled()
                 if not can_download_document(actor, document):
                     continue
 
@@ -604,7 +618,12 @@ def _build_authorized_download_zip(
                     filename=version.original_filename,
                     used_paths=used_paths,
                 )
-                zip_file.write(storage.resolve(version.storage_path), arcname=archive_path)
+                _write_file_to_zip(
+                    zip_file=zip_file,
+                    source_path=storage.resolve(version.storage_path),
+                    archive_path=archive_path,
+                    is_canceled=is_canceled,
+                )
                 total_size += version.file_size
                 document_count += 1
 
@@ -645,6 +664,20 @@ def _build_authorized_download_zip(
         archive.close()
         raise
     return archive, archive_filename, total_size, archive_size, document_count
+
+
+def _write_file_to_zip(
+    *,
+    zip_file: ZipFile,
+    source_path: Path,
+    archive_path: str,
+    is_canceled: Callable[[], bool] | None,
+) -> None:
+    with source_path.open("rb") as source, zip_file.open(archive_path, mode="w") as target:
+        while chunk := source.read(ARCHIVE_COPY_CHUNK_SIZE):
+            if is_canceled is not None and is_canceled():
+                raise ArchiveDownloadCanceled()
+            target.write(chunk)
 
 
 def _folder_archive_paths(*, root_folder: Folder, folders: list[Folder]) -> dict[int, str]:

@@ -857,6 +857,9 @@ def test_only_admin_can_upload_system_prompt_and_new_task_freezes_snapshot(
         lambda task_id: None,
     )
     client.force_login(case["manager"])
+    User.objects.filter(pk=case["manager"].pk).update(
+        active_session_key=client.session.session_key
+    )
     response = client.post(
         "/api/v1/document-generation/tasks/pipeline/",
         {

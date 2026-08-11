@@ -43,7 +43,14 @@ from .serializers import (
     WebAuthnRegisterOptionsSerializer,
     WebAuthnRegisterVerifySerializer,
 )
-from .services import create_user, disable_user, reset_password, update_user
+from .services import (
+    activate_login_session,
+    clear_active_login_session,
+    create_user,
+    disable_user,
+    reset_password,
+    update_user,
+)
 from .webauthn_services import (
     active_credentials_for_user,
     begin_login,
@@ -136,6 +143,7 @@ class LoginView(APIView):
             login(request, user)
             request.session.pop(PENDING_LOGIN_PREFERENCE_SESSION_KEY, None)
             set_login_session_expiry(request, remember_me=remember_me)
+            replaced_existing_session = activate_login_session(request=request, user=user)
             audit_log(
                 user=user,
                 action="auth.password_verified",
@@ -149,7 +157,14 @@ class LoginView(APIView):
                 resource=user,
                 result="success",
                 request=request,
-                after_data={"verification_method": "password"},
+                after_data={
+                    "verification_method": "password",
+                    **(
+                        {"replaced_existing_session": True}
+                        if replaced_existing_session
+                        else {}
+                    ),
+                },
             )
             return Response(
                 {
@@ -196,13 +211,21 @@ class WebAuthnLoginVerifyView(APIView):
         login(request, user)
         set_login_session_expiry(request, remember_me=remember_me)
         mark_webauthn_session(request, user)
+        replaced_existing_session = activate_login_session(request=request, user=user)
         audit_log(
             user=user,
             action="auth.login",
             resource=user,
             result="success",
             request=request,
-            after_data={"verification_method": "webauthn"},
+            after_data={
+                "verification_method": "webauthn",
+                **(
+                    {"replaced_existing_session": True}
+                    if replaced_existing_session
+                    else {}
+                ),
+            },
         )
         return Response(UserSerializer(user).data)
 
@@ -290,6 +313,7 @@ class LogoutView(APIView):
                 result="success",
                 request=request,
             )
+            clear_active_login_session(request=request, user=user)
         logout(request)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
@@ -331,6 +355,7 @@ class ChangePasswordView(APIView):
         user.must_change_password = False
         user.save(update_fields=["password", "must_change_password"])
         update_session_auth_hash(request, user)
+        activate_login_session(request=request, user=user)
         audit_log(
             user=user,
             action="auth.change_password",

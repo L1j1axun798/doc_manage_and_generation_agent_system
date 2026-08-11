@@ -6,7 +6,8 @@ RequiresMountsFor=/data/documents /data/exports /data/backups
 [Service]
 Type=notify
 User=winddoc
-Group=winddoc
+Group=www-data
+SupplementaryGroups=winddoc
 WorkingDirectory=/opt/wind-doc-system/backend
 Environment=DJANGO_SETTINGS_MODULE=config.settings.production
 RuntimeDirectory=wind-doc-system
@@ -19,7 +20,7 @@ PrivateTmp=true
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/data/documents /data/exports /data/backups /run/wind-doc-system /opt/wind-doc-system/backend/staticfiles
+ReadWritePaths=/data/documents /data/exports /data/backups /var/log/wind-doc-system /run/wind-doc-system
 Restart=on-failure
 RestartSec=5
 

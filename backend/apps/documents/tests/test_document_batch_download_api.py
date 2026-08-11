@@ -1,4 +1,5 @@
 from io import BytesIO
+from uuid import uuid4
 from zipfile import ZipFile
 
 import pytest
@@ -7,8 +8,17 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 
 from apps.access.models import DocumentGrant
 from apps.audit.models import AuditLog
+from apps.documents.archive_download_cancellation import (
+    archive_download_is_canceled,
+    clear_archive_download_cancel,
+)
 from apps.documents.models import Document
-from apps.documents.services import BATCH_DOWNLOAD_MAX_BYTES
+from apps.documents.services import (
+    ARCHIVE_COPY_CHUNK_SIZE,
+    BATCH_DOWNLOAD_MAX_BYTES,
+    ArchiveDownloadCanceled,
+    build_folder_download_zip,
+)
 from apps.folders.models import Folder
 from apps.projects.models import Project, ProjectMember
 
@@ -45,6 +55,97 @@ def response_body(response) -> bytes:
     body = b"".join(response.streaming_content)
     response.close()
     return body
+
+
+@pytest.mark.django_db
+def test_archive_download_cancel_endpoint_records_user_scoped_cancel(client):
+    admin = make_user("admin", User.Role.SYSTEM_ADMIN)
+    client.force_login(admin)
+    download_id = uuid4()
+
+    response = client.post(
+        "/api/v1/documents/archive-download-cancel/",
+        {"download_id": str(download_id)},
+        content_type="application/json",
+    )
+
+    assert response.status_code == 204
+    assert archive_download_is_canceled(user_id=admin.pk, download_id=download_id)
+    clear_archive_download_cancel(user_id=admin.pk, download_id=download_id)
+
+
+@pytest.mark.django_db
+def test_folder_download_stops_when_cooperative_cancel_was_requested(client, tmp_path, settings):
+    settings.FILE_STORAGE_ROOT = tmp_path
+    admin = make_user("admin", User.Role.SYSTEM_ADMIN)
+    folder = Folder.objects.create(
+        name="资料",
+        code="DOWNLOAD-CANCEL-ROOT",
+        is_system_root=True,
+        created_by=admin,
+    )
+    client.force_login(admin)
+    create_document(
+        client,
+        folder=folder,
+        title="报告",
+        filename="report.pdf",
+        content=b"content",
+    )
+    download_id = uuid4()
+    cancel_response = client.post(
+        "/api/v1/documents/archive-download-cancel/",
+        {"download_id": str(download_id)},
+        content_type="application/json",
+    )
+    assert cancel_response.status_code == 204
+
+    response = client.post(
+        "/api/v1/documents/folder-download/",
+        {"folder": folder.pk, "download_id": str(download_id)},
+        content_type="application/json",
+    )
+
+    assert response.status_code == 409
+    assert not archive_download_is_canceled(user_id=admin.pk, download_id=download_id)
+
+
+@pytest.mark.django_db
+def test_folder_download_checks_cancel_state_between_large_file_chunks(client, tmp_path, settings):
+    settings.FILE_STORAGE_ROOT = tmp_path
+    admin = make_user("admin", User.Role.SYSTEM_ADMIN)
+    folder = Folder.objects.create(
+        name="资料",
+        code="DOWNLOAD-CHUNK-CANCEL-ROOT",
+        is_system_root=True,
+        created_by=admin,
+    )
+    client.force_login(admin)
+    document_data = create_document(
+        client,
+        folder=folder,
+        title="大文件",
+        filename="large.pdf",
+        content=b"x" * (ARCHIVE_COPY_CHUNK_SIZE * 2 + 1),
+    )
+    document = Document.objects.select_related("current_version").get(pk=document_data["id"])
+    cancel_checks = 0
+
+    def is_canceled():
+        nonlocal cancel_checks
+        cancel_checks += 1
+        return cancel_checks >= 3
+
+    with pytest.raises(ArchiveDownloadCanceled):
+        build_folder_download_zip(
+            actor=admin,
+            root_folder=folder,
+            folders=[folder],
+            documents=[document],
+            is_canceled=is_canceled,
+        )
+
+    assert cancel_checks == 3
 
 
 @pytest.mark.django_db
@@ -119,6 +220,36 @@ def test_batch_download_rejects_any_unauthorized_document(client, tmp_path, sett
     )
 
     assert response.status_code == 403
+
+
+@pytest.mark.django_db
+def test_batch_download_accepts_legacy_windows_storage_paths(client, tmp_path, settings):
+    settings.FILE_STORAGE_ROOT = tmp_path
+    admin = make_user("admin", User.Role.SYSTEM_ADMIN)
+    folder = Folder.objects.create(name="资料", created_by=admin)
+    client.force_login(admin)
+    document_data = create_document(
+        client,
+        folder=folder,
+        title="报告",
+        filename="report.pdf",
+        content=b"content",
+    )
+    document = Document.objects.select_related("current_version").get(pk=document_data["id"])
+    version = document.current_version
+    assert version is not None
+    version.storage_path = version.storage_path.replace("/", "\\")
+    version.save(update_fields=["storage_path"])
+
+    response = client.post(
+        "/api/v1/documents/batch-download/",
+        {"document_ids": [document.id]},
+        content_type="application/json",
+    )
+
+    assert response.status_code == 200
+    with ZipFile(BytesIO(response_body(response))) as archive:
+        assert archive.read("report.pdf") == b"content"
 
 
 @pytest.mark.django_db

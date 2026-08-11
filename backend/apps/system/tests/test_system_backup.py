@@ -1,3 +1,6 @@
+import subprocess
+from types import SimpleNamespace
+
 import pytest
 from django.core.management import call_command
 from django.utils import timezone
@@ -9,9 +12,53 @@ from apps.system.services import (
     BackupProcessError,
     BackupVerificationError,
     create_system_backup,
+    dump_mysql_database,
     ensure_backup_not_running,
     verify_backup_archive,
 )
+
+
+def test_dump_mysql_database_retries_without_unsupported_masking_option(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        "apps.system.services.settings",
+        SimpleNamespace(
+            DATABASES={
+                "default": {
+                    "ENGINE": "django.db.backends.mysql",
+                    "NAME": "wind_docs",
+                    "HOST": "127.0.0.1",
+                    "PORT": "3306",
+                    "USER": "winddoc",
+                    "PASSWORD": "secret",
+                }
+            },
+            SYSTEM_BACKUP_MYSQLDUMP_BIN="mysqldump",
+        ),
+    )
+    commands = []
+
+    def fake_run(command, **kwargs):
+        commands.append(command)
+        if len(commands) == 1:
+            return subprocess.CompletedProcess(
+                command,
+                1,
+                stderr=b"mysqldump: [ERROR] unknown option '--skip-masking-policies'.",
+            )
+        kwargs["stdout"].write(b"database dump")
+        return subprocess.CompletedProcess(command, 0, stderr=b"")
+
+    monkeypatch.setattr("apps.system.services.subprocess.run", fake_run)
+    output_path = tmp_path / "database.sql"
+
+    dump_mysql_database(output_path)
+
+    assert "--skip-masking-policies" in commands[0]
+    assert "--skip-masking-policies" not in commands[1]
+    assert output_path.read_bytes() == b"database dump"
 
 
 @pytest.mark.django_db
