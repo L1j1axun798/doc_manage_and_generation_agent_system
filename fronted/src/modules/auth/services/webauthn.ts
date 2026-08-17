@@ -10,6 +10,25 @@ import {
 
 const UNSUPPORTED_MESSAGE = '当前浏览器或访问环境不支持本人验证，请使用支持 WebAuthn 的安全浏览器'
 const CANONICAL_LOCAL_ORIGIN = 'http://localhost:5174'
+const WECHAT_IOS_MESSAGE = '当前在微信内置浏览器中，无法完成本人验证。请点击右上角“…”，选择“在 Safari 中打开”后重试'
+const WECHAT_ANDROID_MESSAGE = '当前在微信内置浏览器中，无法完成本人验证。请点击右上角“…”，选择“在浏览器打开”后重试'
+const NOT_ALLOWED_MESSAGE = '本人验证未完成：可能已取消、超时，或当前浏览器阻止了此次操作，请重试'
+
+export function getWebAuthnEnvironmentIssue(): string | undefined {
+  if (typeof navigator !== 'undefined') {
+    const userAgent = navigator.userAgent
+    const isMobileWechat = /MicroMessenger/i.test(userAgent) && /Android|iPad|iPhone|iPod/i.test(userAgent)
+    if (isMobileWechat) {
+      return /iPad|iPhone|iPod/i.test(userAgent) ? WECHAT_IOS_MESSAGE : WECHAT_ANDROID_MESSAGE
+    }
+  }
+
+  if (!browserSupportsWebAuthn()) {
+    return UNSUPPORTED_MESSAGE
+  }
+
+  return undefined
+}
 
 export async function authenticateWithWebAuthn(
   options: PublicKeyCredentialRequestOptionsJSON,
@@ -38,8 +57,9 @@ export async function registerWithWebAuthn(
 }
 
 function ensureWebAuthnSupported(): void {
-  if (!browserSupportsWebAuthn()) {
-    throw new Error(UNSUPPORTED_MESSAGE)
+  const environmentIssue = getWebAuthnEnvironmentIssue()
+  if (environmentIssue) {
+    throw new Error(environmentIssue)
   }
 }
 
@@ -77,9 +97,12 @@ function toWebAuthnUserError(error: unknown): Error {
   if (code === 'ERROR_AUTHENTICATOR_GENERAL_ERROR') {
     return new Error('本人验证设备处理失败，请确认使用的是已绑定设备')
   }
+  if (code === 'ERROR_PASSTHROUGH_SEE_CAUSE_PROPERTY') {
+    return new Error(getWebAuthnEnvironmentIssue() ?? NOT_ALLOWED_MESSAGE)
+  }
 
-  if (error instanceof DOMException && error.name === 'NotAllowedError') {
-    return new Error('本人验证未完成或已取消，请重新验证')
+  if (readErrorName(error) === 'NotAllowedError') {
+    return new Error(getWebAuthnEnvironmentIssue() ?? NOT_ALLOWED_MESSAGE)
   }
   if (error instanceof Error && error.message.trim()) {
     return error
@@ -94,4 +117,13 @@ function readErrorCode(error: unknown): string | undefined {
 
   const code = (error as { code: unknown }).code
   return typeof code === 'string' ? code : undefined
+}
+
+function readErrorName(error: unknown): string | undefined {
+  if (typeof error !== 'object' || error === null || !('name' in error)) {
+    return undefined
+  }
+
+  const name = (error as { name: unknown }).name
+  return typeof name === 'string' ? name : undefined
 }

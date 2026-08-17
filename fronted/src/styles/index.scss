@@ -2616,9 +2616,9 @@ a:hover {
 
 .location-attention {
   display: grid;
-  align-content: start;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   gap: 10px;
-  min-height: 520px;
+  min-height: 704px;
   padding: 14px;
 }
 
@@ -2650,6 +2650,23 @@ a:hover {
   text-align: left;
 }
 
+.location-attention__list {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  min-height: 602px;
+}
+
+.location-attention__pagination,
+.location-table-panel__pagination {
+  display: flex;
+  justify-content: center;
+}
+
+.location-attention__pagination {
+  min-height: 28px;
+}
+
 .location-attention__item:hover,
 .location-attention__item:focus {
   border-color: var(--color-brand-3);
@@ -2676,6 +2693,12 @@ a:hover {
 
 .location-table-panel {
   overflow: hidden;
+}
+
+.location-table-panel__pagination {
+  min-height: 56px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--color-border-light);
 }
 
 .location-table-panel__subtext {

@@ -144,12 +144,13 @@ def finish_registration(
         consume_challenge(challenge)
         raise AuthenticationFailed("本人验证绑定失败") from exc
 
-    if verification.credential_device_type == CredentialDeviceType.MULTI_DEVICE:
-        consume_challenge(challenge)
-        raise ValidationError("不允许使用可同步到多设备的通行密钥作为定位凭据")
-    if verification.credential_backed_up:
-        consume_challenge(challenge)
-        raise ValidationError("不允许使用已备份的通行密钥作为定位凭据")
+    if not settings.WEBAUTHN_ALLOW_SYNCED_PASSKEYS:
+        if verification.credential_device_type == CredentialDeviceType.MULTI_DEVICE:
+            consume_challenge(challenge)
+            raise ValidationError("当前安全策略不允许使用可同步到多设备的通行密钥")
+        if verification.credential_backed_up:
+            consume_challenge(challenge)
+            raise ValidationError("当前安全策略不允许使用已备份的通行密钥")
 
     credential_id = bytes_to_base64url(verification.credential_id)
     if WebAuthnCredential.objects.filter(credential_id_hash=hash_token(credential_id)).exists():
@@ -176,7 +177,11 @@ def finish_registration(
         resource=webauthn_credential,
         result="success",
         request=request,
-        after_data={"credential_id": credential_id, "device_type": webauthn_credential.device_type},
+        after_data={
+            "credential_id": credential_id,
+            "device_type": webauthn_credential.device_type,
+            "backed_up": webauthn_credential.backed_up,
+        },
     )
     return webauthn_credential
 

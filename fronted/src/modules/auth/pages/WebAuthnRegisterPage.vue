@@ -10,7 +10,7 @@ import {
   fetchCsrfToken,
   verifyWebAuthnRegistration,
 } from '../api/auth.api'
-import { registerWithWebAuthn } from '../services/webauthn'
+import { getWebAuthnEnvironmentIssue, registerWithWebAuthn } from '../services/webauthn'
 
 const route = useRoute()
 const router = useRouter()
@@ -19,13 +19,20 @@ const loading = ref(false)
 const form = reactive({
   deviceName: '',
 })
+const environmentIssue = getWebAuthnEnvironmentIssue()
 
 const ticket = computed(() => (typeof route.query.ticket === 'string' ? route.query.ticket : ''))
-const canSubmit = computed(() => ticket.value.trim().length > 0 && !loading.value)
+const canSubmit = computed(
+  () => ticket.value.trim().length > 0 && !environmentIssue && !loading.value,
+)
 
 async function submitRegistration(): Promise<void> {
   if (!ticket.value) {
     ElMessage.warning('绑定链接无效')
+    return
+  }
+  if (environmentIssue) {
+    ElMessage.warning(environmentIssue)
     return
   }
 
@@ -68,6 +75,14 @@ async function submitRegistration(): Promise<void> {
         :closable="false"
         title="绑定链接缺少有效票据"
         type="error"
+      />
+
+      <el-alert
+        v-else-if="environmentIssue"
+        :closable="false"
+        :title="environmentIssue"
+        show-icon
+        type="warning"
       />
 
       <el-form class="login-page__form" :model="form" @submit.prevent="submitRegistration">

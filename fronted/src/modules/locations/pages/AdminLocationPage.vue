@@ -18,7 +18,19 @@ import {
 const snapshots = ref<LocationSnapshot[]>([])
 const loading = ref(false)
 const mapRef = ref<InstanceType<typeof PersonnelLocationMap> | null>(null)
+const ATTENTION_PAGE_SIZE = 9
+const LOCATION_TABLE_PAGE_SIZE = 10
+const attentionPage = ref(1)
+const locationTablePage = ref(1)
 const attentionLocations = computed(() => getAttentionLocations(snapshots.value))
+const pagedAttentionLocations = computed(() => {
+  const start = (attentionPage.value - 1) * ATTENTION_PAGE_SIZE
+  return attentionLocations.value.slice(start, start + ATTENTION_PAGE_SIZE)
+})
+const pagedLocationSnapshots = computed(() => {
+  const start = (locationTablePage.value - 1) * LOCATION_TABLE_PAGE_SIZE
+  return snapshots.value.slice(start, start + LOCATION_TABLE_PAGE_SIZE)
+})
 
 const statusCounts = computed<Record<LocationStatus | 'total', number>>(() => {
   const counts: Record<LocationStatus | 'total', number> = {
@@ -42,6 +54,8 @@ async function loadLocations(): Promise<void> {
   loading.value = true
   try {
     snapshots.value = await fetchAdminLatestLocations()
+    attentionPage.value = 1
+    locationTablePage.value = 1
   } catch (error) {
     ElMessage.error(getErrorMessage(error))
   } finally {
@@ -100,34 +114,47 @@ function formatAccuracy(value: string | null | undefined): string {
           <el-tag type="warning">{{ attentionLocations.length }}</el-tag>
         </header>
 
-        <el-empty
-          v-if="attentionLocations.length === 0"
-          description="暂无需关注人员"
-        />
+        <div class="location-attention__list">
+          <el-empty
+            v-if="attentionLocations.length === 0"
+            description="暂无需关注人员"
+          />
 
-        <button
-          v-for="snapshot in attentionLocations"
-          v-else
-          :key="snapshot.user.id"
-          class="location-attention__item"
-          type="button"
-          @click="focusSnapshot(snapshot)"
-        >
-          <span>
-            <strong>{{ snapshot.user.real_name }}</strong>
-            <small>{{ getLocationDisplayAddress(snapshot) }}</small>
-          </span>
-          <el-tag :type="getLocationStatusTagType(snapshot.location_status)">
-            {{ getLocationStatusLabel(snapshot.location_status) }}
-          </el-tag>
-        </button>
+          <button
+            v-for="snapshot in pagedAttentionLocations"
+            v-else
+            :key="snapshot.user.id"
+            class="location-attention__item"
+            type="button"
+            @click="focusSnapshot(snapshot)"
+          >
+            <span>
+              <strong>{{ snapshot.user.real_name }}</strong>
+              <small>{{ getLocationDisplayAddress(snapshot) }}</small>
+            </span>
+            <el-tag :type="getLocationStatusTagType(snapshot.location_status)">
+              {{ getLocationStatusLabel(snapshot.location_status) }}
+            </el-tag>
+          </button>
+        </div>
+
+        <el-pagination
+          v-if="attentionLocations.length > ATTENTION_PAGE_SIZE"
+          v-model:current-page="attentionPage"
+          :page-size="ATTENTION_PAGE_SIZE"
+          :total="attentionLocations.length"
+          class="location-attention__pagination"
+          layout="prev, pager, next"
+          size="small"
+        />
       </aside>
     </section>
 
     <section class="location-table-panel">
       <el-table
         v-loading="loading"
-        :data="snapshots"
+        :data="pagedLocationSnapshots"
+        :height="650"
         row-key="user.id"
         @row-click="focusSnapshot"
       >
@@ -160,6 +187,14 @@ function formatAccuracy(value: string | null | undefined): string {
           </template>
         </el-table-column>
       </el-table>
+      <el-pagination
+        v-if="snapshots.length > LOCATION_TABLE_PAGE_SIZE"
+        v-model:current-page="locationTablePage"
+        :page-size="LOCATION_TABLE_PAGE_SIZE"
+        :total="snapshots.length"
+        class="location-table-panel__pagination"
+        layout="total, prev, pager, next, jumper"
+      />
     </section>
   </section>
 </template>
