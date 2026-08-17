@@ -97,12 +97,13 @@ function submit(): void {
 const roleOptions = computed<Array<{ label: string; value: UserRole }>>(() => {
   const options: Array<{ label: string; value: UserRole }> = [
     { label: '系统管理员', value: 'system_admin' },
-    { label: '项目负责人', value: 'project_manager' },
     { label: '资料整理员', value: 'data_operator' },
   ]
 
   if (props.user?.role === 'temporary_user') {
     options.push({ label: '临时用户', value: 'temporary_user' })
+  } else if (props.user?.role === 'project_manager') {
+    options.push({ label: '项目负责人', value: 'project_manager' })
   }
 
   return options

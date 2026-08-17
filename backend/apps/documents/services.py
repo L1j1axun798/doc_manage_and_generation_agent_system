@@ -20,6 +20,7 @@ from apps.folders.defaults import (
     standard_root_for_name,
 )
 from apps.folders.models import Folder
+from apps.folders.personnel import public_staff_folder_ids
 from apps.projects.models import Project
 from common.storage import LocalDocumentStorage, StoredFile
 from common.validators import normalize_upload_filename, validate_uploaded_file
@@ -464,10 +465,11 @@ def build_batch_download_zip(
     backend = storage or LocalDocumentStorage()
     versions: list[DocumentVersion] = []
     total_size = 0
+    staff_folder_ids = public_staff_folder_ids()
     for document in documents:
         if document.is_deleted:
             raise ValidationError("不能批量下载已删除文档")
-        if not can_download_document(actor, document):
+        if not can_download_document(actor, document, staff_folder_ids=staff_folder_ids):
             audit_log(
                 user=actor,
                 action="document.batch_download",
@@ -597,13 +599,14 @@ def _build_authorized_download_zip(
     used_paths: set[str] = set()
     total_size = 0
     document_count = 0
+    staff_folder_ids = public_staff_folder_ids()
 
     try:
         with ZipFile(archive, mode="w", compression=ZIP_DEFLATED, allowZip64=True) as zip_file:
             for document in documents:
                 if is_canceled is not None and is_canceled():
                     raise ArchiveDownloadCanceled()
-                if not can_download_document(actor, document):
+                if not can_download_document(actor, document, staff_folder_ids=staff_folder_ids):
                     continue
 
                 version = document.current_version

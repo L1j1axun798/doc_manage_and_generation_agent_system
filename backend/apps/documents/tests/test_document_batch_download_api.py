@@ -443,7 +443,7 @@ def test_folder_download_is_not_limited_by_legacy_20_file_batch_limit(client, tm
 
 
 @pytest.mark.django_db
-def test_folder_download_only_includes_documents_user_can_download(client, tmp_path, settings):
+def test_folder_download_includes_public_documents_for_data_operator(client, tmp_path, settings):
     settings.FILE_STORAGE_ROOT = tmp_path
     admin = make_user("admin", User.Role.SYSTEM_ADMIN)
     operator = make_user("operator", User.Role.DATA_OPERATOR)
@@ -453,28 +453,22 @@ def test_folder_download_only_includes_documents_user_can_download(client, tmp_p
         is_system_root=True,
         created_by=admin,
     )
-    allowed_folder = Folder.objects.create(parent=root, name="可下载", created_by=admin)
-    denied_folder = Folder.objects.create(parent=root, name="不可下载", created_by=admin)
+    first_folder = Folder.objects.create(parent=root, name="资料一", created_by=admin)
+    second_folder = Folder.objects.create(parent=root, name="资料二", created_by=admin)
     client.force_login(admin)
-    allowed = create_document(
+    create_document(
         client,
-        folder=allowed_folder,
-        title="已授权",
-        filename="allowed.pdf",
-        content=b"allowed",
+        folder=first_folder,
+        title="公开文件一",
+        filename="first.pdf",
+        content=b"first",
     )
     create_document(
         client,
-        folder=denied_folder,
-        title="未授权",
-        filename="denied.pdf",
-        content=b"denied",
-    )
-    DocumentGrant.objects.create(
-        document_id=allowed["id"],
-        user=operator,
-        can_download=True,
-        created_by=admin,
+        folder=second_folder,
+        title="公开文件二",
+        filename="second.pdf",
+        content=b"second",
     )
     client.force_login(operator)
 
@@ -485,36 +479,41 @@ def test_folder_download_only_includes_documents_user_can_download(client, tmp_p
     )
 
     assert response.status_code == 200
-    assert response["X-Archive-Document-Count"] == "1"
+    assert response["X-Archive-Document-Count"] == "2"
     with ZipFile(BytesIO(response_body(response))) as archive:
-        assert archive.namelist() == ["公共资料/可下载/allowed.pdf"]
-        assert archive.read("公共资料/可下载/allowed.pdf") == b"allowed"
+        assert sorted(archive.namelist()) == [
+            "公共资料/资料一/first.pdf",
+            "公共资料/资料二/second.pdf",
+        ]
+        assert archive.read("公共资料/资料一/first.pdf") == b"first"
+        assert archive.read("公共资料/资料二/second.pdf") == b"second"
 
 
 @pytest.mark.django_db
-def test_folder_download_reports_when_no_documents_are_downloadable(client, tmp_path, settings):
+def test_folder_download_excludes_staff_documents_for_data_operator(client, tmp_path, settings):
     settings.FILE_STORAGE_ROOT = tmp_path
     admin = make_user("admin", User.Role.SYSTEM_ADMIN)
     operator = make_user("operator", User.Role.DATA_OPERATOR)
-    root = Folder.objects.create(
-        name="公共资料",
-        code="DOWNLOAD-ROOT",
+    staff_root = Folder.objects.create(
+        name="人员资质",
+        code="PUBLIC-STAFF",
         is_system_root=True,
         created_by=admin,
     )
+    own_folder = Folder.objects.create(parent=staff_root, name="operator", created_by=admin)
     client.force_login(admin)
     create_document(
         client,
-        folder=root,
-        title="未授权",
-        filename="denied.pdf",
-        content=b"denied",
+        folder=own_folder,
+        title="本人资质",
+        filename="staff.pdf",
+        content=b"staff",
     )
     client.force_login(operator)
 
     response = client.post(
         "/api/v1/documents/folder-download/",
-        {"folder": root.id},
+        {"folder": staff_root.id},
         content_type="application/json",
     )
 
@@ -683,7 +682,7 @@ def test_center_download_includes_standard_roots_and_excludes_legacy_dev_root(
 
 
 @pytest.mark.django_db
-def test_center_download_only_includes_documents_user_can_download(client, tmp_path, settings):
+def test_center_download_includes_public_docs_but_excludes_staff_docs(client, tmp_path, settings):
     settings.FILE_STORAGE_ROOT = tmp_path
     admin = make_user("admin", User.Role.SYSTEM_ADMIN)
     operator = make_user("operator", User.Role.DATA_OPERATOR)
@@ -699,26 +698,34 @@ def test_center_download_only_includes_documents_user_can_download(client, tmp_p
         is_system_root=True,
         created_by=admin,
     )
+    staff_root = Folder.objects.create(
+        name="人员资质",
+        code="PUBLIC-STAFF",
+        is_system_root=True,
+        created_by=admin,
+    )
+    own_folder = Folder.objects.create(parent=staff_root, name="operator", created_by=admin)
     client.force_login(admin)
-    allowed = create_document(
+    create_document(
         client,
         folder=first_root,
-        title="已授权",
-        filename="allowed.pdf",
-        content=b"allowed",
+        title="公共文件一",
+        filename="public1.pdf",
+        content=b"public1",
     )
     create_document(
         client,
         folder=second_root,
-        title="未授权",
-        filename="denied.pdf",
-        content=b"denied",
+        title="公共文件二",
+        filename="public2.pdf",
+        content=b"public2",
     )
-    DocumentGrant.objects.create(
-        document_id=allowed["id"],
-        user=operator,
-        can_download=True,
-        created_by=admin,
+    create_document(
+        client,
+        folder=own_folder,
+        title="本人资质",
+        filename="staff.pdf",
+        content=b"staff",
     )
     client.force_login(operator)
 
@@ -729,30 +736,35 @@ def test_center_download_only_includes_documents_user_can_download(client, tmp_p
     )
 
     assert response.status_code == 200
-    assert response["X-Archive-Document-Count"] == "1"
+    assert response["X-Archive-Document-Count"] == "2"
     with ZipFile(BytesIO(response_body(response))) as archive:
-        assert archive.namelist() == ["技术方案/allowed.pdf"]
-        assert archive.read("技术方案/allowed.pdf") == b"allowed"
+        assert sorted(archive.namelist()) == [
+            "技术方案/public1.pdf",
+            "报告模板/public2.pdf",
+        ]
+        assert archive.read("技术方案/public1.pdf") == b"public1"
+        assert archive.read("报告模板/public2.pdf") == b"public2"
 
 
 @pytest.mark.django_db
-def test_center_download_reports_when_no_documents_are_downloadable(client, tmp_path, settings):
+def test_center_download_excludes_staff_documents_for_data_operator(client, tmp_path, settings):
     settings.FILE_STORAGE_ROOT = tmp_path
     admin = make_user("admin", User.Role.SYSTEM_ADMIN)
     operator = make_user("operator", User.Role.DATA_OPERATOR)
-    root = Folder.objects.create(
-        name="报告模板",
-        code="PUBLIC-REPORT-TEMPLATE",
+    staff_root = Folder.objects.create(
+        name="人员资质",
+        code="PUBLIC-STAFF",
         is_system_root=True,
         created_by=admin,
     )
+    own_folder = Folder.objects.create(parent=staff_root, name="operator", created_by=admin)
     client.force_login(admin)
     create_document(
         client,
-        folder=root,
-        title="未授权",
-        filename="denied.pdf",
-        content=b"denied",
+        folder=own_folder,
+        title="本人资质",
+        filename="staff.pdf",
+        content=b"staff",
     )
     client.force_login(operator)
 

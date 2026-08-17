@@ -13,6 +13,32 @@ from .defaults import standard_root_for_code
 from .models import Folder, PersonnelProfile
 
 
+def public_staff_folder_ids() -> set[int]:
+    """返回“人员资质”公共根分类及其全部后代文件夹的 id 集合。"""
+    definition = standard_root_for_code("PUBLIC-STAFF")
+    if definition is None:
+        return set()
+    root_ids = set(
+        Folder.objects.filter(
+            Q(code=definition.code) | Q(name__in=definition.names),
+            project__isnull=True,
+            parent__isnull=True,
+        ).values_list("id", flat=True)
+    )
+    folder_ids = set(root_ids)
+    frontier = list(root_ids)
+    while frontier:
+        child_ids = set(
+            Folder.objects.filter(parent_id__in=frontier).values_list("id", flat=True)
+        )
+        new_ids = child_ids - folder_ids
+        if not new_ids:
+            break
+        folder_ids |= new_ids
+        frontier = list(new_ids)
+    return folder_ids
+
+
 def personnel_folders() -> QuerySet[Folder]:
     definition = standard_root_for_code("PUBLIC-STAFF")
     if definition is None:

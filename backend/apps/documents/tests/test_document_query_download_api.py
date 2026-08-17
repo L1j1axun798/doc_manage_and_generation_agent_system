@@ -457,3 +457,57 @@ def test_public_staff_root_only_lists_current_users_documents_for_non_admin(
     assert other_folder_response.status_code == 200
     assert other_folder_response.json()["count"] == 0
     assert other_detail_response.status_code == 404
+
+
+@pytest.mark.django_db
+def test_data_operator_can_download_public_document(client, tmp_path, settings):
+    settings.FILE_STORAGE_ROOT = tmp_path
+    admin = make_user("admin", User.Role.SYSTEM_ADMIN)
+    operator = make_user("operator", User.Role.DATA_OPERATOR)
+    root = Folder.objects.create(
+        name="公司资质",
+        code="PUBLIC-COMPANY",
+        is_system_root=True,
+        created_by=admin,
+    )
+    folder = Folder.objects.create(parent=root, name="安全生产许可证", created_by=admin)
+    content = b"public internal document"
+    client.force_login(admin)
+    document = create_document_via_api(
+        client,
+        folder=folder,
+        title="安全生产许可证",
+        content=content,
+    )
+    client.force_login(operator)
+
+    download_response = client.get(f"/api/v1/documents/{document['id']}/download/")
+
+    assert download_response.status_code == 200
+    assert b"".join(download_response.streaming_content) == content
+
+
+@pytest.mark.django_db
+def test_data_operator_cannot_download_public_staff_document(client, tmp_path, settings):
+    settings.FILE_STORAGE_ROOT = tmp_path
+    admin = make_user("admin", User.Role.SYSTEM_ADMIN)
+    operator = make_user("operator", User.Role.DATA_OPERATOR)
+    staff_root = Folder.objects.create(
+        name="人员资质",
+        code="PUBLIC-STAFF",
+        is_system_root=True,
+        created_by=admin,
+    )
+    own_folder = Folder.objects.create(parent=staff_root, name="operator", created_by=admin)
+    client.force_login(admin)
+    document = create_document_via_api(
+        client,
+        folder=own_folder,
+        title="本人资质",
+        content=b"staff",
+    )
+    client.force_login(operator)
+
+    download_response = client.get(f"/api/v1/documents/{document['id']}/download/")
+
+    assert download_response.status_code == 403
