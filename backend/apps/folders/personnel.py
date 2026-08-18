@@ -13,24 +13,45 @@ from .defaults import standard_root_for_code
 from .models import Folder, PersonnelProfile
 
 
-def public_staff_folder_ids() -> set[int]:
-    """返回“人员资质”公共根分类及其全部后代文件夹的 id 集合。"""
+def public_staff_root_ids() -> set[int]:
+    """返回“人员资质”公共根分类的 id 集合。"""
     definition = standard_root_for_code("PUBLIC-STAFF")
     if definition is None:
         return set()
-    root_ids = set(
+    return set(
         Folder.objects.filter(
             Q(code=definition.code) | Q(name__in=definition.names),
             project__isnull=True,
             parent__isnull=True,
         ).values_list("id", flat=True)
     )
+
+
+def public_staff_folder_ids() -> set[int]:
+    """返回“人员资质”公共根分类及其全部后代文件夹的 id 集合。"""
+    return _folder_and_descendant_ids(public_staff_root_ids())
+
+
+def own_public_staff_folder_ids(user: Any) -> set[int]:
+    """返回当前用户以真实姓名命名的人员资质目录及其全部后代 id。"""
+    real_name = (getattr(user, "real_name", "") or "").strip()
+    if not real_name:
+        return set()
+    own_root_ids = set(
+        Folder.objects.filter(
+            project__isnull=True,
+            parent_id__in=public_staff_root_ids(),
+            name=real_name,
+        ).values_list("id", flat=True)
+    )
+    return _folder_and_descendant_ids(own_root_ids)
+
+
+def _folder_and_descendant_ids(root_ids: set[int]) -> set[int]:
     folder_ids = set(root_ids)
-    frontier = list(root_ids)
+    frontier = list(folder_ids)
     while frontier:
-        child_ids = set(
-            Folder.objects.filter(parent_id__in=frontier).values_list("id", flat=True)
-        )
+        child_ids = set(Folder.objects.filter(parent_id__in=frontier).values_list("id", flat=True))
         new_ids = child_ids - folder_ids
         if not new_ids:
             break

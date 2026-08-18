@@ -39,6 +39,7 @@ def create_document_via_api(
     title: str,
     content: bytes,
     source_type: str | None = None,
+    access_level: str | None = None,
 ):
     payload = {
         "folder": folder.id,
@@ -47,6 +48,8 @@ def create_document_via_api(
     }
     if source_type is not None:
         payload["source_type"] = source_type
+    if access_level is not None:
+        payload["access_level"] = access_level
     response = client.post(
         "/api/v1/documents/",
         payload,
@@ -63,7 +66,7 @@ def test_document_list_is_paginated_searchable_and_filtered_by_visibility(
 ):
     settings.FILE_STORAGE_ROOT = tmp_path
     admin = make_user("admin", User.Role.SYSTEM_ADMIN)
-    operator = make_user("operator", User.Role.DATA_OPERATOR)
+    operator = make_user("operator", User.Role.PROJECT_MANAGER)
     visible_project = Project.objects.create(name="可见项目", code="P001", created_by=admin)
     hidden_project = Project.objects.create(name="隐藏项目", code="P002", created_by=admin)
     visible_folder = Folder.objects.create(
@@ -118,7 +121,7 @@ def test_non_admin_cannot_download_without_document_grant(
 ):
     settings.FILE_STORAGE_ROOT = tmp_path
     admin = make_user("admin", User.Role.SYSTEM_ADMIN)
-    operator = make_user("operator", User.Role.DATA_OPERATOR)
+    operator = make_user("operator", User.Role.PROJECT_MANAGER)
     project = Project.objects.create(name="项目", code="P001", created_by=admin)
     folder = Folder.objects.create(project=project, name="过程资料", created_by=admin)
     ProjectMember.objects.create(project=project, user=operator, can_upload=True)
@@ -145,7 +148,7 @@ def test_project_document_is_visible_but_download_denied_without_grant(
 ):
     settings.FILE_STORAGE_ROOT = tmp_path
     admin = make_user("admin", User.Role.SYSTEM_ADMIN)
-    operator = make_user("operator", User.Role.DATA_OPERATOR)
+    operator = make_user("operator", User.Role.PROJECT_MANAGER)
     project = Project.objects.create(name="项目", code="P001", created_by=admin)
     folder = Folder.objects.create(project=project, name="过程资料", created_by=admin)
     ProjectMember.objects.create(project=project, user=operator)
@@ -200,7 +203,7 @@ def test_document_download_allowed_with_document_grant(
 ):
     settings.FILE_STORAGE_ROOT = tmp_path
     admin = make_user("admin", User.Role.SYSTEM_ADMIN)
-    operator = make_user("operator", User.Role.DATA_OPERATOR)
+    operator = make_user("operator", User.Role.PROJECT_MANAGER)
     project = Project.objects.create(name="项目", code="P001", created_by=admin)
     folder = Folder.objects.create(project=project, name="过程资料", created_by=admin)
     content = b"granted content"
@@ -232,7 +235,7 @@ def test_document_download_allowed_with_document_grant(
 def test_guessing_document_id_outside_project_scope_returns_404(client, tmp_path, settings):
     settings.FILE_STORAGE_ROOT = tmp_path
     admin = make_user("admin", User.Role.SYSTEM_ADMIN)
-    operator = make_user("operator", User.Role.DATA_OPERATOR)
+    operator = make_user("operator", User.Role.PROJECT_MANAGER)
     visible_project = Project.objects.create(name="可见项目", code="P001", created_by=admin)
     hidden_project = Project.objects.create(name="隐藏项目", code="P002", created_by=admin)
     visible_folder = Folder.objects.create(
@@ -341,7 +344,7 @@ def test_public_technical_solution_lists_only_visible_project_documents(
 ):
     settings.FILE_STORAGE_ROOT = tmp_path
     admin = make_user("admin", User.Role.SYSTEM_ADMIN)
-    operator = make_user("operator", User.Role.DATA_OPERATOR)
+    operator = make_user("operator", User.Role.PROJECT_MANAGER)
     visible_project = Project.objects.create(name="可见项目", code="P001", created_by=admin)
     hidden_project = Project.objects.create(name="隐藏项目", code="P002", created_by=admin)
     ProjectMember.objects.create(project=visible_project, user=operator)
@@ -488,7 +491,33 @@ def test_data_operator_can_download_public_document(client, tmp_path, settings):
 
 
 @pytest.mark.django_db
-def test_data_operator_cannot_download_public_staff_document(client, tmp_path, settings):
+def test_data_operator_can_download_project_document_without_membership(client, tmp_path, settings):
+    settings.FILE_STORAGE_ROOT = tmp_path
+    admin = make_user("admin", User.Role.SYSTEM_ADMIN)
+    operator = make_user("operator", User.Role.DATA_OPERATOR)
+    project = Project.objects.create(name="未加入项目", code="P-HIDDEN", created_by=admin)
+    folder = Folder.objects.create(project=project, name="项目资料", created_by=admin)
+    client.force_login(admin)
+    document = create_document_via_api(
+        client,
+        folder=folder,
+        title="限制级项目资料",
+        content=b"restricted-project-document",
+        access_level=Document.AccessLevel.RESTRICTED,
+    )
+    client.force_login(operator)
+
+    list_response = client.get("/api/v1/documents/?search=限制级项目资料")
+    download_response = client.get(f"/api/v1/documents/{document['id']}/download/")
+
+    assert list_response.status_code == 200
+    assert list_response.json()["count"] == 1
+    assert download_response.status_code == 200
+    assert b"".join(download_response.streaming_content) == b"restricted-project-document"
+
+
+@pytest.mark.django_db
+def test_data_operator_can_download_only_own_public_staff_document(client, tmp_path, settings):
     settings.FILE_STORAGE_ROOT = tmp_path
     admin = make_user("admin", User.Role.SYSTEM_ADMIN)
     operator = make_user("operator", User.Role.DATA_OPERATOR)
@@ -499,15 +528,25 @@ def test_data_operator_cannot_download_public_staff_document(client, tmp_path, s
         created_by=admin,
     )
     own_folder = Folder.objects.create(parent=staff_root, name="operator", created_by=admin)
+    other_folder = Folder.objects.create(parent=staff_root, name="other", created_by=admin)
     client.force_login(admin)
-    document = create_document_via_api(
+    own_document = create_document_via_api(
         client,
         folder=own_folder,
         title="本人资质",
         content=b"staff",
     )
+    other_document = create_document_via_api(
+        client,
+        folder=other_folder,
+        title="他人资质",
+        content=b"other-staff",
+    )
     client.force_login(operator)
 
-    download_response = client.get(f"/api/v1/documents/{document['id']}/download/")
+    own_response = client.get(f"/api/v1/documents/{own_document['id']}/download/")
+    other_response = client.get(f"/api/v1/documents/{other_document['id']}/download/")
 
-    assert download_response.status_code == 403
+    assert own_response.status_code == 200
+    assert b"".join(own_response.streaming_content) == b"staff"
+    assert other_response.status_code == 403

@@ -21,7 +21,6 @@ from webauthn import (
 from webauthn.helpers import base64url_to_bytes, bytes_to_base64url, options_to_json
 from webauthn.helpers.exceptions import WebAuthnException
 from webauthn.helpers.structs import (
-    AuthenticatorAttachment,
     AuthenticatorSelectionCriteria,
     AuthenticatorTransport,
     CredentialDeviceType,
@@ -34,6 +33,8 @@ from apps.audit.services import audit_log
 
 from .models import User, WebAuthnChallenge, WebAuthnCredential, WebAuthnEnrollmentTicket
 
+MIN_WEBAUTHN_ENROLLMENT_TICKET_TTL_SECONDS = 3 * 60 * 60
+
 
 @dataclass(frozen=True)
 class WebAuthnOptionsResult:
@@ -44,13 +45,18 @@ class WebAuthnOptionsResult:
 def create_enrollment_ticket(
     *, user: User, actor: User | None, request: Any | None = None
 ) -> dict[str, Any]:
+    if actor is not None and not actor.is_system_admin:
+        raise PermissionDenied("仅系统管理员可申请设备绑定邀请")
+    ttl_seconds = max(
+        settings.WEBAUTHN_ENROLLMENT_TICKET_TTL_SECONDS,
+        MIN_WEBAUTHN_ENROLLMENT_TICKET_TTL_SECONDS,
+    )
     token = secrets.token_urlsafe(32)
     ticket = WebAuthnEnrollmentTicket.objects.create(
         user=user,
         token_hash=hash_token(token),
         created_by=actor,
-        expires_at=timezone.now()
-        + timedelta(seconds=settings.WEBAUTHN_ENROLLMENT_TICKET_TTL_SECONDS),
+        expires_at=timezone.now() + timedelta(seconds=ttl_seconds),
     )
     audit_log(
         user=actor,
@@ -84,8 +90,7 @@ def begin_registration(*, ticket_token: str, device_name: str = "") -> WebAuthnO
         challenge=challenge,
         timeout=settings.WEBAUTHN_CHALLENGE_TTL_SECONDS * 1000,
         authenticator_selection=AuthenticatorSelectionCriteria(
-            authenticator_attachment=AuthenticatorAttachment.PLATFORM,
-            resident_key=ResidentKeyRequirement.DISCOURAGED,
+            resident_key=ResidentKeyRequirement.PREFERRED,
             require_resident_key=False,
             user_verification=UserVerificationRequirement.REQUIRED,
         ),

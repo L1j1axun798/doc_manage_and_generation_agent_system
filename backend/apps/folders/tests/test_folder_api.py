@@ -118,7 +118,7 @@ def test_project_member_without_folder_permission_is_denied(client):
 @pytest.mark.django_db
 def test_folder_tree_only_returns_visible_projects(client):
     admin = make_user("admin", User.Role.SYSTEM_ADMIN)
-    operator = make_user("operator", User.Role.DATA_OPERATOR)
+    operator = make_user("operator", User.Role.PROJECT_MANAGER)
     visible_project = Project.objects.create(name="可见项目", code="P001", created_by=admin)
     hidden_project = Project.objects.create(name="隐藏项目", code="P002", created_by=admin)
     ProjectMember.objects.create(project=visible_project, user=operator)
@@ -133,6 +133,39 @@ def test_folder_tree_only_returns_visible_projects(client):
     names = {node["name"] for node in response.json()}
     assert {public.name, visible.name}.issubset(names)
     assert "隐藏目录" not in names
+
+
+@pytest.mark.django_db
+def test_data_operator_sees_all_projects_but_only_own_personnel_folder(client):
+    admin = make_user("admin", User.Role.SYSTEM_ADMIN)
+    operator = User.objects.create_user(
+        username="operator",
+        password="Password123!",
+        real_name="张三",
+        role=User.Role.DATA_OPERATOR,
+    )
+    project = Project.objects.create(name="项目", code="P001", created_by=admin)
+    project_folder = Folder.objects.create(
+        project=project,
+        name="项目资料",
+        created_by=admin,
+    )
+    staff_root = Folder.objects.create(
+        name="人员资质",
+        code="PUBLIC-STAFF",
+        is_system_root=True,
+        created_by=admin,
+    )
+    own_folder = Folder.objects.create(parent=staff_root, name="张三", created_by=admin)
+    other_folder = Folder.objects.create(parent=staff_root, name="李四", created_by=admin)
+    client.force_login(operator)
+
+    response = client.get("/api/v1/folders/tree/")
+
+    assert response.status_code == 200
+    ids = set(_tree_ids(response.json()))
+    assert {project_folder.id, staff_root.id, own_folder.id}.issubset(ids)
+    assert other_folder.id not in ids
 
 
 @pytest.mark.django_db

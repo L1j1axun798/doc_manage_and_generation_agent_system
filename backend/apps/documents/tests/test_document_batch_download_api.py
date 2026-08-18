@@ -38,14 +38,25 @@ def upload_file(name: str, content: bytes):
     return SimpleUploadedFile(name, content, content_type="application/pdf")
 
 
-def create_document(client, *, folder: Folder, title: str, filename: str, content: bytes):
+def create_document(
+    client,
+    *,
+    folder: Folder,
+    title: str,
+    filename: str,
+    content: bytes,
+    access_level: str | None = None,
+):
+    payload = {
+        "folder": folder.id,
+        "title": title,
+        "file": upload_file(filename, content),
+    }
+    if access_level is not None:
+        payload["access_level"] = access_level
     response = client.post(
         "/api/v1/documents/",
-        {
-            "folder": folder.id,
-            "title": title,
-            "file": upload_file(filename, content),
-        },
+        payload,
     )
     assert response.status_code == 201
     return response.json()
@@ -190,7 +201,7 @@ def test_batch_download_returns_zip_and_deduplicates_filenames(client, tmp_path,
 def test_batch_download_rejects_any_unauthorized_document(client, tmp_path, settings):
     settings.FILE_STORAGE_ROOT = tmp_path
     admin = make_user("admin", User.Role.SYSTEM_ADMIN)
-    operator = make_user("operator", User.Role.DATA_OPERATOR)
+    operator = make_user("operator", User.Role.PROJECT_MANAGER)
     visible_project = Project.objects.create(name="可见项目", code="P001", created_by=admin)
     hidden_project = Project.objects.create(name="隐藏项目", code="P002", created_by=admin)
     visible_folder = Folder.objects.create(project=visible_project, name="资料", created_by=admin)
@@ -256,7 +267,7 @@ def test_batch_download_accepts_legacy_windows_storage_paths(client, tmp_path, s
 def test_batch_download_rejects_document_without_download_grant(client, tmp_path, settings):
     settings.FILE_STORAGE_ROOT = tmp_path
     admin = make_user("admin", User.Role.SYSTEM_ADMIN)
-    operator = make_user("operator", User.Role.DATA_OPERATOR)
+    operator = make_user("operator", User.Role.PROJECT_MANAGER)
     project = Project.objects.create(name="项目", code="P001", created_by=admin)
     folder = Folder.objects.create(project=project, name="资料", created_by=admin)
     ProjectMember.objects.create(project=project, user=operator)
@@ -284,7 +295,7 @@ def test_batch_download_rejects_document_without_download_grant(client, tmp_path
 def test_batch_download_allows_document_with_download_grant(client, tmp_path, settings):
     settings.FILE_STORAGE_ROOT = tmp_path
     admin = make_user("admin", User.Role.SYSTEM_ADMIN)
-    operator = make_user("operator", User.Role.DATA_OPERATOR)
+    operator = make_user("operator", User.Role.PROJECT_MANAGER)
     project = Project.objects.create(name="项目", code="P001", created_by=admin)
     folder = Folder.objects.create(project=project, name="资料", created_by=admin)
     client.force_login(admin)
@@ -490,7 +501,9 @@ def test_folder_download_includes_public_documents_for_data_operator(client, tmp
 
 
 @pytest.mark.django_db
-def test_folder_download_excludes_staff_documents_for_data_operator(client, tmp_path, settings):
+def test_folder_download_includes_only_own_staff_documents_for_data_operator(
+    client, tmp_path, settings
+):
     settings.FILE_STORAGE_ROOT = tmp_path
     admin = make_user("admin", User.Role.SYSTEM_ADMIN)
     operator = make_user("operator", User.Role.DATA_OPERATOR)
@@ -501,6 +514,7 @@ def test_folder_download_excludes_staff_documents_for_data_operator(client, tmp_
         created_by=admin,
     )
     own_folder = Folder.objects.create(parent=staff_root, name="operator", created_by=admin)
+    other_folder = Folder.objects.create(parent=staff_root, name="other", created_by=admin)
     client.force_login(admin)
     create_document(
         client,
@@ -508,6 +522,13 @@ def test_folder_download_excludes_staff_documents_for_data_operator(client, tmp_
         title="本人资质",
         filename="staff.pdf",
         content=b"staff",
+    )
+    create_document(
+        client,
+        folder=other_folder,
+        title="他人资质",
+        filename="other-staff.pdf",
+        content=b"other-staff",
     )
     client.force_login(operator)
 
@@ -517,15 +538,18 @@ def test_folder_download_excludes_staff_documents_for_data_operator(client, tmp_
         content_type="application/json",
     )
 
-    assert response.status_code == 400
-    assert response.json()["message"] == "当前目录及子目录没有可下载文件"
+    assert response.status_code == 200
+    assert response["X-Archive-Document-Count"] == "1"
+    with ZipFile(BytesIO(response_body(response))) as archive:
+        assert archive.namelist() == ["人员资质/operator/staff.pdf"]
+        assert archive.read("人员资质/operator/staff.pdf") == b"staff"
 
 
 @pytest.mark.django_db
 def test_folder_download_rejects_folder_outside_user_scope(client, tmp_path, settings):
     settings.FILE_STORAGE_ROOT = tmp_path
     admin = make_user("admin", User.Role.SYSTEM_ADMIN)
-    operator = make_user("operator", User.Role.DATA_OPERATOR)
+    operator = make_user("operator", User.Role.PROJECT_MANAGER)
     project = Project.objects.create(name="隐藏项目", code="P-HIDDEN", created_by=admin)
     folder = Folder.objects.create(project=project, name="资料", created_by=admin)
     client.force_login(operator)
@@ -682,7 +706,7 @@ def test_center_download_includes_standard_roots_and_excludes_legacy_dev_root(
 
 
 @pytest.mark.django_db
-def test_center_download_includes_public_docs_but_excludes_staff_docs(client, tmp_path, settings):
+def test_center_download_includes_public_docs_and_only_own_staff_docs(client, tmp_path, settings):
     settings.FILE_STORAGE_ROOT = tmp_path
     admin = make_user("admin", User.Role.SYSTEM_ADMIN)
     operator = make_user("operator", User.Role.DATA_OPERATOR)
@@ -736,18 +760,74 @@ def test_center_download_includes_public_docs_but_excludes_staff_docs(client, tm
     )
 
     assert response.status_code == 200
-    assert response["X-Archive-Document-Count"] == "2"
+    assert response["X-Archive-Document-Count"] == "3"
     with ZipFile(BytesIO(response_body(response))) as archive:
         assert sorted(archive.namelist()) == [
+            "人员资质/operator/staff.pdf",
             "技术方案/public1.pdf",
             "报告模板/public2.pdf",
         ]
+        assert archive.read("人员资质/operator/staff.pdf") == b"staff"
         assert archive.read("技术方案/public1.pdf") == b"public1"
         assert archive.read("报告模板/public2.pdf") == b"public2"
 
 
 @pytest.mark.django_db
-def test_center_download_excludes_staff_documents_for_data_operator(client, tmp_path, settings):
+def test_center_download_includes_project_documents_without_membership_for_data_operator(
+    client, tmp_path, settings
+):
+    settings.FILE_STORAGE_ROOT = tmp_path
+    admin = make_user("admin", User.Role.SYSTEM_ADMIN)
+    operator = make_user("operator", User.Role.DATA_OPERATOR)
+    public_root = Folder.objects.create(
+        name="技术方案",
+        code="PUBLIC-TECH-SOLUTION",
+        is_system_root=True,
+        created_by=admin,
+    )
+    project = Project.objects.create(name="全量项目", code="P-ALL", created_by=admin)
+    project_root = Folder.objects.create(
+        project=project,
+        name="技术方案",
+        code="PUBLIC-TECH-SOLUTION",
+        created_by=admin,
+    )
+    project_folder = Folder.objects.create(
+        project=project,
+        parent=project_root,
+        name="项目文件",
+        created_by=admin,
+    )
+    client.force_login(admin)
+    create_document(
+        client,
+        folder=project_folder,
+        title="未加入项目资料",
+        filename="project-secret.pdf",
+        content=b"project-secret",
+        access_level=Document.AccessLevel.RESTRICTED,
+    )
+    client.force_login(operator)
+
+    response = client.post(
+        "/api/v1/documents/center-download/",
+        {},
+        content_type="application/json",
+    )
+
+    assert response.status_code == 200
+    assert response["X-Archive-Document-Count"] == "1"
+    with ZipFile(BytesIO(response_body(response))) as archive:
+        assert len(archive.namelist()) == 1
+        assert archive.namelist()[0].endswith("/project-secret.pdf")
+        assert archive.read(archive.namelist()[0]) == b"project-secret"
+    assert public_root.is_system_root is True
+
+
+@pytest.mark.django_db
+def test_center_download_excludes_other_staff_documents_for_data_operator(
+    client, tmp_path, settings
+):
     settings.FILE_STORAGE_ROOT = tmp_path
     admin = make_user("admin", User.Role.SYSTEM_ADMIN)
     operator = make_user("operator", User.Role.DATA_OPERATOR)
@@ -758,6 +838,7 @@ def test_center_download_excludes_staff_documents_for_data_operator(client, tmp_
         created_by=admin,
     )
     own_folder = Folder.objects.create(parent=staff_root, name="operator", created_by=admin)
+    other_folder = Folder.objects.create(parent=staff_root, name="other", created_by=admin)
     client.force_login(admin)
     create_document(
         client,
@@ -765,6 +846,13 @@ def test_center_download_excludes_staff_documents_for_data_operator(client, tmp_
         title="本人资质",
         filename="staff.pdf",
         content=b"staff",
+    )
+    create_document(
+        client,
+        folder=other_folder,
+        title="他人资质",
+        filename="other-staff.pdf",
+        content=b"other-staff",
     )
     client.force_login(operator)
 
@@ -774,5 +862,7 @@ def test_center_download_excludes_staff_documents_for_data_operator(client, tmp_
         content_type="application/json",
     )
 
-    assert response.status_code == 400
-    assert response.json()["message"] == "资料中心没有可下载文件"
+    assert response.status_code == 200
+    assert response["X-Archive-Document-Count"] == "1"
+    with ZipFile(BytesIO(response_body(response))) as archive:
+        assert archive.namelist() == ["人员资质/operator/staff.pdf"]

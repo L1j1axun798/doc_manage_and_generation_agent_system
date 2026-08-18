@@ -71,7 +71,7 @@ def test_document_grant_list_searches_document_and_user(client, tmp_path, settin
 def test_admin_can_grant_restricted_download_to_non_member(client, tmp_path, settings):
     settings.FILE_STORAGE_ROOT = tmp_path
     admin = make_user("admin", User.Role.SYSTEM_ADMIN)
-    recipient = make_user("recipient", User.Role.DATA_OPERATOR)
+    recipient = make_user("recipient", User.Role.PROJECT_MANAGER)
     project = Project.objects.create(name="项目", code="P001", created_by=admin)
     folder = Folder.objects.create(project=project, name="过程资料", created_by=admin)
     client.force_login(admin)
@@ -107,7 +107,7 @@ def test_download_grant_allows_download_without_uploader_match(
 ):
     settings.FILE_STORAGE_ROOT = tmp_path
     admin = make_user("admin", User.Role.SYSTEM_ADMIN)
-    recipient = make_user("recipient", User.Role.DATA_OPERATOR)
+    recipient = make_user("recipient", User.Role.PROJECT_MANAGER)
     project = Project.objects.create(name="项目", code="P001", created_by=admin)
     folder = Folder.objects.create(project=project, name="过程资料", created_by=admin)
     client.force_login(admin)
@@ -135,7 +135,7 @@ def test_download_grant_allows_download_without_uploader_match(
 def test_download_grant_without_view_allows_download_but_hides_list(client, tmp_path, settings):
     settings.FILE_STORAGE_ROOT = tmp_path
     admin = make_user("admin", User.Role.SYSTEM_ADMIN)
-    recipient = make_user("recipient", User.Role.DATA_OPERATOR)
+    recipient = make_user("recipient", User.Role.PROJECT_MANAGER)
     project = Project.objects.create(name="项目", code="P001", created_by=admin)
     folder = Folder.objects.create(project=project, name="过程资料", created_by=admin)
     client.force_login(admin)
@@ -163,7 +163,7 @@ def test_download_grant_without_view_allows_download_but_hides_list(client, tmp_
 def test_expired_grant_does_not_allow_view_or_download(client, tmp_path, settings):
     settings.FILE_STORAGE_ROOT = tmp_path
     admin = make_user("admin", User.Role.SYSTEM_ADMIN)
-    recipient = make_user("recipient", User.Role.DATA_OPERATOR)
+    recipient = make_user("recipient", User.Role.PROJECT_MANAGER)
     project = Project.objects.create(name="项目", code="P001", created_by=admin)
     folder = Folder.objects.create(project=project, name="过程资料", created_by=admin)
     client.force_login(admin)
@@ -190,7 +190,7 @@ def test_expired_grant_does_not_allow_view_or_download(client, tmp_path, setting
 def test_revoked_grant_no_longer_allows_download(client, tmp_path, settings):
     settings.FILE_STORAGE_ROOT = tmp_path
     admin = make_user("admin", User.Role.SYSTEM_ADMIN)
-    recipient = make_user("recipient", User.Role.DATA_OPERATOR)
+    recipient = make_user("recipient", User.Role.PROJECT_MANAGER)
     project = Project.objects.create(name="项目", code="P001", created_by=admin)
     folder = Folder.objects.create(project=project, name="过程资料", created_by=admin)
     client.force_login(admin)

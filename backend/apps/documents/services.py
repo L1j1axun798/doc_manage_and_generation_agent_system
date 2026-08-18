@@ -20,7 +20,7 @@ from apps.folders.defaults import (
     standard_root_for_name,
 )
 from apps.folders.models import Folder
-from apps.folders.personnel import public_staff_folder_ids
+from apps.folders.personnel import own_public_staff_folder_ids, public_staff_folder_ids
 from apps.projects.models import Project
 from common.storage import LocalDocumentStorage, StoredFile
 from common.validators import normalize_upload_filename, validate_uploaded_file
@@ -752,6 +752,12 @@ def _ensure_upload_allowed(*, actor: Any, folder: Folder) -> None:
     project: Project | None = folder.project
     if project is not None and project.status == Project.Status.ARCHIVED:
         raise ValidationError("项目已归档，不能上传文件")
+    if (
+        folder.pk in public_staff_folder_ids()
+        and not getattr(actor, "is_system_admin", False)
+        and folder.pk not in own_public_staff_folder_ids(actor)
+    ):
+        raise PermissionDenied("人员资质仅允许上传到本人目录")
     if not can_upload_document(actor, project):
         raise PermissionDenied("无权上传文件")
 

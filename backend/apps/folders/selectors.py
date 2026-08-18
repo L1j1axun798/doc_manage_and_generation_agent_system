@@ -2,10 +2,16 @@ from typing import Any, TypedDict
 
 from django.db.models import Q, QuerySet
 
+from apps.accounts.models import User
 from apps.projects.selectors import visible_projects_for_user
 
 from .defaults import LEGACY_PROJECT_FOLDER_NAMES
 from .models import Folder
+from .personnel import (
+    own_public_staff_folder_ids,
+    public_staff_folder_ids,
+    public_staff_root_ids,
+)
 
 
 class FolderTreeNode(TypedDict):
@@ -26,8 +32,12 @@ def visible_folders_for_user(user: Any) -> QuerySet[Folder]:
         return queryset.none()
     if getattr(user, "is_system_admin", False):
         return queryset
-    visible_project_ids = visible_projects_for_user(user).values("id")
-    return queryset.filter(Q(project__isnull=True) | Q(project_id__in=visible_project_ids))
+    if getattr(user, "role", None) != User.Role.DATA_OPERATOR:
+        visible_project_ids = visible_projects_for_user(user).values("id")
+        queryset = queryset.filter(Q(project__isnull=True) | Q(project_id__in=visible_project_ids))
+    staff_folder_ids = public_staff_folder_ids()
+    allowed_staff_folder_ids = public_staff_root_ids() | own_public_staff_folder_ids(user)
+    return queryset.exclude(id__in=staff_folder_ids - allowed_staff_folder_ids)
 
 
 def active_visible_folders_for_user(user: Any) -> QuerySet[Folder]:

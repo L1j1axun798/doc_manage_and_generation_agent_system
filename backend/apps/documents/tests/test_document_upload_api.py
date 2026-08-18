@@ -219,6 +219,40 @@ def test_authenticated_user_can_upload_to_public_child_folder(client, tmp_path, 
 
 
 @pytest.mark.django_db
+def test_non_admin_can_upload_only_to_own_public_staff_folder(client, tmp_path, settings):
+    settings.FILE_STORAGE_ROOT = tmp_path
+    admin = make_user("admin", User.Role.SYSTEM_ADMIN)
+    operator = User.objects.create_user(
+        username="operator",
+        password="Password123!",
+        real_name="张三",
+        role=User.Role.DATA_OPERATOR,
+    )
+    staff_root = Folder.objects.create(
+        name="人员资质",
+        code="PUBLIC-STAFF",
+        is_system_root=True,
+        created_by=admin,
+    )
+    own_folder = Folder.objects.create(parent=staff_root, name="张三", created_by=admin)
+    other_folder = Folder.objects.create(parent=staff_root, name="李四", created_by=admin)
+    client.force_login(operator)
+
+    own_response = client.post(
+        "/api/v1/documents/",
+        {"folder": own_folder.id, "file": upload_file("own.pdf", b"own")},
+    )
+    other_response = client.post(
+        "/api/v1/documents/",
+        {"folder": other_folder.id, "file": upload_file("other.pdf", b"other")},
+    )
+
+    assert own_response.status_code == 201
+    assert other_response.status_code == 403
+    assert list(Document.objects.values_list("folder_id", flat=True)) == [own_folder.id]
+
+
+@pytest.mark.django_db
 def test_entry_material_upload_requires_project_entry_folder(client, tmp_path, settings):
     settings.FILE_STORAGE_ROOT = tmp_path
     admin = make_user("admin", User.Role.SYSTEM_ADMIN)

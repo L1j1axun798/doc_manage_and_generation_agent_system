@@ -1,10 +1,13 @@
+from datetime import timedelta
+
 import pytest
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.test import Client, override_settings
 from django.urls import reverse
+from django.utils import timezone
 
-from apps.accounts.models import WebAuthnCredential
+from apps.accounts.models import WebAuthnCredential, WebAuthnEnrollmentTicket
 from apps.audit.models import AuditLog
 
 User = get_user_model()
@@ -406,12 +409,16 @@ def test_logout_from_replaced_session_does_not_clear_current_session(client):
     second_client = Client()
     credentials = {"username": user.username, "password": "ReplacedLogout123!"}
 
-    assert client.post(
-        reverse("auth-login"), credentials, content_type="application/json"
-    ).status_code == 200
-    assert second_client.post(
-        reverse("auth-login"), credentials, content_type="application/json"
-    ).status_code == 200
+    assert (
+        client.post(reverse("auth-login"), credentials, content_type="application/json").status_code
+        == 200
+    )
+    assert (
+        second_client.post(
+            reverse("auth-login"), credentials, content_type="application/json"
+        ).status_code
+        == 200
+    )
 
     assert client.post(reverse("auth-logout")).status_code == 204
     assert second_client.get(reverse("auth-me")).status_code == 200
@@ -467,6 +474,49 @@ def test_admin_can_create_and_reset_webauthn_ticket(client):
     assert reset_response.status_code == 200
     assert reset_response.json()["revoked_credentials"] == 1
     assert user.webauthn_credentials.filter(is_active=True).count() == 0
+
+
+@pytest.mark.django_db
+@override_settings(WEBAUTHN_ENROLLMENT_TICKET_TTL_SECONDS=60)
+def test_webauthn_ticket_requires_admin_and_lasts_at_least_three_hours(client):
+    admin = User.objects.create_user(
+        username="ticket-admin",
+        password="AdminPass123!",
+        real_name="管理员",
+        role=User.Role.SYSTEM_ADMIN,
+    )
+    operator = User.objects.create_user(
+        username="ticket-operator",
+        password="OperatorPass123!",
+        real_name="资料管理员",
+        role=User.Role.DATA_OPERATOR,
+    )
+    target = User.objects.create_user(
+        username="ticket-target",
+        password="TargetPass123!",
+        real_name="待绑定人员",
+        role=User.Role.DATA_OPERATOR,
+    )
+    client.force_login(operator)
+    denied_response = client.post(
+        reverse("auth-webauthn-enrollment-ticket"),
+        {"user": target.id},
+        content_type="application/json",
+    )
+
+    before_creation = timezone.now()
+    client.force_login(admin)
+    created_response = client.post(
+        reverse("auth-webauthn-enrollment-ticket"),
+        {"user": target.id},
+        content_type="application/json",
+    )
+
+    ticket = WebAuthnEnrollmentTicket.objects.get(user=target)
+    assert denied_response.status_code == 403
+    assert created_response.status_code == 201
+    assert ticket.expires_at >= before_creation + timedelta(hours=3)
+    assert ticket.expires_at <= timezone.now() + timedelta(hours=3, seconds=5)
 
 
 @pytest.mark.django_db

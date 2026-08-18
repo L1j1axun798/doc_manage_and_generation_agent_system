@@ -14,7 +14,7 @@ from apps.accounts.models import (
     WebAuthnCredential,
     WebAuthnEnrollmentTicket,
 )
-from apps.accounts.webauthn_services import finish_registration, hash_token
+from apps.accounts.webauthn_services import begin_registration, finish_registration, hash_token
 from apps.audit.models import AuditLog
 
 User = get_user_model()
@@ -55,6 +55,34 @@ def mock_synced_passkey_verification(monkeypatch):
         "apps.accounts.webauthn_services.verify_registration_response",
         lambda **kwargs: verification,
     )
+
+
+@pytest.mark.django_db
+def test_begin_registration_uses_cross_platform_compatible_passkey_options():
+    user = User.objects.create_user(
+        username="compatible-passkey-user",
+        password="CompatiblePasskey123!",
+        real_name="兼容设备员工",
+    )
+    ticket_token, _ = prepare_registration(user)
+
+    result = begin_registration(ticket_token=ticket_token, device_name="兼容设备")
+
+    selection = result.options["authenticatorSelection"]
+    assert "authenticatorAttachment" not in selection
+    assert selection == {
+        "residentKey": "preferred",
+        "requireResidentKey": False,
+        "userVerification": "required",
+    }
+    assert result.options["attestation"] == "none"
+    assert result.options["pubKeyCredParams"][0] == {"type": "public-key", "alg": -7}
+    challenge = WebAuthnChallenge.objects.get(
+        user=user,
+        purpose=WebAuthnChallenge.Purpose.REGISTER,
+        token_hash=hash_token(result.token),
+    )
+    assert challenge.metadata["device_name"] == "兼容设备"
 
 
 @pytest.mark.django_db

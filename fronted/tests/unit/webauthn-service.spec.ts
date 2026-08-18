@@ -58,6 +58,48 @@ describe('WebAuthn browser error handling', () => {
     await expect(registerWithWebAuthn(registrationOptions)).rejects.toThrow('本人验证未完成')
   })
 
+  it('explains when the current device has no matching passkey', async () => {
+    const error = Object.assign(
+      new Error('The request is not allowed by the user agent or the platform in the current context'),
+      {
+        code: 'ERROR_PASSTHROUGH_SEE_CAUSE_PROPERTY',
+        name: 'NotAllowedError',
+        cause: Object.assign(new Error('No Passkey Available'), { name: 'NotAllowedError' }),
+      },
+    )
+    mocks.startRegistration.mockRejectedValue(error)
+
+    await expect(registerWithWebAuthn(registrationOptions)).rejects.toThrow(
+      '当前设备未找到该账号已绑定的通行密钥',
+    )
+  })
+
+  it('gives recovery steps for Android Credential Manager failures', async () => {
+    const error = Object.assign(new Error('Registration failed'), {
+      code: 'ERROR_AUTHENTICATOR_GENERAL_ERROR',
+      cause: new Error('An unknown error occurred while talking to the credential manager.'),
+    })
+    mocks.startRegistration.mockRejectedValue(error)
+
+    await expect(registerWithWebAuthn(registrationOptions)).rejects.toThrow(
+      '请更新系统浏览器和通行密钥服务',
+    )
+  })
+
+  it('gives recovery steps when Windows has no compatible authenticator', async () => {
+    const error = Object.assign(new Error('Registration failed'), {
+      code: 'ERROR_AUTHENTICATOR_GENERAL_ERROR',
+      cause: new Error(
+        "This device can't be used with this site. The website may need to be updated or use a different type of device.",
+      ),
+    })
+    mocks.startRegistration.mockRejectedValue(error)
+
+    await expect(registerWithWebAuthn(registrationOptions)).rejects.toThrow(
+      'Windows Hello 或通行密钥设备',
+    )
+  })
+
   it('reports unsupported browsers before starting credential registration', async () => {
     mocks.browserSupportsWebAuthn.mockReturnValue(false)
 

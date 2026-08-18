@@ -13,6 +13,11 @@ const CANONICAL_LOCAL_ORIGIN = 'http://localhost:5174'
 const WECHAT_IOS_MESSAGE = '当前在微信内置浏览器中，无法完成本人验证。请点击右上角“…”，选择“在 Safari 中打开”后重试'
 const WECHAT_ANDROID_MESSAGE = '当前在微信内置浏览器中，无法完成本人验证。请点击右上角“…”，选择“在浏览器打开”后重试'
 const NOT_ALLOWED_MESSAGE = '本人验证未完成：可能已取消、超时，或当前浏览器阻止了此次操作，请重试'
+const NO_PASSKEY_MESSAGE = '当前设备未找到该账号已绑定的通行密钥，请使用原绑定设备，或联系管理员重新绑定'
+const CREDENTIAL_MANAGER_MESSAGE =
+  '手机通行密钥服务暂时不可用。请更新系统浏览器和通行密钥服务，确认已设置锁屏并启用密码管理器中的通行密钥后重试；仍失败时可选择其他手机或安全密钥'
+const NO_COMPATIBLE_AUTHENTICATOR_MESSAGE =
+  '当前电脑没有可用的 Windows Hello 或通行密钥设备。请先设置 Windows Hello PIN，或更新 Chrome/Edge 后选择手机或安全密钥重试'
 
 export function getWebAuthnEnvironmentIssue(): string | undefined {
   if (typeof navigator !== 'undefined') {
@@ -82,6 +87,20 @@ function ensureRpIdMatchesCurrentHost(rpId: string | undefined): void {
 
 function toWebAuthnUserError(error: unknown): Error {
   const code = readErrorCode(error)
+  if (isNoPasskeyAvailable(error)) {
+    return new Error(NO_PASSKEY_MESSAGE)
+  }
+  if (hasErrorMessage(error, /unknown error occurred while talking to the credential manager/i)) {
+    return new Error(CREDENTIAL_MANAGER_MESSAGE)
+  }
+  if (
+    hasErrorMessage(
+      error,
+      /device (?:can(?:not|'t)|cannot) be used (?:with|for) this site|website may need (?:to be )?updated|other type of device/i,
+    )
+  ) {
+    return new Error(NO_COMPATIBLE_AUTHENTICATOR_MESSAGE)
+  }
   if (code === 'ERROR_INVALID_RP_ID' || code === 'ERROR_INVALID_DOMAIN') {
     return new Error(`本人验证域名不匹配，请使用 ${CANONICAL_LOCAL_ORIGIN} 访问系统`)
   }
@@ -126,4 +145,34 @@ function readErrorName(error: unknown): string | undefined {
 
   const name = (error as { name: unknown }).name
   return typeof name === 'string' ? name : undefined
+}
+
+function isNoPasskeyAvailable(error: unknown): boolean {
+  return hasErrorMessage(
+    error,
+    /no (?:matching )?(?:passkeys?|credentials?)(?: are)? available|credential.*not found/i,
+  )
+}
+
+function hasErrorMessage(error: unknown, pattern: RegExp): boolean {
+  return [readErrorMessage(error), readErrorMessage(readErrorCause(error))].some(
+    (message) => typeof message === 'string' && pattern.test(message),
+  )
+}
+
+function readErrorMessage(error: unknown): string | undefined {
+  if (typeof error !== 'object' || error === null || !('message' in error)) {
+    return undefined
+  }
+
+  const message = (error as { message: unknown }).message
+  return typeof message === 'string' ? message : undefined
+}
+
+function readErrorCause(error: unknown): unknown {
+  if (typeof error !== 'object' || error === null || !('cause' in error)) {
+    return undefined
+  }
+
+  return (error as { cause: unknown }).cause
 }

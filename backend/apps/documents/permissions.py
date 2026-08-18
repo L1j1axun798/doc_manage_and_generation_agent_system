@@ -1,7 +1,7 @@
 from typing import Any
 
 from apps.accounts.models import User
-from apps.folders.personnel import public_staff_folder_ids
+from apps.folders.personnel import own_public_staff_folder_ids, public_staff_folder_ids
 from apps.projects.models import Project
 from apps.projects.selectors import get_project_membership
 
@@ -33,29 +33,17 @@ def can_download_document(
         return False
     if getattr(user, "is_system_admin", False):
         return True
+    staff_ids = staff_folder_ids if staff_folder_ids is not None else public_staff_folder_ids()
+    if document.folder_id in staff_ids:
+        return document.folder_id in own_public_staff_folder_ids(user)
     if _has_active_grant(user, document, "download"):
         return True
-    if _can_download_public_document_as_operator(user, document, staff_folder_ids):
+    if getattr(user, "role", None) == User.Role.DATA_OPERATOR:
         return True
     if document.access_level != Document.AccessLevel.RESTRICTED or document.project is None:
         return False
     membership = get_project_membership(user, document.project)
     return bool(membership and membership.can_download_restricted)
-
-
-def _can_download_public_document_as_operator(
-    user: Any,
-    document: Document,
-    staff_folder_ids: set[int] | None,
-) -> bool:
-    if getattr(user, "role", None) != User.Role.DATA_OPERATOR:
-        return False
-    if document.project_id is not None:
-        return False
-    if document.access_level != Document.AccessLevel.INTERNAL:
-        return False
-    staff_ids = staff_folder_ids if staff_folder_ids is not None else public_staff_folder_ids()
-    return document.folder_id not in staff_ids
 
 
 def can_view_document(user: Any, document: Document) -> bool:
